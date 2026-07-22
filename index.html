@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>직접PPA 전력거래대금 정산서 자동생성</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="app">
+  <div class="app-title">
+    <img src="assets/logo.jpg" alt="한화 신한 테라와트아워" class="app-logo">
+    <div>
+      <h1>직접PPA 전력거래대금 정산서 자동생성</h1>
+      <div class="sub">한화신한테라와트아워 · 전력거래사업팀</div>
+    </div>
+  </div>
+  <div class="badge" id="monthBadge">정산월 미설정</div>
+</header>
+
+<nav class="tabs">
+  <button class="tab-btn active" data-tab="tab1">1. 데이터 업로드</button>
+  <button class="tab-btn" data-tab="tab2">2. 발전소별 확인/조정</button>
+  <button class="tab-btn" data-tab="tab3">3. 정산서 생성/다운로드</button>
+</nav>
+
+<main>
+
+  <!-- TAB 1 : UPLOAD -->
+  <div class="panel active" id="tab1">
+    <div class="card">
+      <h2>월별 직접PPA 시간대별 거래데이터 업로드</h2>
+      <p class="desc">'거래일자, 시간, 발전기명, 발전량(MWh), 전기사용량(MWh), 재생E공급량(MWh), 초과전력량(MWh), 부족전력량(MWh)' 등의 컬럼을 포함한 원본 엑셀(.xlsx)을 업로드하세요.</p>
+      <div class="drop-zone" id="dropZone">
+        <div class="drop-zone-text">드래그해서 파일을 놓거나 클릭해서 선택하세요</div>
+        <input type="file" id="dataFile" accept=".xlsx,.xls">
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <span id="dataStatus" class="status warn">파일 대기중</span>
+      </div>
+      <div class="kpi-grid" id="siteKpis" style="display:none;"></div>
+    </div>
+
+    <div class="card" id="aggCard" style="display:none;">
+      <h2>발전소별 집계 결과 (이번 달, 확인용)</h2>
+      <div class="grid-wrap">
+        <table class="grid" id="aggTable"></table>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 2 : PER-PLANT CHECK & ADJUSTMENTS -->
+  <div class="panel" id="tab2">
+    <div class="card">
+      <h2>발전소별 확인/조정</h2>
+      <div class="row">
+        <label style="font-size:12.5px; color:var(--sub);">발전사업자 선택</label>
+        <select id="plantSelectAdjust" class="plant-select" onchange="onPlantSelectChange(this.value)"></select>
+      </div>
+    </div>
+
+    <div class="card" id="plantAdjustHost" style="display:none;">
+      <h2>PPA 발전량 / 재생E 공급량 / 초과발전량</h2>
+      <div class="kpi-grid" id="plantKpis"></div>
+
+      <h2 style="margin-top:20px;">정산 조정값</h2>
+      <p class="desc">전월차액, 전월 미지급액, 기타정산을 입력하고 저장하면 이번 달 정산서 계산에 바로 반영됩니다.</p>
+      <div class="row">
+        <label class="adj-label">전월 차액 (원)</label>
+        <input type="number" id="adjPrevDiff" class="adj-input" value="0">
+        <label class="adj-label">전월 미지급액 (원)</label>
+        <input type="number" id="adjPrevUnpaid" class="adj-input" value="0">
+        <label class="adj-label">기타정산 (원)</label>
+        <input type="number" id="adjOtherSettle" class="adj-input" value="0">
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <button class="btn accent" id="adjSaveBtn">저장</button>
+        <span id="adjStatus" class="status warn" style="background:none;"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 3 : INVOICE GENERATION -->
+  <div class="panel" id="tab3">
+    <div class="note-box">
+      마스터 시트(구글시트 "발전소 사업자 정보")에 계약단가·사업자정보가 등록된 발전소는 자동으로 계산되고, 아직 등록되지 않은 항목은 <b>빈 입력칸(노란 배경)</b>으로 표시됩니다.
+    </div>
+    <div class="card">
+      <h2>정산서 생성</h2>
+      <div class="row">
+        <label style="font-size:12.5px; color:var(--sub);">발전사업자 선택</label>
+        <select id="plantSelectInvoice" class="plant-select" onchange="onPlantSelectChange(this.value)"></select>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <button class="btn accent" id="exportBtn" disabled>이 발전소 엑셀 다운로드 (수식 포함, 3개 탭)</button>
+        <button class="btn secondary" id="pdfBtn" disabled>이 발전소 고지서 PDF 다운로드</button>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <button class="btn" id="exportAllBtn" disabled>전체 발전소 일괄 생성 (PDF+엑셀 zip)</button>
+        <span id="exportAllStatus" class="status warn" style="background:none;"></span>
+      </div>
+    </div>
+
+    <div class="card doc-card" id="invoiceHost" style="display:none;"></div>
+  </div>
+
+</main>
+
+<script src="js/config.js"></script>
+<script src="js/state.js"></script>
+<script src="js/api.js"></script>
+<script src="js/upload.js"></script>
+<script src="js/invoice.js"></script>
+<script src="js/exporters/excel.js"></script>
+<script src="js/exporters/pdf.js"></script>
+<script src="js/exporters/zip.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
