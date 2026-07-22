@@ -15,13 +15,13 @@ async function exportAllPlants(){
       statusEl.textContent = `생성 중... (${i+1}/${plants.length}) ${plant}`;
       adjustmentsByPlant[plant] = await fetchAdjustments(settleMonth, plant);
       const folder = zip.folder(sanitizeFilename(plant));
-      const [pdfBlob, wb] = await Promise.all([
+      const [pdfBlob, workbook] = await Promise.all([
         buildPdfBlobForPlant(plant),
         buildWorkbookForPlant(plant)
       ]);
-      const xlsxArray = XLSX.write(wb, {bookType:"xlsx", type:"array"});
+      const xlsxBuffer = await workbook.xlsx.writeBuffer();
       folder.file("고지서.pdf", pdfBlob);
-      folder.file("정산서.xlsx", xlsxArray);
+      folder.file("정산서.xlsx", xlsxBuffer);
     }
     statusEl.textContent = "압축 중...";
     const zipBlob = await zip.generateAsync({type:"blob"});

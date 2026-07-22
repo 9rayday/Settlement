@@ -55,7 +55,15 @@ function buildGuaranteeSchedule(plant, history){
     const label = `(${ymLabel(windowStart)} ~ ${ymLabel(windowEnd)})`;
     const inWindow = history.filter(h=> h.month >= ymKey(windowStart) && h.month <= ymKey(windowEnd));
     const actualCum = inWindow.length ? inWindow.reduce((s,h)=>s+h.supply,0) : null;
-    rows.push({k, label, expected: yearlyExpected, actualCum});
+    // 회차 시작월 기준 1~12번째 달 위치에 실적을 배치 (달력상 1월이 아니라 회차 내 순번)
+    const monthly = new Array(12).fill(null);
+    inWindow.forEach(h=>{
+      const hym = parseYm(h.month);
+      if(!hym) return;
+      const pos = (hym.y - windowStart.y)*12 + (hym.m - windowStart.m);
+      if(pos>=0 && pos<12) monthly[pos] = h.supply;
+    });
+    rows.push({k, label, expected: yearlyExpected, actualCum, monthly});
   }
   return rows;
 }
@@ -109,8 +117,22 @@ async function handleSaveAdjustments(){
   statusEl.textContent = "저장 중...";
   const result = await saveAdjustments(settleMonth, selectedPlant, prevDiff, prevUnpaid, otherSettle);
   adjustmentsByPlant[selectedPlant] = { 전월차액: prevDiff, 전월미지급액: prevUnpaid, 기타정산: otherSettle };
-  statusEl.textContent = result ? "저장 완료" : "저장 실패 (GAS 배포 전이면 로컬에만 반영됩니다)";
+  // 저장 시점에 구글시트("발전소 사업자 정보")가 그새 바뀌었을 수 있으니 해당 발전소 값도 최신으로 다시 가져온다.
+  await fetchMaster();
+  statusEl.textContent = result ? "저장 완료 (마스터 정보도 최신으로 갱신됨)" : "저장 실패 (GAS 배포 전이면 로컬에만 반영됩니다)";
   renderInvoicePreview();
+}
+
+async function handleRefreshMaster(){
+  const btn = document.getElementById("refreshMasterBtn");
+  const statusEl = document.getElementById("refreshMasterStatus");
+  btn.disabled = true;
+  statusEl.textContent = "전체 발전소 마스터 정보 불러오는 중...";
+  await fetchMaster();
+  statusEl.textContent = `완료 (${Object.keys(masterData).length}개 발전소 정보 반영)`;
+  renderPlantAdjustTab();
+  renderInvoicePreview();
+  btn.disabled = false;
 }
 
 /* ============ Tab 3: 정산서 미리보기 ============ */
@@ -160,17 +182,17 @@ async function buildInvoiceHtml(plant){
     </table>
     <table class="doc-table">
       <tr><th class="section" rowspan="9">정산<br>내역</th><td class="label">항목</td><td class="label">금액</td><td colspan="2" class="label">산출 근거</td></tr>
-      <tr><td class="label">전력량 요금</td><td class="num${calc.energyFee==null?' editable':''}">${calc.energyFee==null? '단가 입력 필요' : fmt(calc.energyFee)+' 원'}</td><td colspan="2">= ${fmt(a.supply)} kWh × ${calc.unitPrice==null?'-':calc.unitPrice+' 원/kWh'}</td></tr>
+      <tr><td class="label">전력량 요금</td><td class="num${calc.energyFee==null?' editable':''}">${calc.energyFee==null? '단가 입력 필요' : fmt(calc.energyFee)+' 원'}</td><td colspan="2">( = ${fmt(a.supply)} kWh x ${calc.unitPrice==null?'-':calc.unitPrice+' 원/KWh'})</td></tr>
       <tr><td class="label">공급가액</td><td class="num">${fmt(calc.supplyValue)} 원</td><td colspan="2"></td></tr>
-      <tr><td class="label">부가가치세</td><td class="num">${fmt(calc.vat1)} 원</td><td colspan="2">= 공급가액 × 10%</td></tr>
+      <tr><td class="label">부가가치세</td><td class="num">${fmt(calc.vat1)} 원</td><td colspan="2">( = ${fmt(calc.supplyValue)} 원 x 10.00% )</td></tr>
       <tr class="total"><td class="label">계</td><td class="num">${fmt(calc.subtotal1)} 원</td><td colspan="2"></td></tr>
-      <tr><td class="label">거래수수료</td><td class="num">${fmt(calc.fee)} 원</td><td colspan="2">= ${fmt(a.supply)} kWh × ${calc.feeRate} 원/kWh</td></tr>
-      <tr><td class="label">부가가치세</td><td class="num">${fmt(calc.vat2)} 원</td><td colspan="2">= 거래수수료 × 10%</td></tr>
+      <tr><td class="label">거래수수료</td><td class="num">${fmt(calc.fee)} 원</td><td colspan="2">( = ${fmt(a.supply)} kWh x ${calc.feeRate} 원/KWh)</td></tr>
+      <tr><td class="label">부가가치세</td><td class="num">${fmt(calc.vat2)} 원</td><td colspan="2">( = ${fmt(calc.fee)} 원 x 10.00% )</td></tr>
       <tr class="total"><td class="label">계</td><td class="num">${fmt(calc.subtotal2)} 원</td><td colspan="2"></td></tr>
-      <tr><td class="label">전월 차액</td><td class="num">${fmt(calc.adj.전월차액)} 원</td><td colspan="2"></td></tr>
-      <tr><td class="label">전월 미지급액</td><td class="num">${fmt(calc.adj.전월미지급액)} 원</td><td colspan="2"></td></tr>
+      <tr><td class="label">전월 차액</td><td class="num">${fmt(calc.adj.전월차액)} 원</td><td colspan="2">( = ${fmt(calc.adj.전월차액)} 원 - 0 원)</td></tr>
+      <tr><td class="label">전월 미지급액</td><td class="num">${fmt(calc.adj.전월미지급액)} 원</td><td colspan="2">( = ${fmt(calc.adj.전월미지급액)} 원 - 0 원)</td></tr>
       <tr><td class="label">기타정산</td><td class="num">${fmt(calc.adj.기타정산)} 원</td><td colspan="2"></td></tr>
-      <tr class="pay"><td class="label" style="color:#fff;">지급금액</td><td class="num" colspan="3">${calc.payment==null?'단가 입력 후 계산됩니다':fmt(calc.payment)+' 원'}</td></tr>
+      <tr class="pay"><td class="label">지급금액</td><td class="num" colspan="3">${calc.payment==null?'단가 입력 후 계산됩니다':fmt(calc.payment)+' 원'}</td></tr>
     </table>
     <table class="doc-table">
       <tr><th class="section" rowspan="4">정산<br>정보</th>
@@ -196,12 +218,12 @@ async function buildInvoiceHtml(plant){
       <div class="sign-block">
         <div class="sign-label">위와 같이 ${monthLabel} 직접PPA 전력거래대금을 확인합니다.</div>
         <div class="sign-role">발전사업자</div>
-        <div class="sign-name">${m["사업자명(대표자명)"] || plant} (인)</div>
+        <div class="sign-name">${(m["사업자명(대표자명)"] || plant).split("(")[0].trim()} (인)</div>
       </div>
       <div class="sign-block">
         <div class="sign-label">위와 같이 ${monthLabel} 직접PPA 전력거래대금을 지급합니다.</div>
         <div class="sign-role">재생에너지전기공급사업자</div>
-        <div class="sign-name">${BUYER.bizName} (인)</div>
+        <div class="sign-name">한화신한테라와트아워 주식회사 (인)</div>
       </div>
     </div>
   </div>`;

@@ -15,7 +15,9 @@ async function renderPlantToCanvas(plant){
   container.innerHTML = await buildInvoiceHtml(plant);
   document.body.appendChild(container);
   const docEl = container.querySelector(".doc");
-  const canvas = await html2canvas(docEl, { scale:2, useCORS:true });
+  // 화면용 스타일 대신 A4 한 장에 맞춘 조밀한 인쇄용 스타일로 캡처한다.
+  docEl.classList.add("pdf-capture");
+  const canvas = await html2canvas(docEl, { scale:2, useCORS:true, windowWidth:docEl.scrollWidth, windowHeight:docEl.scrollHeight });
   document.body.removeChild(container);
   return canvas;
 }
@@ -25,9 +27,13 @@ async function canvasToPdfBlob(canvas){
   const pdf = new jsPDF({ unit:"mm", format:"a4" });
   const pageWidth = 210, pageHeight = 297;
   const imgData = canvas.toDataURL("image/png");
-  const imgHeightMm = canvas.height * pageWidth / canvas.width;
-  const y = imgHeightMm < pageHeight ? (pageHeight - imgHeightMm)/2 : 0;
-  pdf.addImage(imgData, "PNG", 0, y, pageWidth, Math.min(imgHeightMm, pageHeight));
+  // 가로/세로 중 더 빡빡한 쪽에 맞춰 축소해서 종횡비를 항상 유지한다(찌그러짐 방지).
+  const scale = Math.min(pageWidth / canvas.width, pageHeight / canvas.height);
+  const drawW = canvas.width * scale;
+  const drawH = canvas.height * scale;
+  const x = (pageWidth - drawW) / 2;
+  const y = (pageHeight - drawH) / 2;
+  pdf.addImage(imgData, "PNG", x, y, drawW, drawH);
   return pdf.output("blob");
 }
 

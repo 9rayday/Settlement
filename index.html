@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>직접PPA 전력거래대금 정산서 자동생성</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
@@ -62,6 +63,11 @@
         <label style="font-size:12.5px; color:var(--sub);">발전사업자 선택</label>
         <select id="plantSelectAdjust" class="plant-select" onchange="onPlantSelectChange(this.value)"></select>
       </div>
+      <div class="row" style="margin-top:10px;">
+        <button class="btn secondary" id="refreshMasterBtn">전체 발전소 마스터 정보 새로고침</button>
+        <span id="refreshMasterStatus" class="status warn" style="background:none;"></span>
+      </div>
+      <p class="desc" style="margin-top:8px;">구글시트("발전소 사업자 정보")에서 계약정보를 새로 입력·수정했다면 이 버튼으로 전체 발전소 값을 다시 불러오세요. 조정값 저장 시에도 자동으로 함께 갱신됩니다.</p>
     </div>
 
     <div class="card" id="plantAdjustHost" style="display:none;">

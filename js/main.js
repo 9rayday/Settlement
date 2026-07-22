@@ -10,6 +10,7 @@ document.addEventListener("DOMContentLoaded", ()=>{
 
   initUploadZone();
   document.getElementById("adjSaveBtn").addEventListener("click", handleSaveAdjustments);
+  document.getElementById("refreshMasterBtn").addEventListener("click", handleRefreshMaster);
   document.getElementById("exportBtn").addEventListener("click", exportSinglePlantExcel);
   document.getElementById("pdfBtn").addEventListener("click", exportSinglePlantPdf);
   document.getElementById("exportAllBtn").addEventListener("click", exportAllPlants);
