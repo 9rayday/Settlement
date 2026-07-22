@@ -24,16 +24,11 @@ async function renderPlantToCanvas(plant){
 
 async function canvasToPdfBlob(canvas){
   const { jsPDF } = window.jspdf;
-  const pdf = new jsPDF({ unit:"mm", format:"a4" });
-  const pageWidth = 210, pageHeight = 297;
+  const pdf = new jsPDF({ unit:"pt", format:"a4" });
+  // 종횡비를 지키느라 이미지를 페이지 가운데 작게 넣는 대신, 표준 여백만 남기고 거의 꽉 채운다.
+  const x = 40, y = 13, width = 515, height = 815;
   const imgData = canvas.toDataURL("image/png");
-  // 가로/세로 중 더 빡빡한 쪽에 맞춰 축소해서 종횡비를 항상 유지한다(찌그러짐 방지).
-  const scale = Math.min(pageWidth / canvas.width, pageHeight / canvas.height);
-  const drawW = canvas.width * scale;
-  const drawH = canvas.height * scale;
-  const x = (pageWidth - drawW) / 2;
-  const y = (pageHeight - drawH) / 2;
-  pdf.addImage(imgData, "PNG", x, y, drawW, drawH);
+  pdf.addImage(imgData, "PNG", x, y, width, height);
   return pdf.output("blob");
 }
 
