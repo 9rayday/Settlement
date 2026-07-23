@@ -5,6 +5,20 @@
 }
 *{box-sizing:border-box;}
 body{ margin:0; background:var(--paper); color:var(--ink); font-size:14px; line-height:1.5; }
+.login-gate{
+  position:fixed; inset:0; z-index:100; display:flex; align-items:center; justify-content:center;
+  background:linear-gradient(135deg,var(--navy),var(--navy-2));
+}
+.login-card{
+  background:#fff; border-radius:12px; padding:32px 30px; width:320px; text-align:center;
+  box-shadow:0 12px 40px rgba(0,0,0,0.25);
+}
+.login-card .login-logo{ height:36px; margin-bottom:14px; }
+.login-card h2{ font-size:15px; margin:0 0 18px; color:var(--navy); }
+.login-card input{
+  padding:10px 12px; border-radius:7px; border:1px solid var(--line); font-size:13.5px; width:100%;
+}
+.login-card button{ width:100%; }
 header.app{
   background:linear-gradient(135deg,var(--navy),var(--navy-2)); color:#fff; padding:22px 28px;
   display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;
@@ -80,18 +94,20 @@ table.doc-table tr.pay td{ font-weight:700; font-size:13.5px; }
 .doc-signature .sign-name{ margin-top:4px; font-weight:700; font-size:16px; }
 .guarantee-table td.label{ white-space:normal; font-size:11px; }
 
-/* PDF 캡처 전용: html2canvas는 @media print를 안 타므로, A4 한 장 비율에 맞춘 조밀한 스타일을 별도 클래스로 강제 적용 */
+/* PDF 캡처 전용: html2canvas는 @media print를 안 타므로, A4 한 장 비율에 맞춘 스타일을 별도 클래스로 강제 적용.
+   jsPDF가 최종적으로 페이지 여백만 남기고 꽉 채우도록 늘려 그리므로, 원본 글씨를 너무 작게 잡으면
+   최종 PDF에서도 작게 보인다 — 화면 미리보기와 비슷한 크기를 유지한다. */
 .doc.pdf-capture{
   width:794px; max-width:794px; box-sizing:border-box;
-  padding:26px 30px; font-size:11px;
+  padding:22px 28px; font-size:13px;
 }
-.doc.pdf-capture h1.title{ font-size:17px; margin-bottom:1px; }
-.doc.pdf-capture .month{ font-size:11px; margin-bottom:12px; }
-.doc.pdf-capture table.doc-table{ font-size:10.5px; margin-bottom:10px; }
-.doc.pdf-capture table.doc-table td, .doc.pdf-capture table.doc-table th{ padding:4px 6px; }
-.doc.pdf-capture .doc-logo{ height:32px; }
-.doc.pdf-capture .doc-date{ font-size:11px; margin:10px 0 6px; }
-.doc.pdf-capture .doc-signature{ font-size:10.5px; }
+.doc.pdf-capture h1.title{ font-size:19px; margin-bottom:2px; }
+.doc.pdf-capture .month{ font-size:12px; margin-bottom:8px; }
+.doc.pdf-capture table.doc-table{ font-size:12.5px; margin-bottom:7px; }
+.doc.pdf-capture table.doc-table td, .doc.pdf-capture table.doc-table th{ padding:4px 7px; }
+.doc.pdf-capture .doc-logo{ height:34px; }
+.doc.pdf-capture .doc-date{ font-size:13px; margin:8px 0 5px; }
+.doc.pdf-capture .doc-signature{ font-size:12px; }
 
 @page{ size: A4; margin: 12mm; }
 @media print{

@@ -209,14 +209,14 @@ function loadLogoBuffer(){
 }
 
 /* ============ Sheet 1: 고지서 양식 (발전사업자 1인분, PDF와 동일한 디자인) ============ */
-async function buildInvoiceSheet(workbook, ws, plant, meta, history){
+async function buildInvoiceSheet(workbook, ws, plant, meta, grid){
   const {n} = meta;
   const genRange = [7, 6+n];
   const supRange = [8+n, 7+2*n];
   const excRange = [9+2*n, 8+3*n];
   const m = masterData[plant] || {};
   const calc = calcInvoice(plant);
-  const schedule = buildGuaranteeSchedule(plant, history);
+  const schedule = buildGuaranteeSchedule(plant, grid);
 
   // test.xlsx 원본("고지서 양식" 탭)을 직접 열어 실측한 값 그대로 적용.
   ws.getColumn(1).width = 1.58203125;
@@ -225,12 +225,15 @@ async function buildInvoiceSheet(workbook, ws, plant, meta, history){
   ws.getColumn(10).width = 3.4; // J: 회차 순번 (인쇄 영역 밖)
   for(let c=11;c<=22;c++) ws.getColumn(c).width = 9; // K~V: 회차별 월간 실적 (인쇄 영역 밖)
 
-  const GAP_ROW_HEIGHT = 9.9;
-  const CONTENT_ROW_HEIGHT = 34;
-  const TALL_ROW_HEIGHT = 46; // 2줄 이상 줄바꿈되는 행(주소/연락처/서명 문구)
+  // 열너비(23.08자×7칸, test.xlsx 실측값)는 고정, 행 높이만 축소했다.
+  // 원래 값(GAP 9.9/CONTENT 34/TALL 46, 총 높이 약 1909pt)은 세로가 A4 폭 비율보다 훨씬 길어서
+  // "페이지에 맞추기"로 축소하면 좌우 여백이 상하 여백보다 훨씬 커지는 문제가 있었다(약 68%로 축소).
+  const GAP_ROW_HEIGHT = 6.8;
+  const CONTENT_ROW_HEIGHT = 23;
+  const TALL_ROW_HEIGHT = 31; // 2줄 이상 줄바꿈되는 행(주소/연락처/서명 문구)
   const GAP_ROWS = new Set([8,14,27,32,54,59]);
   const TALL_ROWS = new Set([6,7,29,56,57,58]);
-  ws.getRow(1).height = 10;
+  ws.getRow(1).height = 7;
   for(let r=2;r<=59;r++){
     ws.getRow(r).height = GAP_ROWS.has(r) ? GAP_ROW_HEIGHT : (TALL_ROWS.has(r) ? TALL_ROW_HEIGHT : CONTENT_ROW_HEIGHT);
   }
@@ -408,7 +411,7 @@ async function buildInvoiceSheet(workbook, ws, plant, meta, history){
 
 /* ============ Workbook assembly (per plant) ============ */
 async function buildWorkbookForPlant(plant){
-  const history = await fetchPerformanceHistory(plant);
+  const grid = await fetchYearlyGrid(plant);
   const workbook = new ExcelJS.Workbook();
   workbook.calcProperties.fullCalcOnLoad = true;
 
@@ -417,7 +420,7 @@ async function buildWorkbookForPlant(plant){
   const rawWs = workbook.addWorksheet(RAW_SHEET);
 
   const {meta} = buildDetailSheet(detailWs, plants);
-  await buildInvoiceSheet(workbook, invoiceWs, plant, meta, history);
+  await buildInvoiceSheet(workbook, invoiceWs, plant, meta, grid);
   buildRawSheet(rawWs, rawRows);
 
   return workbook;

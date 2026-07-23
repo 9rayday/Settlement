@@ -1,4 +1,9 @@
-document.addEventListener("DOMContentLoaded", ()=>{
+let _appInited = false;
+
+function initApp(){
+  if(_appInited) return; // 로그인 성공 시 checkAuth()가 다시 부를 수 있어 중복 초기화 방지
+  _appInited = true;
+
   document.querySelectorAll(".tab-btn").forEach(b=>{
     b.addEventListener("click", ()=>{
       document.querySelectorAll(".tab-btn").forEach(x=>x.classList.remove("active"));
@@ -16,4 +21,11 @@ document.addEventListener("DOMContentLoaded", ()=>{
   document.getElementById("exportAllBtn").addEventListener("click", exportAllPlants);
 
   fetchMaster().catch(err=> console.error("[main] 마스터 데이터 조회 실패:", err));
+}
+
+document.addEventListener("DOMContentLoaded", ()=>{
+  document.getElementById("loginBtn").addEventListener("click", handleLogin);
+  document.getElementById("loginPw").addEventListener("keydown", e=>{ if(e.key==="Enter") handleLogin(); });
+
+  if(checkAuth()) initApp();
 });

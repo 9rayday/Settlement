@@ -58,6 +58,15 @@ async function fetchPerformanceHistory(plant){
   return data || [];
 }
 
+async function fetchYearlyGrid(plant){
+  const data = await gasGet("getYearlyGrid", { plant });
+  return data || {};
+}
+
+async function login(id, pw){
+  return gasPost("login", { id, pw });
+}
+
 async function fetchAdjustments(month, plant){
   const data = await gasGet("getAdjustments", { month, plant });
   return data || { 전월차액:0, 전월미지급액:0, 기타정산:0 };

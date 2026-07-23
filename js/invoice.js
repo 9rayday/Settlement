@@ -37,10 +37,12 @@ function addMonths(ym, n){
   const total = ym.y*12 + (ym.m-1) + n;
   return { y: Math.floor(total/12), m: (total%12)+1 };
 }
-function ymKey(ym){ return String(ym.y) + String(ym.m).padStart(2,"0"); }
 function ymLabel(ym){ return `'${String(ym.y).slice(2)}.${String(ym.m).padStart(2,"0")}.`; }
 
-function buildGuaranteeSchedule(plant, history){
+// grid: fetchYearlyGrid()가 반환하는 { "1":[12개 값 또는 null...], ..., "20":[...] } 형태.
+// 구글시트 "실적그리드" 탭(발전소별 연차 x 월 블록)을 그대로 읽어온 값이라, 시트에서 수동으로
+// 고친 값도 여기 바로 반영된다 — 프론트는 그걸 합산/표시만 한다.
+function buildGuaranteeSchedule(plant, grid){
   const m = masterData[plant] || {};
   const capacity = Number(m["계약용량"]) || 0;
   const hours = Number(m["발전보장시간"]) || DEFAULT_GUARANTEE_HOURS;
@@ -53,16 +55,9 @@ function buildGuaranteeSchedule(plant, history){
     const windowStart = addMonths(startYm, (k-1)*12);
     const windowEnd = addMonths(startYm, k*12-1);
     const label = `(${ymLabel(windowStart)} ~ ${ymLabel(windowEnd)})`;
-    const inWindow = history.filter(h=> h.month >= ymKey(windowStart) && h.month <= ymKey(windowEnd));
-    const actualCum = inWindow.length ? inWindow.reduce((s,h)=>s+h.supply,0) : null;
-    // 회차 시작월 기준 1~12번째 달 위치에 실적을 배치 (달력상 1월이 아니라 회차 내 순번)
-    const monthly = new Array(12).fill(null);
-    inWindow.forEach(h=>{
-      const hym = parseYm(h.month);
-      if(!hym) return;
-      const pos = (hym.y - windowStart.y)*12 + (hym.m - windowStart.m);
-      if(pos>=0 && pos<12) monthly[pos] = h.supply;
-    });
+    const monthly = (grid && grid[String(k)]) || new Array(12).fill(null);
+    const filled = monthly.filter(v=> v!=null);
+    const actualCum = filled.length ? filled.reduce((s,v)=>s+v,0) : null;
     rows.push({k, label, expected: yearlyExpected, actualCum, monthly});
   }
   return rows;
@@ -152,8 +147,8 @@ async function buildInvoiceHtml(plant){
   const fmt2 = n => n==null ? "-" : n.toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2});
   const monthLabel = settleMonth ? `${settleMonth.slice(0,4)}년 ${settleMonth.slice(4,6)}월` : "-";
   const lossRate = siteTotals.usage ? (siteTotals.usage - siteTotals.supply)/siteTotals.usage : 0;
-  const history = await fetchPerformanceHistory(plant);
-  const schedule = buildGuaranteeSchedule(plant, history);
+  const grid = await fetchYearlyGrid(plant);
+  const schedule = buildGuaranteeSchedule(plant, grid);
   const today = new Date();
   const todayLabel = `${today.getFullYear()}년 ${String(today.getMonth()+1).padStart(2,"0")}월 ${String(today.getDate()).padStart(2,"0")}일`;
   const field = (label,val,editable)=> `<td class="label">${label}</td><td colspan="2"${editable?' class="editable"':''}>${val}</td>`;
