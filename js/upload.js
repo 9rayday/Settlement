@@ -39,8 +39,10 @@ function pickCol(row, candidates){
 }
 
 function handleFile(file){
-  document.getElementById("dataStatus").textContent = "읽는 중...";
-  document.getElementById("dataStatus").className = "status warn";
+  const statusEl = document.getElementById("dataStatus");
+  statusEl.style.display = "inline-flex";
+  statusEl.textContent = "읽는 중...";
+  statusEl.className = "status warn";
   const reader = new FileReader();
   reader.onload = e=>{
     try{
@@ -51,15 +53,15 @@ function handleFile(file){
       rawHeaders = headerRow.map(h=> h===null||h===undefined ? "" : String(h)).filter(h=>h!=="");
       buildColMap(rawRows);
       aggregate(rawRows);
-      document.getElementById("dataStatus").textContent = `${rawRows.length.toLocaleString()}행 처리 완료 (${sheetName})`;
-      document.getElementById("dataStatus").className = "status ok";
+      statusEl.textContent = `발전소 수 ${plants.length} 처리 완료`;
+      statusEl.className = "status ok";
       document.getElementById("exportBtn").disabled = false;
       document.getElementById("pdfBtn").disabled = false;
       document.getElementById("exportAllBtn").disabled = false;
       syncPerformanceToGas();
     }catch(err){
-      document.getElementById("dataStatus").textContent = "오류: " + err.message;
-      document.getElementById("dataStatus").className = "status bad";
+      statusEl.textContent = "오류: " + err.message;
+      statusEl.className = "status bad";
     }
   };
   reader.readAsArrayBuffer(file);
@@ -122,7 +124,7 @@ function buildColMap(rows){
 function aggregate(rows){
   aggByPlant = {}; plants = [];
   const seenTs = new Set();
-  siteTotals = {usage:0, generation:0, supply:0, excess:0, deficit:0};
+  siteTotals = {usage:0, generation:0, supply:0, excess:0, deficit:0, lossRatePct:null};
   settleMonth = "";
 
   rows.forEach(r=>{
@@ -146,6 +148,11 @@ function aggregate(rows){
       const d = String(r[colMap.date]).replace(/[^0-9]/g,"");
       if(d.length>=6) settleMonth = d.slice(0,6);
     }
+    // 전력손실률은 계산하지 않고 원본 데이터의 "종합손실률(%)" 컬럼값을 그대로 쓴다(사이트 전체 대비
+    // 계산식은 발전소별 공급량이 작아 항상 90%대로 나와 실제 의미와 달랐다).
+    if(siteTotals.lossRatePct===null && colMap.totalLossRate && r[colMap.totalLossRate]!=null && r[colMap.totalLossRate]!==""){
+      siteTotals.lossRatePct = num(r[colMap.totalLossRate]) / 100;
+    }
   });
 
   document.getElementById("monthBadge").textContent = settleMonth ? `정산월 ${settleMonth.slice(0,4)}.${settleMonth.slice(4,6)}` : "정산월 미설정";
@@ -157,7 +164,8 @@ function aggregate(rows){
 function renderSiteKpis(){
   const el = document.getElementById("siteKpis");
   el.style.display = "grid";
-  const lossRate = siteTotals.usage ? ((siteTotals.usage - siteTotals.supply) / siteTotals.usage) : 0;
+  const lossRate = siteTotals.lossRatePct!=null ? siteTotals.lossRatePct
+    : (siteTotals.usage ? ((siteTotals.usage - siteTotals.supply) / siteTotals.usage) : 0);
   const kpis = [
     ["총 전기사용량 (kWh)", Math.round(siteTotals.usage).toLocaleString()],
     ["총 발전량 (kWh)", Math.round(siteTotals.generation).toLocaleString()],
@@ -165,7 +173,6 @@ function renderSiteKpis(){
     ["총 초과발전량 (kWh)", Math.round(siteTotals.excess).toLocaleString()],
     ["총 부족전력량 (kWh)", Math.round(siteTotals.deficit).toLocaleString()],
     ["전력손실률", (lossRate*100).toFixed(2)+"%"],
-    ["발전소 수", plants.length],
   ];
   el.innerHTML = kpis.map(([l,v])=>`<div class="kpi"><div class="label">${l}</div><div class="value">${v}</div></div>`).join("");
 }

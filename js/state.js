@@ -14,6 +14,7 @@ let cumulativeSupplyByPlant = {}; // {발전소명: 실공급량누계 kWh} from
 
 const BUYER = {
   bizName: "한화신한테라와트아워 (김 한 성)",
+  bizNameLegal: "한화신한테라와트아워 주식회사",
   bizRegNo: "243-81-02905",
   address: "서울특별시 중구 삼일대로 363 1107호\n(장교동, 장교빌딩)",
   manager: "홍인성 프로",

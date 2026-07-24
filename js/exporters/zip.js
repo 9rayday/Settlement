@@ -9,19 +9,20 @@ async function exportAllPlants(){
   const btn = document.getElementById("exportAllBtn");
   btn.disabled = true;
   const zip = new JSZip();
+  const monthLabel = settleMonth && settleMonth.length>=6 ? `${settleMonth.slice(0,4)}년 ${settleMonth.slice(4,6)}월` : "정산";
   try{
     for(let i=0;i<plants.length;i++){
       const plant = plants[i];
       statusEl.textContent = `생성 중... (${i+1}/${plants.length}) ${plant}`;
       adjustmentsByPlant[plant] = await fetchAdjustments(settleMonth, plant);
-      const folder = zip.folder(sanitizeFilename(plant));
       const [pdfBlob, workbook] = await Promise.all([
         buildPdfBlobForPlant(plant),
         buildWorkbookForPlant(plant)
       ]);
       const xlsxBuffer = await workbook.xlsx.writeBuffer();
-      folder.file("고지서.pdf", pdfBlob);
-      folder.file("정산서.xlsx", xlsxBuffer);
+      const baseName = sanitizeFilename(`${monthLabel} 직접PPA 전력거래대금 정산서_${plant}`);
+      zip.file(`${baseName}.pdf`, pdfBlob);
+      zip.file(`${baseName}.xlsx`, xlsxBuffer);
     }
     statusEl.textContent = "압축 중...";
     const zipBlob = await zip.generateAsync({type:"blob"});

@@ -273,7 +273,11 @@ async function buildInvoiceSheet(workbook, ws, plant, meta, grid){
   xSection(ws,9,13,"전력\n거래\n내역");
   xLabel(ws,9,3,"총 전기사용량"); merge2(9,4,5);   ws.getCell(9,4).value = { formula: `'${DETAIL_SHEET}'!AB5` }; xStyle(ws,9,4,9,4,{numFmt:'#,##0.00" kWh"'});
   xLabel(ws,9,6,"총 발전량"); merge2(9,7,8);       ws.getCell(9,7).value = { formula: `'${DETAIL_SHEET}'!AB6` }; xStyle(ws,9,7,9,7,{numFmt:'#,##0.00" kWh"'});
-  xLabel(ws,10,3,"전력손실률"); merge2(10,4,5);     ws.getCell(10,4).value = { formula: `IFERROR((D9-G10)/D9,0)` }; xStyle(ws,10,4,10,4,{numFmt:"0.00%", align:{horizontal:'center'}});
+  // 전력손실률: 원본 업로드 데이터의 "종합손실률(%)" 컬럼값을 그대로 쓴다(usage/supply 비율 계산은
+  // 발전소 공급량이 사이트 전체보다 작아 항상 90%대로 나와 실제 의미와 달랐다).
+  xLabel(ws,10,3,"전력손실률"); merge2(10,4,5);
+  if(siteTotals.lossRatePct!=null){ xValue(ws,10,4, siteTotals.lossRatePct, {numFmt:"0.00%"}); }
+  else{ ws.getCell(10,4).value = { formula: `IFERROR((D9-G10)/D9,0)` }; xStyle(ws,10,4,10,4,{numFmt:"0.00%", align:{horizontal:'center'}}); }
   xLabel(ws,10,6,"총 공급량"); merge2(10,7,8);      ws.getCell(10,7).value = { formula: `'${DETAIL_SHEET}'!AB${7+n}` }; xStyle(ws,10,7,10,7,{numFmt:'#,##0.00" kWh"'});
   xLabel(ws,11,3,"총 초과발전량"); merge2(11,4,5);  ws.getCell(11,4).value = { formula: `'${DETAIL_SHEET}'!AB${8+2*n}` }; xStyle(ws,11,4,11,4,{numFmt:'#,##0.00" kWh"'});
   xLabel(ws,11,6,"총 부족전력량"); merge2(11,7,8);  ws.getCell(11,7).value = { formula: `'${DETAIL_SHEET}'!AB${9+3*n}` }; xStyle(ws,11,7,11,7,{numFmt:'#,##0.00" kWh"'});

@@ -26,6 +26,7 @@ function initApp(){
 document.addEventListener("DOMContentLoaded", ()=>{
   document.getElementById("loginBtn").addEventListener("click", handleLogin);
   document.getElementById("loginPw").addEventListener("keydown", e=>{ if(e.key==="Enter") handleLogin(); });
+  document.getElementById("pwToggleBtn").addEventListener("click", togglePasswordVisibility);
 
   if(checkAuth()) initApp();
 });

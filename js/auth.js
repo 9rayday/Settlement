@@ -30,11 +30,19 @@ async function handleLogin(){
   btn.disabled = true; btn.textContent = "확인 중...";
   const result = await login(id, pw);
   btn.disabled = false; btn.textContent = "로그인";
-  if(!result){
-    errEl.textContent = "아이디 또는 비밀번호가 올바르지 않습니다.";
+  if(!result.ok){
+    errEl.textContent = result.error;
     errEl.style.display = "inline-flex";
     return;
   }
   sessionStorage.setItem(AUTH_KEY, "1");
   if(checkAuth()) initApp();
+}
+
+function togglePasswordVisibility(){
+  const input = document.getElementById("loginPw");
+  const btn = document.getElementById("pwToggleBtn");
+  const shown = input.type === "text";
+  input.type = shown ? "password" : "text";
+  btn.textContent = shown ? "👁" : "🙈";
 }

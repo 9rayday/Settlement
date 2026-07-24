@@ -93,8 +93,8 @@ function renderPlantAdjustTab(){
   const a = aggByPlant[selectedPlant];
   const adj = adjustmentsByPlant[selectedPlant] || {전월차액:0,전월미지급액:0,기타정산:0};
   document.getElementById("plantKpis").innerHTML = `
-    <div class="kpi"><div class="label">PPA 발전량</div><div class="value">${Math.round(a.generation).toLocaleString()} kWh</div></div>
-    <div class="kpi"><div class="label">재생E 공급량</div><div class="value">${Math.round(a.supply).toLocaleString()} kWh</div></div>
+    <div class="kpi"><div class="label">발전량</div><div class="value">${Math.round(a.generation).toLocaleString()} kWh</div></div>
+    <div class="kpi"><div class="label">공급량</div><div class="value">${Math.round(a.supply).toLocaleString()} kWh</div></div>
     <div class="kpi"><div class="label">초과발전량</div><div class="value">${Math.round(a.excess).toLocaleString()} kWh</div></div>
   `;
   document.getElementById("adjPrevDiff").value = adj.전월차액 || 0;
@@ -146,7 +146,8 @@ async function buildInvoiceHtml(plant){
   const fmtK = n => n==null ? "-" : Math.round(n).toLocaleString()+' kWh';
   const fmt2 = n => n==null ? "-" : n.toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2});
   const monthLabel = settleMonth ? `${settleMonth.slice(0,4)}년 ${settleMonth.slice(4,6)}월` : "-";
-  const lossRate = siteTotals.usage ? (siteTotals.usage - siteTotals.supply)/siteTotals.usage : 0;
+  const lossRate = siteTotals.lossRatePct!=null ? siteTotals.lossRatePct
+    : (siteTotals.usage ? (siteTotals.usage - siteTotals.supply)/siteTotals.usage : 0);
   const grid = await fetchYearlyGrid(plant);
   const schedule = buildGuaranteeSchedule(plant, grid);
   const today = new Date();

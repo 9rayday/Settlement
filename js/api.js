@@ -63,8 +63,24 @@ async function fetchYearlyGrid(plant){
   return data || {};
 }
 
+// 로그인은 실패 사유(아이디 없음/비밀번호 틀림/잠김)를 화면에 그대로 보여줘야 해서
+// 실패 시 null로 뭉개버리는 gasPost 대신 직접 처리해 {ok, data, error}를 그대로 반환한다.
 async function login(id, pw){
-  return gasPost("login", { id, pw });
+  if(!gasConfigured_()){
+    return { ok:false, error:"GAS 연결이 설정되지 않았습니다." };
+  }
+  try{
+    const res = await fetch(GAS_WEBAPP_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ action:"login", id, pw })
+    });
+    const json = await res.json();
+    if(!json.ok) return { ok:false, error: String(json.error || "로그인 실패").replace(/^Error:\s*/, "") };
+    return { ok:true, data: json.data };
+  }catch(err){
+    return { ok:false, error:"서버에 연결할 수 없습니다." };
+  }
 }
 
 async function fetchAdjustments(month, plant){
