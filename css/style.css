@@ -10,14 +10,17 @@ body{ margin:0; background:var(--paper); color:var(--ink); font-size:14px; line-
   background:linear-gradient(135deg,var(--navy),var(--navy-2));
 }
 .login-card{
-  background:#fff; border-radius:12px; padding:32px 30px; width:320px; text-align:center;
+  background:#fff; border-radius:12px; text-align:center;
   box-shadow:0 12px 40px rgba(0,0,0,0.25);
+  width:min(94vw, 460px);
+  padding:clamp(28px,5vw,44px) clamp(24px,5vw,40px);
 }
-.login-card .login-logo{ height:36px; margin-bottom:18px; }
+.login-card .login-logo{ height:clamp(36px,6vw,52px); margin-bottom:clamp(16px,3vw,24px); }
 .login-card input{
-  padding:10px 12px; border-radius:7px; border:1px solid var(--line); font-size:13.5px; width:100%;
+  padding:clamp(10px,1.6vw,14px) 14px; border-radius:7px; border:1px solid var(--line);
+  font-size:clamp(13.5px,1.8vw,16px); width:100%;
 }
-.login-card #loginBtn{ width:100%; }
+.login-card #loginBtn{ width:100%; padding-top:clamp(9px,1.6vw,13px); padding-bottom:clamp(9px,1.6vw,13px); font-size:clamp(13px,1.6vw,15px); }
 .pw-field{ position:relative; }
 .pw-field input{ padding-right:38px; }
 .pw-toggle{
