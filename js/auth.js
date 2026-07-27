@@ -41,8 +41,8 @@ async function handleLogin(){
 
 function togglePasswordVisibility(){
   const input = document.getElementById("loginPw");
-  const btn = document.getElementById("pwToggleBtn");
   const shown = input.type === "text";
   input.type = shown ? "password" : "text";
-  btn.textContent = shown ? "👁" : "🙈";
+  document.getElementById("pwIconClosed").style.display = shown ? "" : "none";
+  document.getElementById("pwIconOpen").style.display = shown ? "none" : "";
 }

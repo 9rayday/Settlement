@@ -309,6 +309,6 @@ async function exportSinglePlantPdf(){
   }catch(err){
     alert(err.message);
   } finally {
-    btn.disabled = false; btn.textContent = "PDF";
+    btn.disabled = false; btn.textContent = "PDF 다운";
   }
 }
