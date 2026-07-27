@@ -17,12 +17,12 @@ body{ margin:0; background:var(--paper); color:var(--ink); font-size:14px; line-
 .login-card input{
   padding:10px 12px; border-radius:7px; border:1px solid var(--line); font-size:13.5px; width:100%;
 }
-.login-card button{ width:100%; }
+.login-card #loginBtn{ width:100%; }
 .pw-field{ position:relative; }
 .pw-field input{ padding-right:38px; }
 .pw-toggle{
   position:absolute; right:6px; top:50%; transform:translateY(-50%);
-  border:none; background:none; cursor:pointer; padding:4px 6px; line-height:1;
+  width:auto; border:none; background:none; cursor:pointer; padding:4px 6px; line-height:1;
   display:flex; align-items:center; justify-content:center; color:var(--sub);
 }
 .pw-toggle:hover{ color:var(--navy); }
