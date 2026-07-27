@@ -92,8 +92,10 @@ table.doc-table tr.pay td{ font-weight:700; font-size:13.5px; }
 .drop-zone-text{ font-size:13px; color:var(--sub); }
 .drop-zone input[type="file"]{ display:none; }
 
+.adj-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-top:10px; }
+.adj-item{ display:flex; flex-direction:column; gap:6px; }
 .adj-label{ font-size:12.5px; color:var(--sub); }
-.adj-input{ width:160px; padding:8px 10px; border-radius:7px; border:1px solid var(--line); font-size:13px; }
+.adj-input{ width:100%; padding:8px 10px; border-radius:7px; border:1px solid var(--line); font-size:13px; }
 
 .doc-header{ text-align:left; margin-bottom:6px; }
 .doc-logo{ height:40px; }
