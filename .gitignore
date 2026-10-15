@@ -1,0 +1,5 @@
+
+# 실데이터 fixture / 로컬 산출물 (공개 저장소에 올리지 않는다)
+fixture*.json
+*.fixture.json
+node_modules/
