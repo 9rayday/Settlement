@@ -24,9 +24,11 @@ const SHEET_PERFORMANCE = "월별실적로그";
 const SHEET_DASHBOARD = "대시보드";
 const SHEET_YEARLY_GRID = "실적그리드";
 const SHEET_ADMIN = "관리자";
+const SHEET_STORE = "앱데이터";
 
 const ADJUSTMENTS_HEADERS = ["정산월","발전소명","전월차액","전월미지급액","기타정산","저장일시"];
 const PERFORMANCE_HEADERS = ["정산월","발전소명","발전량","공급량","초과발전량","기록일시"];
+const STORE_HEADERS = ["키","값","저장일시"];
 const ADMIN_HEADERS = ["아이디","비밀번호","이름","등록일시","실패횟수","잠금시점비밀번호"];
 const DASHBOARD_YEARS = 20;
 const DEFAULT_GUARANTEE_HOURS = 3.4; // 발전보장시간이 비어있을 때 기본값
@@ -39,6 +41,7 @@ function setupSheets() {
   ensureSheet_(ss, SHEET_PERFORMANCE, PERFORMANCE_HEADERS);
   ensureSheet_(ss, SHEET_DASHBOARD, ["발전소명","계약용량","발전보장시간","구분"]);
   ensureSheet_(ss, SHEET_ADMIN, ADMIN_HEADERS);
+  ensureSheet_(ss, SHEET_STORE, STORE_HEADERS);
   getYearlyGridSheet_();
 }
 
@@ -69,6 +72,7 @@ function getSheet_(name) {
   if (name === SHEET_PERFORMANCE) return ensureSheet_(ss, name, PERFORMANCE_HEADERS);
   if (name === SHEET_DASHBOARD) return ensureSheet_(ss, name, ["발전소명","계약용량","발전보장시간","구분"]);
   if (name === SHEET_ADMIN) return ensureSheet_(ss, name, ADMIN_HEADERS);
+  if (name === SHEET_STORE) return ensureSheet_(ss, name, STORE_HEADERS);
   const sheet = findSheetFuzzy_(ss, name);
   if (!sheet) {
     const actual = ss.getSheets().map(s => s.getName()).join(", ");
@@ -104,6 +108,7 @@ function doGet(e) {
     if (action === "getMaster") return jsonOut_({ ok: true, data: getMaster_() });
     if (action === "getAdjustments") return jsonOut_({ ok: true, data: getAdjustments_(e.parameter.month, e.parameter.plant) });
     if (action === "getPerformanceHistory") return jsonOut_({ ok: true, data: getPerformanceHistory_(e.parameter.plant) });
+    if (action === "getStoreAll") return jsonOut_({ ok: true, data: getStoreAll_() });
     if (action === "getYearlyGrid") return jsonOut_({ ok: true, data: getYearlyGrid_(e.parameter.plant) });
     return jsonOut_({ ok: false, error: "unknown action: " + action });
   } catch (err) {
@@ -117,6 +122,7 @@ function doPost(e) {
     const action = body.action;
     if (action === "saveAdjustments") return jsonOut_({ ok: true, data: saveAdjustments_(body) });
     if (action === "logPerformance") return jsonOut_({ ok: true, data: logPerformance_(body) });
+    if (action === "saveStore") return jsonOut_({ ok: true, data: saveStore_(body) });
     if (action === "login") return jsonOut_({ ok: true, data: login_(body) });
     return jsonOut_({ ok: false, error: "unknown action: " + action });
   } catch (err) {
@@ -207,6 +213,28 @@ function logPerformance_(body) {
   });
   const cumulative = rebuildDashboard_();
   return { logged: (body.rows || []).length, cumulative: cumulative };
+}
+
+/* ============ 앱데이터 (수요기업 청구 모듈: 월별 요율/발전소/계약/이월값을 JSON 으로 저장) ============
+ * 키 예: "rates:202609", "plants", "customers", "carry:202609:<신청번호>". 값은 JSON 문자열.
+ * 시트 셀 한 칸은 5만자 제한이므로 값이 커지면 키를 나눠서 저장한다. */
+function getStoreAll_() {
+  const rows = sheetToObjects_(getSheet_(SHEET_STORE));
+  const out = {};
+  rows.forEach(r => { if (r["키"] !== "") out[String(r["키"])] = String(r["값"]); });
+  return out;
+}
+
+function saveStore_(body) {
+  const key = String(body.key || "");
+  if (!key) throw new Error("key 가 필요합니다.");
+  const value = typeof body.value === "string" ? body.value : JSON.stringify(body.value);
+  if (value.length > 49000) throw new Error("값이 너무 큽니다(5만자 제한): " + key);
+  const sheet = getSheet_(SHEET_STORE);
+  const found = sheetToObjects_(sheet).find(r => String(r["키"]) === key);
+  const values = [key, value, new Date()];
+  if (found) sheet.getRange(found._row, 1, 1, values.length).setValues([values]); else sheet.appendRow(values);
+  return { saved: true };
 }
 
 /* ============ Date helpers ============ */

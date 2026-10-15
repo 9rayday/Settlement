@@ -53,6 +53,8 @@
   <button class="tab-btn active" data-tab="tab1">1. 데이터 업로드</button>
   <button class="tab-btn" data-tab="tab2">2. 발전소별 확인/조정</button>
   <button class="tab-btn" data-tab="tab3">3. 정산서 생성/다운로드</button>
+  <button class="tab-btn" data-tab="tab4">4. 등록·요율</button>
+  <button class="tab-btn" data-tab="tab5">5. 수요기업 청구</button>
 </nav>
 
 <main>
@@ -135,6 +137,10 @@
     <div class="card doc-card" id="invoiceHost" style="display:none;"></div>
   </div>
 
+  <!-- TAB 4 / 5 : 수요기업 청구 모듈 (js/billing.js 가 내용을 채운다) -->
+  <div class="panel" id="tab4"></div>
+  <div class="panel" id="tab5"></div>
+
 </main>
 
 </div>
@@ -142,9 +148,13 @@
 <script src="js/config.js"></script>
 <script src="js/state.js"></script>
 <script src="js/api.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/parsers.js"></script>
+<script src="js/store.js"></script>
 <script src="js/auth.js"></script>
 <script src="js/upload.js"></script>
 <script src="js/invoice.js"></script>
+<script src="js/billing.js"></script>
 <script src="js/exporters/excel.js"></script>
 <script src="js/exporters/pdf.js"></script>
 <script src="js/exporters/zip.js"></script>

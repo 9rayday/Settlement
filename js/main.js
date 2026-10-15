@@ -20,6 +20,7 @@ function initApp(){
   document.getElementById("pdfBtn").addEventListener("click", exportSinglePlantPdf);
   document.getElementById("exportAllBtn").addEventListener("click", exportAllPlants);
 
+  initBilling().catch(err=> console.error("[main] 수요기업 청구 모듈 초기화 실패:", err));
   fetchMaster().catch(err=> console.error("[main] 마스터 데이터 조회 실패:", err));
 }
 
