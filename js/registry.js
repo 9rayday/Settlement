@@ -54,7 +54,7 @@ const CUSTOMER_FORM = [
   { k: "담당자", label: "담당자" },
   { section: "계약정보" },
   { k: "KPX신청번호", label: "KPX 신청번호 (그룹 키)", req: true, placeholder: "26-PR00000" },
-  { k: "정산방식", label: "정산방식" },
+  { k: "정산방식", label: "정산방식", type: "select", options: ["", "실시간 정산", "월간균등 정산"] },
   { k: "계약단가", label: "계약단가 (원/kWh)", type: "number", req: true },
   { k: "계약기간", label: "계약기간 (년)", type: "number" },
   { k: "계약일자", label: "계약시작일", type: "date" },
@@ -72,8 +72,9 @@ const CUSTOMER_FORM = [
   { k: "한전계약전력", label: "한전계약전력 (kW)", type: "number" },
   { k: "한전고객번호", label: "한전고객번호" },
   { section: "연간보장공급" },
-  { k: "연간보장시간", label: "연간보장시간 (h/일)", type: "number" },
-  { k: "연간보장공급량", label: "연간보장공급량 (kWh)", type: "number" },
+  { k: "계약용량", label: "계약용량 (kW, 그룹 발전소 합계)", type: "number", calc: true },
+  { k: "연간보장시간", label: "연간보장시간 (h/년)", type: "number" },
+  { k: "연간보장공급량", label: "연간보장공급량 (kWh, 계약용량 × 연간보장시간)", type: "number", calc: true },
   { k: "연간효율감소", label: "연간효율감소 (%/년)", type: "number" },
   { section: "위약금" },
   { k: "위약금유형", label: "위약금 유형", type: "select", options: [["", "미정 (방식 정리 후 추가)"]] }
@@ -164,6 +165,21 @@ function calcContractDates(rec) {
   rec["연장통보마감일"] = YMD.test(end) && notice > 0 ? addMonthsYmd(end, -notice, 0) : "";
   return rec;
 }
+/* ----- 전기사용자 계약용량 = 그룹 발전소 설비용량 합, 연간보장공급량 = 계약용량 × 연간보장시간(h/년) ----- */
+const groupCapacity = app => Registry.plantsOfGroup(app).reduce((s, p) => s + (Number(Registry.plants()[p]["계약용량"]) || 0), 0);
+const guaranteeOf = (cap, hours) => { cap = Number(cap); hours = Number(hours); return cap > 0 && hours > 0 ? Number((cap * hours).toFixed(3)) : ""; };
+// 그룹 구성이나 발전소 용량이 바뀌면 해당 전기사용자 행의 계약용량·연간보장공급량을 다시 저장한다
+async function syncGroupTotals(apps) {
+  for (const app of new Set(apps.map(rStr).filter(Boolean))) {
+    const raw = Registry.rawCustomers().find(c => rStr(c["KPX신청번호"]) === app);
+    if (!raw) continue;
+    const cap = groupCapacity(app), g = guaranteeOf(cap, raw["연간보장시간"]);
+    if (Number(raw["계약용량"]) === cap && String(raw["연간보장공급량"]) === String(g)) continue;
+    await Registry.save("customer", { "KPX신청번호": app, "계약용량": cap, "연간보장공급량": g }, app);
+  }
+}
+const plantGroupOf = name => name && Registry.plants()[name] ? rStr(Registry.plants()[name]["KPX신청번호"]) : "";
+
 // 발전소·전기사용자 폼 공통. 발전소 폼에만 있는 설비용량/보장시간이 있으면 연간보장공급량 참고값도 보여준다
 function bindContractCalc(hostId) {
   const host = r$(hostId), el = k => host.querySelector(`[data-k="${k}"]`);
@@ -174,8 +190,9 @@ function bindContractCalc(hostId) {
       const cap = Number(el("계약용량").value), h = Number(el("발전보장시간").value);
       el("연간보장공급량").placeholder = cap > 0 && h > 0 ? `참고 ${Math.round(cap * h * 365).toLocaleString()}` : "";
     }
+    if (el("계약용량") && el("연간보장시간")) el("연간보장공급량").value = guaranteeOf(el("계약용량").value, el("연간보장시간").value); // 전기사용자
   };
-  ["계약일자", "계약기간", "연장통보기한", "계약용량", "발전보장시간"].forEach(k => { if (el(k)) el(k).addEventListener("input", update); });
+  ["계약일자", "계약기간", "연장통보기한", "계약용량", "발전보장시간", "연간보장시간"].forEach(k => { if (el(k)) el(k).addEventListener("input", update); });
   update();
 }
 // 발전사업자 정산서는 "사업자명(대표자명)" 한 칸을 쓰므로 저장할 때 합쳐 두고, 열 때는 나눠서 보여준다
@@ -223,8 +240,9 @@ function renderCustomerPage() {
 
 function openCustomer(app, keepScroll) {
   regState.openCust = app; markActive(".cust-card", "app", app);
-  const raw = Registry.rawCustomers().find(c => rStr(c["KPX신청번호"]) === app) || { "수요지지역": "비수도권" };
+  const raw = Object.assign({}, Registry.rawCustomers().find(c => rStr(c["KPX신청번호"]) === app) || { "수요지지역": "비수도권" });
   const isNew = !app, plants = isNew ? [] : Registry.plantsOfGroup(app);
+  raw["계약용량"] = isNew ? "" : groupCapacity(app);
   r$("regCustDetail").innerHTML = `<div class="reg-detail">
     <div class="reg-head"><h3 class="sub" style="margin:0">${isNew ? "새 전기사용자" : rEsc(raw["수요기업명"]) + " 계약 정보"}</h3><button class="btn secondary" id="regCustClose">닫기</button></div>
     <div id="regCustForm">${regFormHtml(CUSTOMER_FORM, raw, "cf")}</div>
@@ -327,8 +345,10 @@ function renderGroupMain() {
 // 발전소의 KPX 신청번호(그룹)만 바꿔 저장 (시트의 다른 칸은 그대로)
 async function setPlantGroup(plant, app) {
   const st = r$("grpStatus"); st.textContent = "저장 중..."; st.className = "status warn";
+  const oldGroup = plantGroupOf(plant);
   const r = await Registry.save("plant", { "발전소명": plant, "KPX신청번호": app }, plant);
   if (!r.ok) { st.textContent = "저장 실패: " + r.error; st.className = "status bad"; return; }
+  await syncGroupTotals([oldGroup, app]); // 계약용량·연간보장공급량 자동 갱신
   afterRegistryChange();
   const st2 = r$("grpStatus"); if (st2) { st2.textContent = `${plant} → ${app ? "그룹에 추가" : "그룹에서 제외"} (구글시트 저장)`; st2.className = "status ok"; }
 }
@@ -385,9 +405,12 @@ async function saveRegistry(kind, formId, form, originalKey, statusId) {
   try { rec = readRegForm(formId, form); } catch (e) { st.textContent = e.message; st.className = "status bad"; return; }
   calcContractDates(rec);
   if (kind === "plant") rec["사업자명(대표자명)"] = joinOwnerName(rec);
+  else { rec["계약용량"] = groupCapacity(rec["KPX신청번호"]); rec["연간보장공급량"] = guaranteeOf(rec["계약용량"], rec["연간보장시간"]); }
+  const oldGroup = kind === "plant" ? plantGroupOf(originalKey) : "";
   st.textContent = "저장 중..."; st.className = "status warn";
   const r = await Registry.save(kind, rec, originalKey);
   if (!r.ok) { st.textContent = "저장 실패: " + r.error; st.className = "status bad"; return; }
+  if (kind === "plant") await syncGroupTotals([oldGroup, rec["KPX신청번호"]]);
   if (kind === "plant") regState.openPlant = rec["발전소명"]; else regState.openCust = rec["KPX신청번호"];
   afterRegistryChange();
   const st2 = r$(statusId); if (st2) { st2.textContent = "저장 완료 (구글시트)"; st2.className = "status ok"; }
@@ -396,8 +419,10 @@ async function saveRegistry(kind, formId, form, originalKey, statusId) {
 async function deleteRegistry(kind, key, label, statusId) {
   if (!confirm(`${label} 을(를) 삭제할까요? 구글시트에서도 행이 지워집니다.`)) return;
   const st = r$(statusId); st.textContent = "삭제 중..."; st.className = "status warn";
+  const oldGroup = kind === "plant" ? plantGroupOf(key) : "";
   const r = await Registry.remove(kind, key);
   if (!r.ok) { st.textContent = "삭제 실패: " + r.error; st.className = "status bad"; return; }
+  if (oldGroup) await syncGroupTotals([oldGroup]);
   if (kind === "plant") regState.openPlant = null; else regState.openCust = null;
   afterRegistryChange();
 }
