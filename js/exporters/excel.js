@@ -308,7 +308,7 @@ async function buildInvoiceSheet(workbook, ws, plant, meta, grid){
   xValue(ws,23,5,"( ="); basisCell(23,5); xValue(ws,23,6, 0, {numFmt:'#,##0" 원"'}); xValue(ws,23,7,"-"); basisCell(23,7); xValue(ws,23,8, 0, {numFmt:'#,##0" 원"'});
   xValue(ws,24,3,"전월 미지급액"); xValue(ws,24,4, calc.adj.전월미지급액||0, moneyFmt);
   xValue(ws,24,5,"( ="); basisCell(24,5); xValue(ws,24,6, 0, {numFmt:'#,##0" 원"'}); xValue(ws,24,7,"-"); basisCell(24,7); xValue(ws,24,8, 0, {numFmt:'#,##0" 원"'});
-  xValue(ws,25,3,"기타정산"); xValue(ws,25,4, calc.adj.기타정산||0, moneyFmt);
+  xValue(ws,25,3, calc.penalty ? "기타정산·위약금" : "기타정산"); xValue(ws,25,4, (Number(calc.adj.기타정산)||0) + (calc.penalty||0), moneyFmt);
   xValue(ws,26,3,"지급금액"); xValue(ws,26,4, calc.payment ?? 0, moneyFmt);
   [17,19,22].forEach(r=> xStyle(ws,r,3,r,4,{font:{bold:true}}));
   xStyle(ws,26,3,26,8,{font:{bold:true, size:11}});

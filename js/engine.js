@@ -168,11 +168,12 @@
     const vatTotal = vat.energy + vat.network + vat.fee + vat.surcharge + vat.prevDiff;
     const taxInvoice = supplyAfter + vatTotal;
     const fund = E.floorTo((energy + netTotal + fee + expectedSurcharge) * rates.fundRate, -1);
-    const billTotal = cs.exempt + fund + pd.exempt;
+    const penalty = (ctx.penalty && ctx.penalty.amount) || 0; // 계약 위약금 (청구서 차감 방식) — 비과세 차감
+    const billTotal = cs.exempt + fund + pd.exempt - penalty;
     return {
       supplyTotal, energy, netByPlant: net, netTotal, fee, expectedSurcharge, fund,
       confirmedSurcharge: cs, prevDiff: pd, supplyBefore, supplyAfter, vat, vatTotal, taxInvoice,
-      exemptSubtotal: billTotal, grandTotal: taxInvoice + billTotal,
+      penalty, penaltyLabel: (ctx.penalty && ctx.penalty.label) || "", exemptSubtotal: billTotal, grandTotal: taxInvoice + billTotal,
       loss: { deficitSimple: match.totals.deficitSimple, deficitLoss: match.totals.deficitLoss }
     };
   };

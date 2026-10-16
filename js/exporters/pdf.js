@@ -216,7 +216,7 @@ async function drawInvoicePdf(doc, ctx){
   cell(23,5,5,null,"( ="); cell(23,6,6,null, pdfFmtWon(adj.전월차액)); cell(23,7,7,null,"-"); cell(23,8,8,null, pdfFmtWon(0));
   cell(24,3,3,null,"전월 미지급액"); value(24,4,4, pdfFmtWon(adj.전월미지급액));
   cell(24,5,5,null,"( ="); cell(24,6,6,null, pdfFmtWon(adj.전월미지급액)); cell(24,7,7,null,"-"); cell(24,8,8,null, pdfFmtWon(0));
-  cell(25,3,3,null,"기타정산"); value(25,4,4, pdfFmtWon(adj.기타정산));
+  cell(25,3,3,null, calc.penalty ? "기타정산·위약금" : "기타정산"); value(25,4,4, pdfFmtWon((Number(adj.기타정산)||0) + (calc.penalty||0)));
   cell(26,3,3,null,"지급금액",{bold:true,fontSize:11}); value(26,4,4, pdfFmtWon(calc.payment), {bold:true,fontSize:11}); value(26,5,8,null);
 
   // 정산정보

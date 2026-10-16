@@ -222,5 +222,6 @@ async function syncPerformanceToGas(){
   if(!plants.length || !settleMonth) return;
   const rows = plants.map(p=> ({ plant: p, generation: aggByPlant[p].generation, supply: aggByPlant[p].supply, excess: aggByPlant[p].excess }));
   await logPerformance(settleMonth, rows);
+  if(typeof refreshPerformance === "function") await refreshPerformance(); // 계약이행현황·위약금 갱신
   renderInvoicePreview();
 }

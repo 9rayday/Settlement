@@ -42,7 +42,9 @@ const PLANT_FORM = [
   { k: "연간보장공급량", label: "연간보장공급량 (kWh)", type: "number", calc: true },
   { k: "연간효율감소", label: "연간효율감소 (%/년)", type: "number" },
   { section: "위약금" },
-  { k: "위약금유형", label: "위약금 유형", type: "select", options: [["", "미정 (방식 정리 후 추가)"]] }
+  { k: "위약금유형", label: "위약금 유형", type: "select", options: [["", "미정"], ["단가", "미달량 × 위약금 단가"]] },
+  { k: "위약금단가", label: "위약금 단가 (원/kWh)", type: "number" },
+  { k: "위약금처리방식", label: "처리 방식", type: "select", options: [["", "선택"], ["직접 납부", "직접 납부"], ["청구서 차감", "청구서 청구 (전력대금에서 차감)"]] }
 ];
 const CUSTOMER_FORM = [
   { section: "소유자정보" },
@@ -77,7 +79,9 @@ const CUSTOMER_FORM = [
   { k: "연간보장공급량", label: "연간보장공급량 (kWh)", type: "number", calc: true },
   { k: "연간효율감소", label: "연간효율감소 (%/년)", type: "number" },
   { section: "위약금" },
-  { k: "위약금유형", label: "위약금 유형", type: "select", options: [["", "미정 (방식 정리 후 추가)"]] }
+  { k: "위약금유형", label: "위약금 유형", type: "select", options: [["", "미정"], ["단가", "미달량 × 위약금 단가"]] },
+  { k: "위약금단가", label: "위약금 단가 (원/kWh)", type: "number" },
+  { k: "위약금처리방식", label: "처리 방식", type: "select", options: [["", "선택"], ["직접 납부", "직접 납부"], ["청구서 차감", "청구서 청구 (전력대금에서 차감)"]] }
 ];
 
 const Registry = (function () {
@@ -124,9 +128,9 @@ const Registry = (function () {
 })();
 
 /* ---------- 화면: 정산관리 > 계약관리 (전기사용자 / 발전사업자 / 그룹화) ---------- */
-const regState = { openCust: null, openPlant: null, openGroup: null, month: "", pages: { cust: 1, plant: 1, group: 1 } };
+const regState = { openCust: null, openPlant: null, openGroup: null, month: "", pages: { cust: 1, plant: 1, group: 1, perfCust: 1, perfGen: 1 } };
 // 목록이 길면 페이지로 나눠 보여준다
-const PAGE_SIZE = { cust: 12, plant: 10, group: 8 };
+const PAGE_SIZE = { cust: 12, plant: 10, group: 8, perfCust: 10, perfGen: 10 };
 function pageSlice(kind, items) {
   const pages = Math.max(1, Math.ceil(items.length / PAGE_SIZE[kind]));
   const page = Math.min(Math.max(1, regState.pages[kind] || 1), pages);
@@ -449,6 +453,7 @@ async function deleteRegistry(kind, key, label, statusId) {
 // 등록 정보가 바뀌면 계약관리 화면과 정산 화면(그룹 이름·발전소 지역)을 다시 그린다
 function afterRegistryChange() {
   renderRegistry();
+  if (typeof renderPerfPages === "function") renderPerfPages();
   if (typeof renderAlerts === "function") renderAlerts();
   if (typeof renderBillingBody === "function") renderBillingBody();
   if (typeof refreshPlantSelect === "function" && typeof plants !== "undefined" && plants.length) refreshPlantSelect(); // 발전사업자 정산서 미리보기 갱신

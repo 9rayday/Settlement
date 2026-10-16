@@ -336,3 +336,24 @@ header.app{ padding:14px 24px; }
 .pager button.active{ background:#4A4A4A; border-color:#4A4A4A; color:#fff; }
 .pager button:disabled{ color:#B6BCC5; cursor:default; }
 .grid-wrap:has(> table.reg-table){ max-height:none; }
+
+/* ===== 계약이행현황 (js/performance.js) ===== */
+.perf-kpis{ display:grid; grid-template-columns:repeat(5, minmax(0, 1fr)); gap:10px; margin-bottom:16px; }
+.grid-wrap.perf-wrap{ max-height:none; }
+table.perf-table td, table.perf-years td{ vertical-align:middle; }
+table.perf-table th.num, table.perf-years th.num{ text-align:right; }
+tr.perf-row{ cursor:pointer; }
+tr.perf-row:hover td{ background:#F7F8FA; }
+tr.perf-row.active td{ background:#F1F3F5; }
+.perf-sub{ font-size:11.5px; color:var(--sub); margin-top:2px; }
+.perf-bar{ height:8px; background:#E5E7EB; border-radius:999px; overflow:hidden; }
+.perf-bar span{ display:block; height:100%; background:#6B7280; border-radius:999px; transition:width .3s; }
+.perf-badge{ display:inline-flex; padding:3px 10px; border-radius:999px; font-size:12px; font-weight:700; white-space:nowrap; }
+.perf-badge.ok{ background:#E3F3EA; color:#1E7A46; }
+.perf-badge.bad{ background:#FBE3E1; color:#B3423A; }
+.perf-badge.run{ background:#E5E7EB; color:#374151; }
+.perf-badge.wait{ background:#F3F4F6; color:#9CA3AF; }
+table.perf-years tr.yr-ok td{ background:#F1FAF4; }
+table.perf-years tr.yr-bad td{ background:#FDF1F0; }
+table.perf-years tr.yr-wait td{ color:#9CA3AF; }
+@media (max-width:1000px){ .perf-kpis{ grid-template-columns:repeat(2, minmax(0, 1fr)); } }

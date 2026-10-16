@@ -117,6 +117,7 @@ function doGet(e) {
     if (action === "getPerformanceHistory") return jsonOut_({ ok: true, data: getPerformanceHistory_(e.parameter.plant) });
     if (action === "getStoreAll") return jsonOut_({ ok: true, data: getStoreAll_() });
     if (action === "getCustomers") return jsonOut_({ ok: true, data: getCustomers_() });
+    if (action === "getPerformanceAll") return jsonOut_({ ok: true, data: getPerformanceAll_() });
     if (action === "getPerformanceMonth") return jsonOut_({ ok: true, data: getPerformanceMonth_(e.parameter.month) });
     if (action === "getYearlyGrid") return jsonOut_({ ok: true, data: getYearlyGrid_(e.parameter.plant) });
     return jsonOut_({ ok: false, error: "unknown action: " + action });
@@ -159,10 +160,10 @@ const MASTER_FIELDS = ["발전소명","사업자명(대표자명)","사업자등
   "담당자","수수료율","지역(요금구분)","배전연결","KPX신청번호",
   "사업자명","대표자명","이메일","발전기ID","변전소","한전고객번호",
   "정산방식","계약기간","연장가능여부","연장통보기한","연장통보마감일","비고",
-  "연간보장공급량","연간효율감소","위약금유형"];
+  "연간보장공급량","연간효율감소","위약금유형","위약금단가","위약금처리방식"];
 const CUSTOMER_FIELDS = ["수요기업명","대표자명","사업자등록번호","전기사용장소","담당자","연락처","이메일","수요지지역","계약단가","KPX신청번호","소비계약신청번호","계약일자","계약해지일",
   "정산방식","계약기간","연장가능여부","연장통보기한","연장통보마감일","비고",
-  "사용장소명","수요망","한전계약전력","한전고객번호","계약용량","연간보장시간","연간보장공급량","연간효율감소","위약금유형"];
+  "사용장소명","수요망","한전계약전력","한전고객번호","계약용량","연간보장시간","연간보장공급량","연간효율감소","위약금유형","위약금단가","위약금처리방식"];
 // 앞자리 0·하이픈이 숫자/날짜로 바뀌지 않도록 텍스트 서식으로 저장할 컬럼
 const TEXT_FIELDS = ["사업자등록번호","계좌번호","연락처","담당자","KPX신청번호","소비계약신청번호","발전기ID","한전고객번호"];
 
@@ -249,6 +250,13 @@ function getPerformanceMonth_(month) {
     out[String(r["발전소명"]).trim()] = { generation: gen, supply: supply, excess: gen - supply, loggedAt: r["기록일시"] };
   });
   return out;
+}
+
+// 전체 월별 실적 (계약이행현황: 연차별 실발전량·초과발전량 집계용)
+function getPerformanceAll_() {
+  return sheetToObjects_(getSheet_(SHEET_PERFORMANCE)).map(r => ({
+    month: String(r["정산월"]), plant: String(r["발전소명"]).trim(), generation: Number(r["발전량"]) || 0, supply: Number(r["공급량"]) || 0
+  }));
 }
 
 /* ============ Performance history (per plant, for 연간보장공급량 회차 계산) ============ */

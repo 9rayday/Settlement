@@ -79,10 +79,12 @@ function calcInvoice(plant){
   const vat2 = Math.round(fee*0.1);
   const subtotal2 = fee+vat2;
   const adj = adjustmentsByPlant[plant] || {전월차액:0,전월미지급액:0,기타정산:0};
+  // 계약 위약금 (연간보장공급량 미달, 처리 방식 "청구서 차감") — js/performance.js
+  const pen = (typeof penaltyDue === "function" && settleMonth) ? penaltyDue("gen", plant, settleMonth) : {amount:0, label:""};
   const payment = subtotal1!=null
-    ? subtotal1 - subtotal2 - (Number(adj.전월차액)||0) - (Number(adj.전월미지급액)||0) - (Number(adj.기타정산)||0)
+    ? subtotal1 - subtotal2 - (Number(adj.전월차액)||0) - (Number(adj.전월미지급액)||0) - (Number(adj.기타정산)||0) - pen.amount
     : null;
-  return { unitPrice, feeRate, supply, energyFee, supplyValue, vat1, subtotal1, fee, vat2, subtotal2, adj, payment };
+  return { unitPrice, feeRate, supply, energyFee, supplyValue, vat1, subtotal1, fee, vat2, subtotal2, adj, payment, penalty: pen.amount, penaltyLabel: pen.label };
 }
 
 /* ============ Tab 2: 발전소별 확인/조정 ============ */
@@ -203,6 +205,7 @@ async function buildInvoiceHtml(plant){
       <tr><td class="label">전월 미지급액</td><td class="num">${fmt(calc.adj.전월미지급액)} 원</td>
         <td class="basis">( =</td><td class="basis">${fmt(calc.adj.전월미지급액)} 원</td><td class="basis">-</td><td class="basis">0 원)</td></tr>
       <tr><td class="label">기타정산</td><td class="num">${fmt(calc.adj.기타정산)} 원</td><td></td><td></td><td></td><td></td></tr>
+      ${calc.penalty ? `<tr><td class="label">위약금 차감</td><td class="num">${fmt(calc.penalty)} 원</td><td class="basis" colspan="4">연간보장공급량 ${calc.penaltyLabel}</td></tr>` : ""}
       <tr class="pay"><td class="label">지급금액</td><td class="num" colspan="5">${calc.payment==null?'단가 입력 후 계산됩니다':fmt(calc.payment)+' 원'}</td></tr>
     </table>
     <table class="doc-table">

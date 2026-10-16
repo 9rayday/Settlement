@@ -211,7 +211,8 @@ function runCalc() {
     const ctx = {
       unitPrice: P.customer.unitPrice, demandRegion: P.customer.demandRegion, plants: P.plants,
       confirmedSurcharge: { taxable: Number($("cs_taxable").value) || 0, exempt: Number($("cs_exempt").value) || 0 },
-      prevDiff: { taxable: Number($("pd_taxable").value) || 0, exempt: Number($("pd_exempt").value) || 0 }
+      prevDiff: { taxable: Number($("pd_taxable").value) || 0, exempt: Number($("pd_exempt").value) || 0 },
+      penalty: typeof penaltyDue === "function" ? penaltyDue("cust", P.app, P.g.month) : null
     };
     const carry = Store.get(`carry:${P.g.month}:${P.app}`, null);
     if (carry && (ctx.confirmedSurcharge.taxable !== carry.confirmed.taxable || ctx.confirmedSurcharge.exempt !== carry.confirmed.exempt
@@ -252,6 +253,7 @@ function invoiceHtml(R) {
       ${row(R.month.slice(4).replace(/^0/, "") + "월 예상 부가정산금", won(inv.expectedSurcharge), `${kwhStr(inv.supplyTotal)} × ${rates.surcharge} 원/kWh, 익월 확정 후 청구 (※ 청구서 계에는 미포함, 기금 산정에만 사용)`)}
       ${row("전력산업기반기금 (비과세)", won(inv.fund), `(전력량요금+망이용요금+거래수수료+예상부가정산금) × ${(rates.fundRate * 100).toFixed(1)}%, 10원 미만 절사`)}
       ${row("전월 차액 (비과세)", won(inv.prevDiff.exempt), "전월 오차 정산서")}
+      ${inv.penalty ? row("위약금 차감", won(-inv.penalty), `연간보장공급량 ${esc(inv.penaltyLabel)}`) : ""}
       ${row("청구서 계", won(inv.exemptSubtotal), "", "total")}
       ${row("당월 청구 계", won(inv.grandTotal), "", "pay")}</table>
     <h3 class="sub">발전소별 망이용요금</h3>

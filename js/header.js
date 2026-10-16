@@ -30,6 +30,7 @@ function collectAlerts() {
   };
   Object.entries(Registry.plants()).forEach(([n, r]) => check("발전소", n, r));
   Registry.rawCustomers().forEach(r => check("전기사용자", r["수요기업명"], r));
+  if (typeof perfAlerts === "function") out.push(...perfAlerts()); // 연차 종료 30일 이내 미달 위험
   return out.sort((a, b) => a.d - b.d);
 }
 function renderAlerts() {

@@ -16,7 +16,7 @@ function initApp(){
 
   initBilling().catch(err=> console.error("[main] 수요기업 청구 모듈 초기화 실패:", err));
   // 발전소(마스터 = masterData)와 전기사용자 등록 정보를 함께 불러온다 (탭0)
-  initRegistry().catch(err=> console.error("[main] 등록 정보 조회 실패:", err));
+  initRegistry().then(()=> initPerformance()).catch(err=> console.error("[main] 등록 정보/계약이행현황 조회 실패:", err)); // 계약이행현황은 등록 정보가 있어야 계산
 }
 
 document.addEventListener("DOMContentLoaded", ()=>{
