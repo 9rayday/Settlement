@@ -196,7 +196,7 @@ button.btn.secondary.danger{ color:var(--danger); border-color:var(--danger); }
 
 /* ===== 사이드 메뉴 레이아웃 (js/nav.js) ===== */
 :root{ --side-bg:#26292E; --side-line:#363A41; --side-text:#B9BFC8; --side-dim:#868D97; --side-hover:#30343A; --side-w:248px; }
-.layout{ display:grid; grid-template-columns:var(--side-w) minmax(0, 1fr); min-height:calc(100vh - 72px); }
+.layout{ display:grid; grid-template-columns:minmax(240px, 30%) minmax(0, 70%); min-height:calc(100vh - 72px); } /* 사이드 메뉴 30% : 본문 70% */
 .sidebar{ background:var(--side-bg); color:var(--side-text); position:sticky; top:0; align-self:start; height:100vh; overflow-y:auto; padding-bottom:24px; }
 .side-toggle{ display:grid; grid-template-columns:1fr 1fr; border-bottom:1px solid var(--side-line); }
 .side-toggle button{ background:none; border:none; border-bottom:2px solid transparent; color:var(--side-dim); font:inherit; font-size:13.5px; font-weight:600; padding:15px 0 13px; cursor:pointer; }
@@ -217,8 +217,8 @@ button.btn.secondary.danger{ color:var(--danger); border-color:var(--danger); }
 .side-folder-btn .chev{ margin-left:auto; width:15px; height:15px; transition:transform .15s; }
 .side-folder:not(.open) > .side-sub{ display:none; }
 .side-folder:not(.open) > .side-folder-btn .chev{ transform:rotate(-90deg); }
-main.content{ max-width:none; margin:0; padding:22px 28px 40px; min-width:0; }
-main.content > *{ max-width:1180px; }
+main.content{ max-width:none; margin:0; padding:22px 40px 40px; min-width:0; }
+main.content > *{ max-width:1400px; margin-left:auto; margin-right:auto; } /* 본문 영역 안에서 가운데 정렬 → 양쪽 여백 동일 */
 .page{ display:none; }
 .page.active{ display:block; }
 .page-head{ margin:0 0 16px; }
