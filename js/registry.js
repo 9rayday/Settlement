@@ -5,24 +5,44 @@
 const GEN_REGIONS = ["비수도권", "수도권북", "수도권남", "제주"];
 const DEMAND_REGIONS = ["수도권", "비수도권", "제주"];
 
-// 화면 입력 항목 = 시트 컬럼명(k). req: 필수, type: text|number|date|select
+// 화면 입력 항목 = 시트 컬럼명(k). req: 필수, type: text|number|date|select|textarea|group, calc: 자동 계산(읽기 전용)
+// { section } 은 폼 안의 구분 제목. 기존 시트 컬럼(연락처·계약용량·계약일자·발전보장시간·배전연결)은 이름을 바꾸지 않고 라벨만 바꿔 쓴다.
 const PLANT_FORM = [
-  { k: "발전소명", label: "발전소명 (KPX 발전기명과 동일)", req: true },
-  { k: "지역(요금구분)", label: "지역 (송전요금 구분)", type: "select", options: GEN_REGIONS, req: true },
-  { k: "배전연결", label: "배전 연결", type: "select", options: ["N", "Y"] },
-  { k: "KPX신청번호", label: "그룹 (전기사용자 계약)", type: "group" },
-  { k: "사업자명(대표자명)", label: "사업자명 (대표자명)" },
+  { section: "소유자정보" },
+  { k: "사업자명", label: "사업자명" },
   { k: "사업자등록번호", label: "사업자등록번호" },
+  { k: "대표자명", label: "대표자명" },
+  { k: "이메일", label: "이메일" },
+  { k: "연락처", label: "전화번호" },
+  { k: "담당자", label: "담당자" },
   { k: "사업자주소", label: "사업자 주소", wide: true },
   { k: "계좌번호", label: "계좌번호" },
-  { k: "담당자", label: "담당자" },
-  { k: "연락처", label: "연락처" },
-  { k: "계약용량", label: "계약용량 (kW)", type: "number" },
-  { k: "발전보장시간", label: "발전보장시간 (h/일)", type: "number", placeholder: "3.4" },
-  { k: "계약단가", label: "매입 계약단가 (원/kWh)", type: "number" },
+  { section: "발전기정보" },
+  { k: "발전소명", label: "발전기명 (KPX 발전기명과 동일)", req: true },
+  { k: "발전기ID", label: "발전기ID" },
+  { k: "계약용량", label: "설비용량 (kW)", type: "number" },
+  { k: "배전연결", label: "발전망", type: "select", options: [["N", "송전망"], ["Y", "배전망"]] },
+  { k: "변전소", label: "변전소" },
+  { k: "한전고객번호", label: "한전고객번호" },
+  { k: "지역(요금구분)", label: "지역 (송전요금 구분)", type: "select", options: GEN_REGIONS, req: true },
+  { k: "KPX신청번호", label: "그룹 (전기사용자 계약)", type: "group" },
+  { section: "계약정보" },
+  { k: "정산방식", label: "정산방식" },
+  { k: "계약단가", label: "계약단가 (원/kWh)", type: "number" },
   { k: "수수료율", label: "거래수수료 (원/kWh)", type: "number", placeholder: "0.1193" },
-  { k: "계약일자", label: "계약일자", type: "date" },
-  { k: "계약해지일", label: "계약해지일", type: "date" }
+  { k: "계약기간", label: "계약기간 (년)", type: "number" },
+  { k: "계약일자", label: "계약시작일", type: "date" },
+  { k: "계약해지일", label: "계약해지일 (자동 계산)", type: "date", calc: true },
+  { k: "연장가능여부", label: "연장가능여부", type: "select", options: ["", "가능", "불가"] },
+  { k: "연장통보기한", label: "연장통보기한 (개월 전)", type: "number" },
+  { k: "연장통보마감일", label: "연장통보 마감일 (자동 계산)", type: "date", calc: true },
+  { k: "비고", label: "비고", type: "textarea", full: true },
+  { section: "연간보장공급" },
+  { k: "발전보장시간", label: "연간보장시간 (h/일)", type: "number", placeholder: "3.4" },
+  { k: "연간보장공급량", label: "연간보장공급량 (kWh, 참고=용량×시간×365)", type: "number" },
+  { k: "연간효율감소", label: "연간효율감소 (%/년)", type: "number" },
+  { section: "위약금" },
+  { k: "위약금유형", label: "위약금 유형", type: "select", options: [["", "미정 (방식 정리 후 추가)"]] }
 ];
 const CUSTOMER_FORM = [
   { k: "수요기업명", label: "수요기업명", req: true },
@@ -93,17 +113,56 @@ const custName = app => { const c = Registry.customerByApp(app); return c ? c.na
 
 function regFormHtml(form, rec, prefix) {
   return `<div class="reg-form">${form.map((f, i) => {
+    if (f.section) return `<div class="reg-section">${rEsc(f.section)}</div>`;
     const v = rec[f.k] == null ? "" : String(rec[f.k]);
-    const id = `${prefix}_${i}`;
+    const id = `${prefix}_${i}`, attrs = `id="${id}" data-k="${rEsc(f.k)}"`;
     let input;
-    if (f.type === "select") input = `<select id="${id}" data-k="${rEsc(f.k)}">${f.options.map(o => `<option${o === v ? " selected" : ""}>${o}</option>`).join("")}</select>`;
-    else if (f.type === "group") input = `<select id="${id}" data-k="${rEsc(f.k)}"><option value="">미연결</option>${Registry.rawCustomers().map(c => {
+    if (f.type === "select") input = `<select ${attrs}>${f.options.map(o => { const [val, lab] = Array.isArray(o) ? o : [o, o];
+        return `<option value="${rEsc(val)}"${val === v ? " selected" : ""}>${rEsc(lab || "선택")}</option>`; }).join("")}</select>`;
+    else if (f.type === "group") input = `<select ${attrs}><option value="">미연결</option>${Registry.rawCustomers().map(c => {
         const app = rStr(c["KPX신청번호"]); return `<option value="${rEsc(app)}"${app === v ? " selected" : ""}>${rEsc(app)} · ${rEsc(c["수요기업명"])}</option>`; }).join("")}
         ${v && !Registry.customerByApp(v) ? `<option value="${rEsc(v)}" selected>${rEsc(v)} (계약 미등록)</option>` : ""}</select>`;
-    else input = `<input id="${id}" data-k="${rEsc(f.k)}" type="${f.type || "text"}"${f.type === "number" ? ' step="any"' : ""} value="${rEsc(v)}" placeholder="${rEsc(f.placeholder || "")}">`;
-    return `<div class="reg-field${f.wide ? " wide" : ""}"><label for="${id}">${rEsc(f.label)}${f.req ? ' <span class="req">*</span>' : ""}</label>${input}</div>`;
+    else if (f.type === "textarea") input = `<textarea ${attrs} rows="3">${rEsc(v)}</textarea>`;
+    else input = `<input ${attrs} type="${f.type || "text"}"${f.type === "number" ? ' step="any"' : ""}${f.calc ? " readonly" : ""} value="${rEsc(v)}" placeholder="${rEsc(f.placeholder || "")}">`;
+    return `<div class="reg-field${f.wide ? " wide" : ""}${f.full ? " full" : ""}"><label for="${id}">${rEsc(f.label)}${f.req ? ' <span class="req">*</span>' : ""}</label>${input}</div>`;
   }).join("")}</div>`;
 }
+
+/* ----- 발전소 폼 자동 계산 ----- */
+function addMonthsYmd(ymd, months, dayOffset) { // 말일 넘침은 그 달 말일로
+  const [y, m, d] = ymd.split("-").map(Number);
+  const t = new Date(Date.UTC(y, m - 1 + months, 1));
+  const last = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + 1, 0)).getUTCDate();
+  t.setUTCDate(Math.min(d, last) + (dayOffset || 0));
+  return t.toISOString().slice(0, 10);
+}
+const YMD = /^\d{4}-\d{2}-\d{2}$/;
+// 계약해지일 = 시작일 + 계약기간 − 1일, 연장통보 마감일 = 해지일 − 통보기한(개월)
+function calcPlantFields(rec) {
+  const start = rStr(rec["계약일자"]), yrs = Number(rec["계약기간"]), notice = Number(rec["연장통보기한"]);
+  if (YMD.test(start) && yrs > 0) rec["계약해지일"] = addMonthsYmd(start, Math.round(yrs * 12), -1);
+  const end = rStr(rec["계약해지일"]);
+  rec["연장통보마감일"] = YMD.test(end) && notice > 0 ? addMonthsYmd(end, -notice, 0) : "";
+  return rec;
+}
+function bindPlantCalc(hostId) {
+  const host = r$(hostId), el = k => host.querySelector(`[data-k="${k}"]`);
+  const update = () => {
+    const rec = calcPlantFields({ "계약일자": el("계약일자").value, "계약기간": el("계약기간").value, "연장통보기한": el("연장통보기한").value, "계약해지일": el("계약해지일").value });
+    el("계약해지일").value = rec["계약해지일"] || ""; el("연장통보마감일").value = rec["연장통보마감일"];
+    const cap = Number(el("계약용량").value), h = Number(el("발전보장시간").value);
+    el("연간보장공급량").placeholder = cap > 0 && h > 0 ? `참고 ${Math.round(cap * h * 365).toLocaleString()}` : "";
+  };
+  ["계약일자", "계약기간", "연장통보기한", "계약용량", "발전보장시간"].forEach(k => el(k).addEventListener("input", update));
+  update();
+}
+// 발전사업자 정산서는 "사업자명(대표자명)" 한 칸을 쓰므로 저장할 때 합쳐 두고, 열 때는 나눠서 보여준다
+function splitOwnerName(raw) {
+  const comb = rStr(raw["사업자명(대표자명)"]);
+  if (!rStr(raw["사업자명"]) && comb) { const m = /^(.*?)\s*\((.*)\)\s*$/.exec(comb); raw["사업자명"] = m ? m[1] : comb; if (m && !rStr(raw["대표자명"])) raw["대표자명"] = m[2]; }
+  return raw;
+}
+const joinOwnerName = rec => rec["대표자명"] ? `${rec["사업자명"]}(${rec["대표자명"]})` : rec["사업자명"];
 function readRegForm(hostId, form) {
   const rec = {};
   r$(hostId).querySelectorAll("[data-k]").forEach(el => { rec[el.dataset.k] = el.value.trim(); });
@@ -182,13 +241,14 @@ function renderPlantPage() {
 function openPlant(name, keepScroll) {
   regState.openPlant = name; markActive(".reg-row", "plant", name);
   const isNew = !name;
-  const raw = isNew ? { "지역(요금구분)": "비수도권", "배전연결": "N" } : Object.assign({}, Registry.plants()[name]);
-  if (!isNew && rStr(raw["배전연결"]).toUpperCase() !== "Y") raw["배전연결"] = "N";
+  const raw = isNew ? { "지역(요금구분)": "비수도권", "배전연결": "N" } : splitOwnerName(Object.assign({}, Registry.plants()[name]));
+  raw["배전연결"] = rStr(raw["배전연결"]).toUpperCase() === "Y" ? "Y" : "N";
   r$("regPlantDetail").innerHTML = `<div class="reg-detail">
     <div class="reg-head"><h3 class="sub" style="margin:0">${isNew ? "새 발전소" : rEsc(name)}</h3><button class="btn secondary" id="regPlantClose">닫기</button></div>
     <div id="regPlantForm">${regFormHtml(PLANT_FORM, raw, "pf")}</div>
     <div class="row" style="margin-top:12px"><button class="btn accent" id="regPlantSave">저장</button>${isNew ? "" : '<button class="btn secondary danger" id="regPlantDel">삭제</button>'}<span id="regPlantStatus" class="status warn" style="background:none"></span></div>
   </div>`;
+  bindPlantCalc("regPlantForm");
   r$("regPlantClose").onclick = () => { regState.openPlant = null; markActive(".reg-row", "plant", null); r$("regPlantDetail").innerHTML = ""; };
   r$("regPlantSave").onclick = () => saveRegistry("plant", "regPlantForm", PLANT_FORM, name, "regPlantStatus");
   if (!isNew) r$("regPlantDel").onclick = () => deleteRegistry("plant", name, name, "regPlantStatus");
@@ -300,6 +360,7 @@ async function saveRegistry(kind, formId, form, originalKey, statusId) {
   const st = r$(statusId);
   let rec;
   try { rec = readRegForm(formId, form); } catch (e) { st.textContent = e.message; st.className = "status bad"; return; }
+  if (kind === "plant") { calcPlantFields(rec); rec["사업자명(대표자명)"] = joinOwnerName(rec); }
   st.textContent = "저장 중..."; st.className = "status warn";
   const r = await Registry.save(kind, rec, originalKey);
   if (!r.ok) { st.textContent = "저장 실패: " + r.error; st.className = "status bad"; return; }

@@ -175,6 +175,11 @@ h3.sub{ font-size:13px; color:var(--navy); margin:16px 0 6px; }
 .reg-field label{ font-size:12px; color:var(--sub); }
 .reg-field .req{ color:var(--danger); }
 .reg-field input, .reg-field select{ width:100%; min-width:0; box-sizing:border-box; padding:7px 9px; border:1px solid var(--line); border-radius:6px; font-size:13px; font-family:inherit; background:#fff; }
+.reg-section{ grid-column:1 / -1; font-size:13px; font-weight:700; color:var(--navy); padding:10px 0 2px; margin-top:4px; border-top:1px solid var(--line); }
+.reg-form > .reg-section:first-child{ border-top:none; margin-top:0; padding-top:0; }
+.reg-field.full{ grid-column:1 / -1; }
+.reg-field textarea{ width:100%; box-sizing:border-box; padding:7px 9px; border:1px solid var(--line); border-radius:6px; font-size:13px; font-family:inherit; resize:vertical; }
+.reg-field input[readonly]{ background:#F1F3F6; color:var(--sub); }
 .reg-group{ margin-top:18px; padding-top:14px; border-top:1px dashed var(--line); }
 table.reg-table tr.reg-row{ cursor:pointer; }
 table.reg-table tr.reg-row:hover td{ background:#F7F8FA; }
