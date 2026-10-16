@@ -127,16 +127,27 @@ table.doc-table tr.pay td{ font-weight:700; font-size:13.5px; }
   .note{ font-size:10px; }
 }
 
-/* ===== 수요기업 정산 모듈 (탭1 정산 구분, 탭4/5) ===== */
+/* ===== 수요기업 정산 모듈 (탭0 등록, 탭1 정산 구분, 탭4/5) ===== */
 .hint{ font-size:12px; color:var(--sub); margin:2px 0 8px; }
 h3.sub{ font-size:13px; color:var(--navy); margin:16px 0 6px; }
 .notice{ border-radius:8px; padding:10px 14px; margin:0 0 12px; font-size:12.5px; line-height:1.7; }
 .notice.warn{ background:#FFF6E5; border:1px solid #E8C27A; color:#6B4A0E; }
 .notice.bad{ background:#FDECEA; border:1px solid #E3A09A; color:var(--danger); }
-.mode-row{ display:flex; flex-wrap:wrap; align-items:center; gap:10px 16px; padding-bottom:12px; border-bottom:1px solid var(--line); }
-.mode-title{ font-weight:700; color:var(--navy); font-size:13px; }
-.mode-opt{ display:inline-flex; align-items:center; gap:6px; padding:6px 12px; border:1px solid var(--line); border-radius:999px; cursor:pointer; font-size:13px; background:#fff; }
-.mode-opt:has(input:checked){ border-color:var(--accent); color:var(--accent); font-weight:700; background:#FBEFE3; }
+/* 정산 구분: 회색 네모 박스, 선택하면 밝은 회색으로 활성화 */
+.mode-boxes{ display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; max-width:560px; }
+.mode-box{ position:relative; display:flex; flex-direction:column; gap:2px; padding:12px 16px; border-radius:4px; cursor:pointer;
+  background:#D9DCE1; border:1px solid #C3C8CF; color:#6B7280; transition:background .12s, border-color .12s, color .12s; }
+.mode-box input{ position:absolute; opacity:0; pointer-events:none; }
+.mode-box-title{ font-size:14px; font-weight:700; }
+.mode-box-desc{ font-size:11.5px; }
+.mode-box:hover{ background:#E3E6EA; }
+.mode-box:has(input:checked){ background:#F3F4F6; border-color:#4A4A4A; color:var(--ink); box-shadow:inset 0 0 0 1px #4A4A4A; }
+.mode-box:has(input:focus-visible){ outline:2px solid var(--accent); outline-offset:2px; }
+/* KPX / 사용량 업로드 박스 한 행에 */
+.upload-pair{ display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:16px; margin-top:6px; }
+.upload-col{ min-width:0; }
+.upload-status{ margin-top:8px; min-height:28px; }
+@media (max-width:720px){ .upload-pair, .mode-boxes{ grid-template-columns:1fr; } }
 .mode-badge{ display:inline-flex; padding:4px 12px; border-radius:999px; font-size:12.5px; font-weight:700; }
 .mode-badge.provisional{ background:#E6F5F1; color:var(--accent-2); }
 .mode-badge.trueup{ background:#FBEFE3; color:var(--accent); }
@@ -146,4 +157,31 @@ h3.sub{ font-size:13px; color:var(--navy); margin:16px 0 6px; }
 #tab4 table.grid input{ width:100%; box-sizing:border-box; }
 #tab4 table.grid select{ min-width:0; }
 #tab5 #billResult .doc{ background:#fff; border:1px solid var(--line); border-radius:10px; padding:20px 22px; margin-bottom:12px; }
+/* 탭0 등록 */
+.reg-head{ display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+.reg-head h2{ margin:0; }
+.reg-cards{ display:grid; grid-template-columns:repeat(auto-fill, minmax(230px, 1fr)); gap:10px; margin-top:6px; }
+.reg-card{ text-align:left; background:#fff; border:1px solid var(--line); border-radius:8px; padding:12px 14px; cursor:pointer; font:inherit; color:inherit; transition:border-color .12s, background .12s; }
+.reg-card:hover{ border-color:#9AA3AF; }
+.reg-card.active{ border-color:var(--accent); background:#FFFAF3; box-shadow:inset 0 0 0 1px var(--accent); }
+.reg-card-title{ font-weight:700; font-size:14px; }
+.reg-card-sub{ font-size:12px; color:var(--sub); margin-top:2px; }
+.reg-card-meta{ display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+.reg-card-meta span{ font-size:11.5px; background:#F1F3F6; border-radius:4px; padding:2px 7px; color:var(--sub); }
+.reg-detail{ margin-top:14px; border:1px solid var(--line); border-radius:8px; padding:16px; background:#FAFBFC; }
+.reg-form{ display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:10px 12px; margin-top:12px; }
+.reg-field{ display:flex; flex-direction:column; gap:5px; min-width:0; }
+.reg-field.wide{ grid-column:span 2; }
+.reg-field label{ font-size:12px; color:var(--sub); }
+.reg-field .req{ color:var(--danger); }
+.reg-field input, .reg-field select{ width:100%; min-width:0; box-sizing:border-box; padding:7px 9px; border:1px solid var(--line); border-radius:6px; font-size:13px; font-family:inherit; background:#fff; }
+.reg-group{ margin-top:18px; padding-top:14px; border-top:1px dashed var(--line); }
+table.reg-table tr.reg-row{ cursor:pointer; }
+table.reg-table tr.reg-row:hover td{ background:#F7F8FA; }
+table.reg-table tr.reg-row.active td{ background:#FFFAF3; }
+table.grid td.num{ text-align:right; font-variant-numeric:tabular-nums; }
+.tag{ display:inline-block; font-size:11px; padding:1px 6px; border-radius:4px; background:#EEF1F5; color:var(--sub); }
+.tag.bad{ background:#FDECEA; color:var(--danger); }
+button.btn.secondary.danger{ color:var(--danger); border-color:var(--danger); }
+@media (max-width:720px){ .reg-field.wide{ grid-column:auto; } }
 @media print{ .notice, #billActions{ display:none !important; } #tab4{ display:none !important; } }

@@ -1,29 +1,35 @@
 /* ============ Upload (drag & drop + file picker) ============ */
 function initUploadZone(){
-  const dropZone = document.getElementById("dropZone");
-  const fileInput = document.getElementById("dataFile");
+  bindDropZone("dropZone", "dataFile", routeKpxFile);
+  bindDropZone("amiDropZone", "amiFile", file=>{ if(typeof onAmiFile === "function") onAmiFile(file); });
+}
 
-  fileInput.addEventListener("change", e=>{
-    if(e.target.files[0]) routeKpxFile(e.target.files[0]);
+// 드래그&드롭 + 클릭 선택 영역. 같은 파일을 다시 골라도 change 가 일어나도록 처리 후 값을 비운다.
+function bindDropZone(zoneId, inputId, onFile){
+  const zone = document.getElementById(zoneId);
+  const input = document.getElementById(inputId);
+  if(!zone || !input) return;
+  input.addEventListener("change", e=>{
+    if(e.target.files[0]) onFile(e.target.files[0]);
+    e.target.value = "";
   });
-
   ["dragenter","dragover"].forEach(evt=>{
-    dropZone.addEventListener(evt, e=>{
+    zone.addEventListener(evt, e=>{
       e.preventDefault(); e.stopPropagation();
-      dropZone.classList.add("drag-over");
+      zone.classList.add("drag-over");
     });
   });
   ["dragleave","drop"].forEach(evt=>{
-    dropZone.addEventListener(evt, e=>{
+    zone.addEventListener(evt, e=>{
       e.preventDefault(); e.stopPropagation();
-      dropZone.classList.remove("drag-over");
+      zone.classList.remove("drag-over");
     });
   });
-  dropZone.addEventListener("drop", e=>{
+  zone.addEventListener("drop", e=>{
     const file = e.dataTransfer.files[0];
-    if(file) routeKpxFile(file);
+    if(file) onFile(file);
   });
-  dropZone.addEventListener("click", ()=> fileInput.click());
+  zone.addEventListener("click", ()=> input.click());
 }
 
 // KPX 직접전력거래량 파일 하나로 발전사업자 정산(탭2~3)과 수요기업 청구(탭5)를 함께 처리한다.

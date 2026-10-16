@@ -50,39 +50,53 @@
 </header>
 
 <nav class="tabs">
+  <button class="tab-btn" data-tab="tab0">0. 발전소/전기사용자 등록</button>
   <button class="tab-btn active" data-tab="tab1">1. 데이터 업로드</button>
   <button class="tab-btn" data-tab="tab2">2. 발전소별 확인/조정</button>
   <button class="tab-btn" data-tab="tab3">3. 정산서 생성/다운로드</button>
-  <button class="tab-btn" data-tab="tab4">4. 등록·요율</button>
+  <button class="tab-btn" data-tab="tab4">4. 요율 (KPX 통지)</button>
   <button class="tab-btn" data-tab="tab5">5. 수요기업 정산서</button>
 </nav>
 
 <main>
 
+  <!-- TAB 0 : 발전소 / 전기사용자 등록 (js/registry.js 가 내용을 채운다) -->
+  <div class="panel" id="tab0"></div>
+
   <!-- TAB 1 : UPLOAD -->
   <div class="panel active" id="tab1">
     <div class="card">
-      <div class="mode-row">
-        <span class="mode-title">정산 구분</span>
-        <label class="mode-opt"><input type="radio" name="settleMode" value="provisional" checked> 가정산</label>
-        <label class="mode-opt"><input type="radio" name="settleMode" value="trueup"> 오차정산 (확정)</label>
-        <span class="hint" id="modeHint" style="margin:0;"></span>
+      <h2>정산 구분</h2>
+      <div class="mode-boxes">
+        <label class="mode-box"><input type="radio" name="settleMode" value="provisional" checked>
+          <span class="mode-box-title">가정산</span><span class="mode-box-desc">월별 가정산서 작성</span></label>
+        <label class="mode-box"><input type="radio" name="settleMode" value="trueup">
+          <span class="mode-box-title">오차정산</span><span class="mode-box-desc">확정 데이터로 가정산과 비교 → 전월 차액</span></label>
       </div>
+      <p class="hint" id="modeHint" style="margin-top:8px;"></p>
 
-      <h3 class="sub">① KPX 직접전력거래량 (.xlsx)</h3>
-      <div class="drop-zone" id="dropZone">
-        <div class="drop-zone-text">드래그해서 파일을 놓거나 클릭해서 선택하세요</div>
-        <input type="file" id="dataFile" accept=".xlsx,.xls">
-      </div>
-      <div class="row" style="margin-top:10px;">
-        <span id="dataStatus" class="status warn" style="display:none;"></span>
-        <span id="kpxStatus" class="status warn" style="display:none;"></span>
-      </div>
-
-      <h3 class="sub">② 고객 전기사용량 15분 (.xls)</h3>
-      <div class="row">
-        <input type="file" id="amiFile" accept=".xls,.html,.htm">
-        <span id="amiStatus" class="status warn">미선택</span>
+      <div class="upload-pair">
+        <div class="upload-col">
+          <h3 class="sub">① KPX 직접전력거래량 (.xlsx)</h3>
+          <div class="drop-zone" id="dropZone">
+            <div class="drop-zone-text">드래그해서 파일을 놓거나 클릭해서 선택하세요</div>
+            <input type="file" id="dataFile" accept=".xlsx,.xls">
+          </div>
+          <div class="row upload-status">
+            <span id="dataStatus" class="status warn" style="display:none;"></span>
+            <span id="kpxStatus" class="status warn" style="display:none;"></span>
+          </div>
+        </div>
+        <div class="upload-col">
+          <h3 class="sub">② 전기사용량 15분 (.xls)</h3>
+          <div class="drop-zone" id="amiDropZone">
+            <div class="drop-zone-text">드래그해서 파일을 놓거나 클릭해서 선택하세요</div>
+            <input type="file" id="amiFile" accept=".xls,.html,.htm">
+          </div>
+          <div class="row upload-status">
+            <span id="amiStatus" class="status warn">미선택 (없으면 KPX 전기사용량 사용)</span>
+          </div>
+        </div>
       </div>
       <div class="kpi-grid" id="siteKpis" style="display:none;"></div>
     </div>
@@ -166,6 +180,7 @@
 <script src="js/engine.js"></script>
 <script src="js/parsers.js"></script>
 <script src="js/store.js"></script>
+<script src="js/registry.js"></script>
 <script src="js/auth.js"></script>
 <script src="js/upload.js"></script>
 <script src="js/invoice.js"></script>

@@ -75,12 +75,13 @@
     return { supplyByPlant, genByPlant, excessByPlant, byLoad, totals: tot };
   };
 
-  /* ---------- 1-b) 확정(오차정산) 매칭 ----------
-   * KPX 확정 파일의 재생E공급량(발전소·시간별)을 그대로 공급량으로 쓴다. 금액 계산(invoice)은 가정산과 같다.
+  /* ---------- 1-b) KPX 재생E공급량 기준 매칭 (가정산·오차정산 공통, 화면에서 사용) ----------
+   * KPX 파일의 재생E공급량(발전소·시간별)을 그대로 공급량으로 쓰고, 초과발전량 = 발전량 − 공급량.
+   * (1) matchMonth 의 min(사용량, 발전량) 방식은 8월 엑셀 검증(tests/engine.test.js)용으로 남겨둔다.
    * days: [{date, load, usage:[24]|null, gen:{plant:[24]}, supply:{plant:[24]}}]  반환 형태는 matchMonth 와 같다.
    * 사용량이 없는 시간은 사용량 = 공급량(부족 0)으로 본다.
    */
-  E.matchMonthConfirmed = function (days, rates) {
+  E.matchMonthKpx = function (days, rates) {
     const loss = (rates && rates.transLossRate != null) ? rates.transLossRate : E.DEFAULT_RATES.transLossRate;
     const supplyByPlant = {}, genByPlant = {}, excessByPlant = {};
     const byLoad = {};

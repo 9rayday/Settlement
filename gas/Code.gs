@@ -12,6 +12,9 @@
  * pickField_() 가 유연하게 매칭한다):
  *   발전소명, 사업자명(대표자명), 사업자등록번호, 사업자주소, 계좌번호, 연락처,
  *   계약용량(kW), 발전보장시간(h/일), 계약단가(원/kWh), 계약일자, 계약해지일
+ *   + (탭0 등록 화면에서 저장할 때 없으면 맨 끝에 자동 추가) 담당자, 수수료율, 지역(요금구분), 배전연결, KPX신청번호
+ *
+ * 전기사용자 시트("전기사용자 정보"): CUSTOMER_FIELDS. 탭0 등록 화면이 행 단위로 저장/삭제한다.
  *
  * ※ 고지서 PDF는 이제 GAS를 거치지 않고 프론트엔드(js/exporters/pdf.js)에서 jsPDF로 직접
  * 그린다 — 이 파일은 UrlFetchApp을 쓰지 않으므로 script.external_request 스코프도 불필요하다.
@@ -25,6 +28,7 @@ const SHEET_DASHBOARD = "대시보드";
 const SHEET_YEARLY_GRID = "실적그리드";
 const SHEET_ADMIN = "관리자";
 const SHEET_STORE = "앱데이터";
+const SHEET_CUSTOMERS = "전기사용자 정보";
 
 const ADJUSTMENTS_HEADERS = ["정산월","발전소명","전월차액","전월미지급액","기타정산","저장일시"];
 const PERFORMANCE_HEADERS = ["정산월","발전소명","발전량","공급량","초과발전량","기록일시"];
@@ -42,6 +46,7 @@ function setupSheets() {
   ensureSheet_(ss, SHEET_DASHBOARD, ["발전소명","계약용량","발전보장시간","구분"]);
   ensureSheet_(ss, SHEET_ADMIN, ADMIN_HEADERS);
   ensureSheet_(ss, SHEET_STORE, STORE_HEADERS);
+  ensureSheet_(ss, SHEET_CUSTOMERS, CUSTOMER_FIELDS);
   getYearlyGridSheet_();
 }
 
@@ -73,6 +78,7 @@ function getSheet_(name) {
   if (name === SHEET_DASHBOARD) return ensureSheet_(ss, name, ["발전소명","계약용량","발전보장시간","구분"]);
   if (name === SHEET_ADMIN) return ensureSheet_(ss, name, ADMIN_HEADERS);
   if (name === SHEET_STORE) return ensureSheet_(ss, name, STORE_HEADERS);
+  if (name === SHEET_CUSTOMERS) return ensureSheet_(ss, name, CUSTOMER_FIELDS);
   const sheet = findSheetFuzzy_(ss, name);
   if (!sheet) {
     const actual = ss.getSheets().map(s => s.getName()).join(", ");
@@ -109,6 +115,8 @@ function doGet(e) {
     if (action === "getAdjustments") return jsonOut_({ ok: true, data: getAdjustments_(e.parameter.month, e.parameter.plant) });
     if (action === "getPerformanceHistory") return jsonOut_({ ok: true, data: getPerformanceHistory_(e.parameter.plant) });
     if (action === "getStoreAll") return jsonOut_({ ok: true, data: getStoreAll_() });
+    if (action === "getCustomers") return jsonOut_({ ok: true, data: getCustomers_() });
+    if (action === "getPerformanceMonth") return jsonOut_({ ok: true, data: getPerformanceMonth_(e.parameter.month) });
     if (action === "getYearlyGrid") return jsonOut_({ ok: true, data: getYearlyGrid_(e.parameter.plant) });
     return jsonOut_({ ok: false, error: "unknown action: " + action });
   } catch (err) {
@@ -123,6 +131,10 @@ function doPost(e) {
     if (action === "saveAdjustments") return jsonOut_({ ok: true, data: saveAdjustments_(body) });
     if (action === "logPerformance") return jsonOut_({ ok: true, data: logPerformance_(body) });
     if (action === "saveStore") return jsonOut_({ ok: true, data: saveStore_(body) });
+    if (action === "savePlant") return jsonOut_({ ok: true, data: upsertRegistryRow_(getSheet_(SHEET_MASTER), MASTER_FIELDS, "발전소명", body.record, body.originalKey) });
+    if (action === "deletePlant") return jsonOut_({ ok: true, data: deleteRegistryRow_(getSheet_(SHEET_MASTER), "발전소명", body.key) });
+    if (action === "saveCustomer") return jsonOut_({ ok: true, data: upsertRegistryRow_(getSheet_(SHEET_CUSTOMERS), CUSTOMER_FIELDS, "KPX신청번호", body.record, body.originalKey) });
+    if (action === "deleteCustomer") return jsonOut_({ ok: true, data: deleteRegistryRow_(getSheet_(SHEET_CUSTOMERS), "KPX신청번호", body.key) });
     if (action === "login") return jsonOut_({ ok: true, data: login_(body) });
     return jsonOut_({ ok: false, error: "unknown action: " + action });
   } catch (err) {
@@ -142,7 +154,11 @@ function pickField_(row, canonical) {
   return key !== undefined ? row[key] : undefined;
 }
 
-const MASTER_FIELDS = ["발전소명","사업자명(대표자명)","사업자등록번호","사업자주소","계좌번호","연락처","계약용량","발전보장시간","계약단가","계약일자","계약해지일"];
+const MASTER_FIELDS = ["발전소명","사업자명(대표자명)","사업자등록번호","사업자주소","계좌번호","연락처","계약용량","발전보장시간","계약단가","계약일자","계약해지일",
+  "담당자","수수료율","지역(요금구분)","배전연결","KPX신청번호"];
+const CUSTOMER_FIELDS = ["수요기업명","대표자명","사업자등록번호","전기사용장소","담당자","연락처","이메일","수요지지역","계약단가","KPX신청번호","소비계약신청번호","계약일자","계약해지일"];
+// 앞자리 0·하이픈이 숫자/날짜로 바뀌지 않도록 텍스트 서식으로 저장할 컬럼
+const TEXT_FIELDS = ["사업자등록번호","계좌번호","연락처","담당자","KPX신청번호","소비계약신청번호"];
 
 // Date 셀은 JSON.stringify가 UTC로 변환하면서 자정 근처 날짜가 하루 밀릴 수 있어
 // 스프레드시트 타임존 기준 "yyyy-MM-dd" 문자열로 먼저 고정한다.
@@ -161,6 +177,72 @@ function getMaster_() {
     if (key) byPlant[key] = out;
   });
   return byPlant;
+}
+
+/* ============ 등록 정보 (탭0: 발전소 / 전기사용자) ============ */
+function getCustomers_() {
+  return sheetToObjects_(getSheet_(SHEET_CUSTOMERS)).map(r => {
+    const out = {};
+    CUSTOMER_FIELDS.forEach(f => out[f] = formatDateField_(pickField_(r, f)));
+    return out;
+  }).filter(c => String(c["KPX신청번호"] || "").trim() || String(c["수요기업명"] || "").trim());
+}
+
+// 한 행 저장(upsert). 헤더는 공백/괄호를 무시하고 매칭하고, 없는 컬럼은 맨 끝에 추가한다.
+// 시트에 수기로 만든 다른 컬럼 값은 건드리지 않는다. originalKey 가 있으면 그 행을 수정(키 변경 포함), 없으면 새로 추가.
+function upsertRegistryRow_(sheet, fields, keyField, record, originalKey) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    record = record || {};
+    let header = sheet.getLastColumn() ? sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String) : [];
+    const colOf = f => header.findIndex(h => normalizeKey_(h) === normalizeKey_(f));
+    const missing = fields.filter(f => colOf(f) < 0);
+    if (missing.length) {
+      sheet.getRange(1, header.length + 1, 1, missing.length).setValues([missing]).setFontWeight("bold");
+      header = header.concat(missing);
+    }
+    const key = String(record[keyField] == null ? "" : record[keyField]).trim();
+    if (!key) throw new Error(keyField + "을(를) 입력하세요.");
+    record[keyField] = key;
+    const keyCol = colOf(keyField) + 1, lastRow = sheet.getLastRow();
+    const keys = lastRow > 1 ? sheet.getRange(2, keyCol, lastRow - 1, 1).getValues().map(r => String(r[0]).trim()) : [];
+    const rowOf = k => { const i = keys.indexOf(k); return i < 0 ? -1 : i + 2; };
+    const orig = String(originalKey || "").trim();
+    if (rowOf(key) > 0 && key !== orig) throw new Error("이미 등록된 " + keyField + "입니다: " + key);
+    let row = orig ? rowOf(orig) : -1;
+    if (row < 0) row = lastRow + 1;
+    const values = row <= lastRow ? sheet.getRange(row, 1, 1, header.length).getValues()[0] : new Array(header.length).fill("");
+    fields.forEach(f => { if (record[f] !== undefined) values[colOf(f)] = record[f]; });
+    TEXT_FIELDS.forEach(f => { const c = colOf(f); if (c >= 0 && fields.indexOf(f) >= 0) sheet.getRange(row, c + 1).setNumberFormat("@"); });
+    sheet.getRange(row, 1, 1, header.length).setValues([values]);
+    return { saved: true, key: key };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function deleteRegistryRow_(sheet, keyField, key) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const found = sheetToObjects_(sheet).find(r => String(pickField_(r, keyField)).trim() === String(key || "").trim());
+    if (!found) throw new Error("삭제할 항목을 찾지 못했습니다: " + key);
+    sheet.deleteRow(found._row);
+    return { deleted: true };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// 정산월의 발전소별 실적 (탭0 그룹 월별 집계). 초과발전량은 발전량 − 공급량으로 계산한다.
+function getPerformanceMonth_(month) {
+  const out = {};
+  sheetToObjects_(getSheet_(SHEET_PERFORMANCE)).filter(r => String(r["정산월"]) === String(month)).forEach(r => {
+    const gen = Number(r["발전량"]) || 0, supply = Number(r["공급량"]) || 0;
+    out[String(r["발전소명"]).trim()] = { generation: gen, supply: supply, excess: gen - supply, loggedAt: r["기록일시"] };
+  });
+  return out;
 }
 
 /* ============ Performance history (per plant, for 연간보장공급량 회차 계산) ============ */

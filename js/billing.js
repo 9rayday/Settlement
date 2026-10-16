@@ -1,11 +1,9 @@
 /* ============ 수요기업 정산 모듈 UI (가정산서 / 오차정산서) ============
  * 탭1: 정산 구분 선택 + KPX 직접전력거래량·고객 사용량 업로드 (upload.js 가 onKpxFile 호출)
- * 탭4: 월별 요율 / 발전소 / 수요기업 계약 등록   탭5: 가정산서 계산·저장, 또는 오차정산(가정산과 비교 → 다음 달로 이월)
+ * 탭4: 월별 요율 (발전소·전기사용자 등록은 탭0, js/registry.js)   탭5: 가정산서 계산·저장, 또는 오차정산(가정산과 비교 → 다음 달로 이월)
  * 계산은 js/engine.js, 파일 해석은 js/parsers.js. 여기서는 화면과 저장만 다룬다.
  */
 const INVOICE_PREFIX = "200005"; // 수요기업 청구서 번호 접두 (발전사업자 정산서는 BUYER.invoicePrefix)
-const GEN_REGIONS = ["비수도권", "수도권북", "수도권남", "제주"];
-const DEMAND_REGIONS = ["수도권", "비수도권", "제주"];
 
 const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const won = n => (n == null || isNaN(n)) ? "-" : Math.round(n).toLocaleString() + " 원";
@@ -64,72 +62,9 @@ async function saveRates() {
   $("rt_status").textContent = where === "remote" ? "저장 완료 (구글시트)" : "이 브라우저에만 저장됨 (GAS 연결 확인 필요)";
 }
 
-/* ---------- 발전소 / 계약 등록 ---------- */
-function plantRow(name, p) {
-  return `<tr><td><input class="pl_name" value="${esc(name)}"></td>
-    <td><select class="pl_region">${GEN_REGIONS.map(g => `<option${g === p.region ? " selected" : ""}>${g}</option>`).join("")}</select></td>
-    <td style="text-align:center"><input type="checkbox" class="pl_dist"${p.distConnected ? " checked" : ""}></td>
-    <td><input type="number" class="pl_price" value="${p.buyPrice == null ? "" : p.buyPrice}" style="width:90px"></td>
-    <td><input class="pl_app" value="${esc(p.appNo || "")}" placeholder="26-PR00000"></td>
-    <td><button class="btn secondary pl_del">삭제</button></td></tr>`;
-}
-function renderPlantsCard() {
-  const plants = Store.get("plants", {});
-  $("plantsBody").innerHTML = `<table class="grid"><tr><th>발전기명 (KPX 파일과 동일)</th><th>지역(요금구분)</th><th>배전연결</th><th>발전사업자 매입단가(원/kWh)</th><th>KPX 신청번호(그룹)</th><th></th></tr>
-    ${Object.keys(plants).map(n => plantRow(n, plants[n])).join("")}</table>
-    <div class="row" style="margin-top:8px"><button class="btn secondary" id="pl_add">+ 발전소 추가</button><button class="btn accent" id="pl_save">발전소 저장</button><span id="pl_status" class="status warn" style="background:none"></span></div>`;
-  const tbl = $("plantsBody").querySelector("table");
-  $("pl_add").onclick = () => { tbl.insertAdjacentHTML("beforeend", plantRow("", { region: "비수도권" })); bindPlantDel(); };
-  $("pl_save").onclick = savePlants;
-  bindPlantDel();
-}
-function bindPlantDel() { $("plantsBody").querySelectorAll(".pl_del").forEach(b => b.onclick = () => b.closest("tr").remove()); }
-async function savePlants() {
-  const out = {};
-  $("plantsBody").querySelectorAll("tr").forEach(tr => {
-    const n = tr.querySelector(".pl_name"); if (!n || !n.value.trim()) return;
-    const pr = tr.querySelector(".pl_price").value;
-    out[n.value.trim()] = { region: tr.querySelector(".pl_region").value, distConnected: tr.querySelector(".pl_dist").checked,
-      buyPrice: pr === "" ? null : Number(pr), appNo: tr.querySelector(".pl_app").value.trim() };
-  });
-  const where = await Store.set("plants", out);
-  $("pl_status").textContent = (where === "remote" ? "저장 완료 (구글시트) " : "이 브라우저에만 저장됨 ") + Object.keys(out).length + "개";
-}
-
-const CUST_FIELDS = [["name", "수요기업명"], ["bizNo", "사업자등록번호"], ["address", "전기사용장소"], ["manager", "담당자"], ["contact", "연락처"],
-  ["demandRegion", "수요지 지역"], ["unitPrice", "계약 단가(원/kWh)"], ["appNo", "KPX 신청번호(그룹키)"], ["consumeAppNo", "소비계약 신청번호"]];
-function custRow(c) {
-  return `<tr>${CUST_FIELDS.map(([k]) => k === "demandRegion"
-    ? `<td><select data-k="${k}">${DEMAND_REGIONS.map(g => `<option${g === c[k] ? " selected" : ""}>${g}</option>`).join("")}</select></td>`
-    : `<td><input data-k="${k}" value="${esc(c[k])}"${k === "unitPrice" ? ' type="number" style="width:80px"' : ""}></td>`).join("")}
-    <td><button class="btn secondary c_del">삭제</button></td></tr>`;
-}
-function renderCustomersCard() {
-  const list = Store.get("customers", []);
-  $("custBody").innerHTML = `<div class="grid-wrap"><table class="grid"><tr>${CUST_FIELDS.map(([, l]) => `<th>${l}</th>`).join("")}<th></th></tr>${list.map(custRow).join("")}</table></div>
-    <div class="row" style="margin-top:8px"><button class="btn secondary" id="c_add">+ 수요기업 추가</button><button class="btn accent" id="c_save">수요기업 저장</button><span id="c_status" class="status warn" style="background:none"></span></div>`;
-  const tbl = $("custBody").querySelector("table");
-  $("c_add").onclick = () => { tbl.insertAdjacentHTML("beforeend", custRow({ demandRegion: "비수도권" })); bindCustDel(); };
-  $("c_save").onclick = saveCustomers;
-  bindCustDel();
-}
-function bindCustDel() { $("custBody").querySelectorAll(".c_del").forEach(b => b.onclick = () => b.closest("tr").remove()); }
-async function saveCustomers() {
-  const list = [];
-  $("custBody").querySelectorAll("tr").forEach(tr => {
-    const c = {}; tr.querySelectorAll("[data-k]").forEach(el => { c[el.dataset.k] = el.value.trim(); });
-    if (!c.name) return;
-    c.unitPrice = Number(c.unitPrice); list.push(c);
-  });
-  const dup = list.map(c => c.appNo).filter((a, i, arr) => a && arr.indexOf(a) !== i);
-  if (dup.length) { $("c_status").textContent = "신청번호가 중복됩니다: " + dup.join(", "); return; }
-  const where = await Store.set("customers", list);
-  $("c_status").textContent = (where === "remote" ? "저장 완료 (구글시트) " : "이 브라우저에만 저장됨 ") + list.length + "건";
-}
-
 /* ---------- 정산 구분 (탭1 라디오: 가정산 / 오차정산) ---------- */
 const MODE_LABEL = { provisional: "가정산", trueup: "오차정산" };
-const custByApp = app => Store.get("customers", []).find(c => c.appNo === app);
+const custByApp = app => Registry.customerByApp(app);
 const monthLabel = m => `${m.slice(0, 4)}.${m.slice(4)}`;
 const monthKo = m => `${m.slice(0, 4)}년 ${Number(m.slice(4))}월`;
 function prevYm(m) { let y = Number(m.slice(0, 4)), mo = Number(m.slice(4)) - 1; if (!mo) { y--; mo = 12; } return `${y}${String(mo).padStart(2, "0")}`; }
@@ -139,8 +74,8 @@ function getSettleMode() { const r = document.querySelector('input[name="settleM
 
 function updateModeHint() {
   $("modeHint").textContent = getSettleMode() === "trueup"
-    ? "KPX 확정 파일과 사용량 파일을 다시 올리세요. 공급량은 KPX 재생E공급량을 쓰고, 저장된 가정산과 비교해 전월 차액을 만듭니다."
-    : "월별 가정산서를 만듭니다. 공급량 = 시간별 min(사용량, 발전량).";
+    ? "KPX 확정 파일과 사용량 파일을 다시 올리세요. 저장된 가정산과 비교해 전월 차액을 만듭니다."
+    : "월별 가정산서를 만듭니다.";
 }
 
 // 가정산 파일로 오차정산을 계산하는 실수를 막기 위해, 구분을 바꾸면 수요기업 쪽 업로드를 비우고 다시 올리게 한다.
@@ -172,6 +107,8 @@ async function onKpxFile(file) {
     st.textContent = `수요기업 ${MODE_LABEL[getSettleMode()]}: 그룹(신청번호) ${apps.length}개` + (unknown ? ` · 미등록 ${unknown}개` : "");
     st.className = "status ok";
     renderBillingBody();
+    // 탭0에서 이 그룹을 열어두었으면 업로드한 달의 집계로 갱신
+    if (regState.openCust && parsed.groups[regState.openCust]) { regState.month = parsed.groups[regState.openCust].month; renderRegistryTab(); }
   } catch (e) { billState.kpx = null; st.textContent = "수요기업: " + e.message; st.className = "status bad"; renderBillingBody(); }
 }
 
@@ -226,7 +163,7 @@ function renderBillingBody() {
     return;
   }
   const apps = Object.keys(billState.kpx.groups);
-  const usageNote = billState.ami ? `사용량: ${esc(billState.amiName)}` : (trueUp ? "사용량 파일 없음 → KPX 전기사용량 사용" : "사용량 파일 없음 → 발전량 전량 공급으로 계산");
+  const usageNote = billState.ami ? `사용량: ${esc(billState.amiName)}` : "사용량 파일 없음 → KPX 전기사용량 사용";
   host.innerHTML = `
     <div class="card"><div class="row"><span class="mode-badge ${mode}">${MODE_LABEL[mode]}</span>
       <label>그룹(신청번호)</label><select id="groupSel" style="min-width:380px">${apps.map(a => {
@@ -284,14 +221,33 @@ function prepareGroup(err, warn) {
   if (!billState.kpx) throw new Error("[1. 데이터 업로드]에서 KPX 직접전력거래량 파일을 먼저 올리세요.");
   const app = $("groupSel").value, g = billState.kpx.groups[app];
   const customer = custByApp(app);
-  if (!customer) err.push(`신청번호 ${app} 에 해당하는 수요기업 계약이 없습니다. [4. 등록·요율]에서 수요기업을 등록하세요.`);
-  const plantReg = Store.get("plants", {});
-  const unreg = Object.keys(g.plants).filter(p => !plantReg[p]);
-  if (unreg.length) err.push("등록되지 않은 발전소: " + unreg.join(", ") + " → [4. 등록·요율]에서 지역(요금구분)을 지정하세요.");
+  if (!customer) err.push(`신청번호 ${app} 에 해당하는 전기사용자 계약이 없습니다. [0. 발전소/전기사용자 등록]에서 등록하세요.`);
+  const unreg = Object.keys(g.plants).filter(p => { const i = Registry.plantInfo(p); return !i || !i.region; });
+  if (unreg.length) err.push("등록되지 않았거나 지역이 비어 있는 발전소: " + unreg.join(", ") + " → [0. 발전소/전기사용자 등록]에서 등록하세요.");
   const { rates, source } = ratesFor(g.month);
   if (!Store.get("rates:" + g.month, null)) warn.push(`${g.month} 요율이 저장되어 있지 않아 ${source}을 사용했습니다.`);
-  const plants = {}; Object.keys(g.plants).forEach(p => plants[p] = plantReg[p]);
-  return { app, g, customer, rates, plants, days: Parsers.buildDays(g, billState.ami) };
+  const plants = {}; Object.keys(g.plants).forEach(p => plants[p] = Registry.plantInfo(p));
+  const days = Parsers.buildDays(g, billState.ami);
+  // 사용량은 부하구분별 사용량·부족전력량 표시에만 쓴다 (공급량은 KPX 재생E공급량). 파일이 없거나 빈 시간은 KPX 전기사용량으로.
+  if (billState.ami) {
+    const miss = Parsers.missingDates(g.month, billState.ami.dates);
+    if (miss.length) warn.push(`사용량 파일에 없는 날짜 ${miss.length}일 — 해당일은 KPX 전기사용량으로 표시합니다. (공급량·금액에는 영향 없음)`);
+    billState.ami.warnings.filter(w => /합계 불일치|96칸/.test(w)).forEach(w => warn.push(w));
+    days.forEach(d => {
+      if (!d.usage) { d.usage = d.kpxUsage; return; }
+      if (d.kpxUsage) d.usage = d.usage.map((v, h) => v == null ? d.kpxUsage[h] : v);
+    });
+  } else {
+    days.forEach(d => { d.usage = d.kpxUsage; });
+    warn.push("고객 사용량 파일이 없어 KPX 파일의 전기사용량으로 표시했습니다. (공급량·금액에는 영향 없음)");
+  }
+  return { app, g, customer, rates, plants, days };
+}
+// 공급량 = KPX 재생E공급량 (가정산·오차정산 공통), 초과발전량 = 발전량 − 공급량
+function matchKpx(P, warn) {
+  const m = Engine.matchMonthKpx(P.days, P.rates);
+  if (!m.totals.supply) warn.push("KPX 재생E공급량 합계가 0입니다. 파일이 맞는지 확인하세요.");
+  return m;
 }
 const noticeHtml = (list, cls) => list.length ? `<div class="notice ${cls}">${list.map(esc).join("<br>")}</div>` : "";
 
@@ -301,15 +257,7 @@ function runCalc() {
   try {
     const P = prepareGroup(err, warn);
     if (err.length) { out.innerHTML = noticeHtml(err, "bad"); return; }
-    if (billState.ami) {
-      const miss = Parsers.missingDates(P.g.month, billState.ami.dates);
-      if (miss.length) warn.push(`사용량 파일에 없는 날짜 ${miss.length}일 (${miss.join(", ")}) — 해당일은 발전량 전량 공급으로 간주되어 공급량이 과대할 수 있습니다.`);
-      P.days.filter(d => d.usage && d.gaps.length).forEach(d => warn.push(`${d.date}: 사용량 미수신 ${d.gaps.length}시간 (${d.gaps.map(h => h + "시").join(", ")}) — 해당 시간은 발전량 전량 공급으로 간주됩니다.`));
-      billState.ami.warnings.filter(w => /합계 불일치|96칸/.test(w)).forEach(w => warn.push(w));
-    } else {
-      warn.push("고객 사용량 파일이 없어 전기사용량 = 발전량(전량 공급)으로 계산했습니다 (엑셀 가정산 방식).");
-    }
-    const match = Engine.matchMonth(P.days, P.rates);
+    const match = matchKpx(P, warn);
     const ctx = {
       unitPrice: P.customer.unitPrice, demandRegion: P.customer.demandRegion, plants: P.plants,
       confirmedSurcharge: { taxable: Number($("cs_taxable").value) || 0, exempt: Number($("cs_exempt").value) || 0 },
@@ -396,7 +344,7 @@ function exportBillExcel() {
 }
 
 /* ---------- 오차정산 ----------
- * 같은 달을 KPX 확정 파일(재생E공급량)로 다시 계산해 저장된 가정산(bill:)과 전력량요금·망이용요금·거래수수료를 비교한다.
+ * 같은 달을 KPX 확정 파일로 다시 계산해 저장된 가정산(bill:)과 전력량요금·망이용요금·거래수수료를 비교한다.
  * 확정 부가정산금(과세/비과세)과 차액(과세/비과세)을 carry:<다음달>:<신청번호> 로 저장 → 다음 달 가정산서에 자동으로 들어간다.
  * 시스템 밖(엑셀)에서 만든 가정산은 비교 기준 값을 직접 입력한다.
  */
@@ -450,19 +398,7 @@ function runTrueUp() {
     const prov = readProvisional(P.g.month, P.app);
     if (!prov) err.push("가정산 값(공급량·전력량요금·망이용요금·거래수수료)을 모두 입력하세요.");
     if (err.length) { out.innerHTML = noticeHtml(err, "bad"); return; }
-    if (billState.ami) {
-      const miss = Parsers.missingDates(P.g.month, billState.ami.dates);
-      if (miss.length) warn.push(`사용량 파일에 없는 날짜 ${miss.length}일 — 해당일은 KPX 전기사용량으로 표시합니다. (공급량·금액에는 영향 없음)`);
-      P.days.forEach(d => {
-        if (!d.usage) { d.usage = d.kpxUsage; return; }
-        if (d.kpxUsage) d.usage = d.usage.map((v, h) => v == null ? d.kpxUsage[h] : v); // 미수신 시간은 KPX 값으로
-      });
-    } else {
-      P.days.forEach(d => { d.usage = d.kpxUsage; });
-      warn.push("고객 사용량 파일이 없어 KPX 파일의 전기사용량으로 표시했습니다. (공급량·금액에는 영향 없음)");
-    }
-    const match = Engine.matchMonthConfirmed(P.days, P.rates);
-    if (!match.totals.supply) warn.push("KPX 재생E공급량 합계가 0입니다. 확정 파일이 맞는지 확인하세요.");
+    const match = matchKpx(P, warn);
     const conf = Engine.invoice(match, { unitPrice: P.customer.unitPrice, demandRegion: P.customer.demandRegion, plants: P.plants }, P.rates);
     const diff = Engine.trueUpDiff(prov, conf);
     setVal("pd_taxable", diff.taxable); // 비교 결과로 채움 (직접 고친 값은 다시 계산하면 덮어씀)
@@ -560,20 +496,16 @@ function exportTrueUpExcel() {
 
 /* ---------- 초기화 ---------- */
 function renderBillingTabs() {
-  $("tab4").innerHTML = `
-    <div class="card"><h2>월별 요율 (KPX 통지서)</h2><div id="ratesBody"></div></div>
-    <div class="card"><h2>발전소 등록</h2><p class="hint">발전기명은 KPX 직접전력거래량 파일의 "발전기명"과 정확히 같아야 합니다. 지역은 최초 등록 시 한 번만 지정합니다.</p><div id="plantsBody"></div></div>
-    <div class="card"><h2>수요기업 계약</h2><p class="hint">KPX 신청번호가 같은 발전소들이 한 그룹입니다. 신청번호로 업로드 파일과 수요기업이 자동으로 연결됩니다.</p><div id="custBody"></div></div>`;
+  $("tab4").innerHTML = `<div class="card"><h2>월별 요율 (KPX 통지서)</h2><div id="ratesBody"></div></div>`;
   $("tab5").innerHTML = `<div id="billBody"></div>`;
 }
 
 async function initBilling() {
   renderBillingTabs();
   document.querySelectorAll('input[name="settleMode"]').forEach(r => r.addEventListener("change", onModeChange));
-  $("amiFile").addEventListener("change", e => e.target.files[0] && onAmiFile(e.target.files[0]));
   updateModeHint(); renderBillingBody();
   const ok = await Store.load();
   if (!ok) console.warn("[billing] GAS 앱데이터를 불러오지 못해 이 브라우저의 저장값만 사용합니다.");
   const m = new Date(); const cur = `${m.getFullYear()}${String(m.getMonth() + 1).padStart(2, "0")}`;
-  renderRatesCard(cur); renderPlantsCard(); renderCustomersCard(); renderBillingBody();
+  renderRatesCard(cur); renderBillingBody();
 }

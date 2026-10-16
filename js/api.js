@@ -83,6 +83,23 @@ async function login(id, pw){
   }
 }
 
+// 저장/삭제처럼 실패 사유(중복 키 등)를 화면에 보여줘야 하는 POST 용. {ok, data, error} 를 그대로 돌려준다.
+async function gasCall(action, body){
+  if(!gasConfigured_()) return { ok:false, error:"GAS 연결이 설정되지 않았습니다." };
+  try{
+    const res = await fetch(GAS_WEBAPP_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ action, ...body })
+    });
+    const json = await res.json();
+    if(!json.ok) return { ok:false, error: String(json.error || "저장 실패").replace(/^Error:\s*/, "") };
+    return { ok:true, data: json.data };
+  }catch(err){
+    return { ok:false, error:"서버에 연결할 수 없습니다." };
+  }
+}
+
 async function fetchAdjustments(month, plant){
   const data = await gasGet("getAdjustments", { month, plant });
   return data || { 전월차액:0, 전월미지급액:0, 기타정산:0 };

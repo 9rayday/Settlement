@@ -21,7 +21,8 @@ function initApp(){
   document.getElementById("exportAllBtn").addEventListener("click", exportAllPlants);
 
   initBilling().catch(err=> console.error("[main] 수요기업 청구 모듈 초기화 실패:", err));
-  fetchMaster().catch(err=> console.error("[main] 마스터 데이터 조회 실패:", err));
+  // 발전소(마스터 = masterData)와 전기사용자 등록 정보를 함께 불러온다 (탭0)
+  initRegistry().catch(err=> console.error("[main] 등록 정보 조회 실패:", err));
 }
 
 document.addEventListener("DOMContentLoaded", ()=>{
