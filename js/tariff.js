@@ -24,7 +24,6 @@ function renderTouPage() {
     <div class="card">
       <div class="reg-head"><h2>부하구분 시간대 (월 × 시간)</h2>
         <div class="tou-legend">${Object.keys(TOU_NAME).map(k => `<span class="tou-chip ${k}">${TOU_NAME[k]}</span>`).join("")}</div></div>
-      <p class="hint">칸을 누르면 경부하 → 중간부하 → 최대부하 순으로 바뀝니다. 0시 = 0~1시 구간. 일요일·공휴일은 전 시간 경부하, 토요일은 최대부하 시간을 중간부하로 계산합니다.</p>
       <div class="grid-wrap"><table class="tou-table"><tr><th></th>${Array.from({ length: 24 }, (_, h) => `<th>${h}</th>`).join("")}</tr>
         ${d.tariff.map((row, m) => `<tr><th>${m + 1}월</th>${row.split("").map((c, h) =>
           `<td class="tou-cell ${c}" data-m="${m}" data-h="${h}" title="${m + 1}월 ${h}시 · ${TOU_NAME[c]}">${TOU_NAME[c][0]}</td>`).join("")}</tr>`).join("")}</table></div>
@@ -32,7 +31,6 @@ function renderTouPage() {
     <div class="card">
       <div class="reg-head"><h2>공휴일 (관공서 공휴일·대체공휴일)</h2>
         <div class="row"><label class="adj-label">연도</label><select id="touYear" style="min-width:110px">${years.map(y => `<option${y === touState.year ? " selected" : ""}>${y}</option>`).join("")}</select></div></div>
-      <p class="hint">공휴일은 해마다 바뀌니 연초에 추가하세요. 공휴일은 전 시간 경부하로 계산합니다.</p>
       <div class="tou-holidays">${hol.length ? hol.map(md => `<span class="tou-hol">${touState.year}-${md}<button type="button" data-md="${md}" aria-label="삭제">×</button></span>`).join("") : '<span class="hint" style="margin:0">등록된 공휴일이 없습니다.</span>'}</div>
       <div class="row" style="margin-top:10px"><input type="date" id="touAddDate" min="${touState.year}-01-01" max="${touState.year}-12-31"><button class="btn secondary" id="touAddBtn">공휴일 추가</button></div>
     </div>

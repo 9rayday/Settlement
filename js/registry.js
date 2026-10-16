@@ -39,7 +39,7 @@ const PLANT_FORM = [
   { k: "비고", label: "비고", type: "textarea", full: true },
   { section: "연간보장공급" },
   { k: "발전보장시간", label: "연간보장시간 (h/일)", type: "number", placeholder: "3.4" },
-  { k: "연간보장공급량", label: "연간보장공급량 (kWh, 참고=용량×시간×365)", type: "number" },
+  { k: "연간보장공급량", label: "연간보장공급량 (kWh)", type: "number" },
   { k: "연간효율감소", label: "연간효율감소 (%/년)", type: "number" },
   { section: "위약금" },
   { k: "위약금유형", label: "위약금 유형", type: "select", options: [["", "미정 (방식 정리 후 추가)"]] }
@@ -74,7 +74,7 @@ const CUSTOMER_FORM = [
   { section: "연간보장공급" },
   { k: "계약용량", label: "계약용량 (kW, 그룹 발전소 합계)", type: "number", calc: true },
   { k: "연간보장시간", label: "연간보장시간 (h/년)", type: "number" },
-  { k: "연간보장공급량", label: "연간보장공급량 (kWh, 계약용량 × 연간보장시간)", type: "number", calc: true },
+  { k: "연간보장공급량", label: "연간보장공급량 (kWh)", type: "number", calc: true },
   { k: "연간효율감소", label: "연간효율감소 (%/년)", type: "number" },
   { section: "위약금" },
   { k: "위약금유형", label: "위약금 유형", type: "select", options: [["", "미정 (방식 정리 후 추가)"]] }
@@ -246,8 +246,6 @@ function openCustomer(app, keepScroll) {
   r$("regCustDetail").innerHTML = `<div class="reg-detail">
     <div class="reg-head"><h3 class="sub" style="margin:0">${isNew ? "새 전기사용자" : rEsc(raw["수요기업명"]) + " 계약 정보"}</h3><button class="btn secondary" id="regCustClose">닫기</button></div>
     <div id="regCustForm">${regFormHtml(CUSTOMER_FORM, raw, "cf")}</div>
-    ${isNew ? "" : `<div class="reg-linked"><span class="adj-label">연결된 발전소</span>${plants.length ? plants.map(p => `<span class="tag">${rEsc(p)}</span>`).join("") : '<span class="hint" style="margin:0">없음</span>'}
-      <a class="link" href="#reg-group" id="regGoGroup">그룹화에서 관리 →</a></div>`}
     <div class="row" style="margin-top:12px"><button class="btn accent" id="regCustSave">저장</button>${isNew ? "" : '<button class="btn secondary danger" id="regCustDel">삭제</button>'}<span id="regCustStatus" class="status warn" style="background:none"></span></div>
   </div>`;
   bindContractCalc("regCustForm");
@@ -255,7 +253,6 @@ function openCustomer(app, keepScroll) {
   r$("regCustSave").onclick = () => saveRegistry("customer", "regCustForm", CUSTOMER_FORM, isNew ? "" : app, "regCustStatus");
   if (!isNew) {
     r$("regCustDel").onclick = () => deleteRegistry("customer", app, raw["수요기업명"], "regCustStatus");
-    r$("regGoGroup").onclick = () => { regState.openGroup = app; renderGroupPage(); };
   }
   if (!keepScroll) r$("regCustDetail").scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
@@ -303,7 +300,7 @@ function renderGroupPage() {
   const unlinked = Object.keys(all).filter(p => { const a = rStr(all[p]["KPX신청번호"]); return !a || !Registry.customerByApp(a); });
   if (regState.openGroup === null && custs.length) regState.openGroup = rStr(custs[0]["KPX신청번호"]);
   host.innerHTML = `${loadFailNotice()}<div class="group-layout">
-    <div class="card group-list"><h2>전기사용자 계약</h2>
+    <div class="card group-list"><h2>계약</h2>
       <div class="reg-cards single">${custCardsHtml(regState.openGroup, "group-card")}</div>
       <p class="hint" style="margin-top:10px">그룹 미연결 발전소: <b>${unlinked.length}</b>개</p></div>
     <div class="card group-main" id="regGroupMain"></div></div>`;

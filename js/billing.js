@@ -17,8 +17,8 @@ function ratesFor(month) {
   const exact = Store.get("rates:" + month, null);
   if (exact) return { rates: exact, source: "저장된 값" };
   const earlier = Store.keys("rates:").filter(k => k.slice(6) < month).pop();
-  if (earlier) return { rates: Object.assign({}, Store.get(earlier), { month }), source: `${earlier.slice(6)} 값을 복사 (이번 달 KPX 통지값으로 수정 후 저장하세요)` };
-  return { rates: Object.assign({}, Engine.DEFAULT_RATES, { month }), source: "기본값 (KPX 통지값으로 수정 후 저장하세요)" };
+  if (earlier) return { rates: Object.assign({}, Store.get(earlier), { month }), source: `${earlier.slice(6)} 값 복사` };
+  return { rates: Object.assign({}, Engine.DEFAULT_RATES, { month }), source: "기본값" };
 }
 
 function numInput(id, val, step) { return `<input type="number" id="${id}" value="${val}" step="${step || "any"}" style="width:110px">`; }
@@ -72,11 +72,7 @@ function nextYm(m) { let y = Number(m.slice(0, 4)), mo = Number(m.slice(4)) + 1;
 
 function getSettleMode() { const r = document.querySelector('input[name="settleMode"]:checked'); return r ? r.value : "provisional"; }
 
-function updateModeHint() {
-  $("modeHint").textContent = getSettleMode() === "trueup"
-    ? "KPX 확정 파일과 사용량 파일을 다시 올리세요. 저장된 가정산과 비교해 전월 차액을 만듭니다."
-    : "월별 가정산서를 만듭니다.";
-}
+function updateModeHint() {}
 
 // 가정산 파일로 오차정산을 계산하는 실수를 막기 위해, 구분을 바꾸면 수요기업 쪽 업로드를 비우고 다시 올리게 한다.
 function onModeChange() {
@@ -128,12 +124,11 @@ const fieldHtml = (label, inner) => `<div class="adj-item"><label class="adj-lab
 const numField = (label, id, val) => fieldHtml(label, `<input type="number" id="${id}" step="any" value="${val == null ? "" : val}">`);
 
 function surchargeRowHtml() {
-  return `<div class="row"><label>확정 부가정산금 총액</label><input type="number" id="cs_total" style="width:130px"><label>과세 비율</label><input type="number" id="cs_ratio" step="any" style="width:90px"><button class="btn secondary" id="cs_split">분할</button>
-    <span class="hint" style="margin:0">비율은 부가정산금이 발생한 달의 KPX 통지값입니다. 통지서에 과세/비과세 금액이 따로 있으면 그 금액으로 고쳐 쓰세요.</span></div>`;
+  return `<div class="row"><label>확정 부가정산금 총액</label><input type="number" id="cs_total" style="width:130px"><label>과세 비율</label><input type="number" id="cs_ratio" step="any" style="width:90px"><button class="btn secondary" id="cs_split">분할</button></div>`;
 }
 
 function provisionalFormHtml() {
-  return `<div class="card"><h2>전월 오차정산 반영</h2><p class="hint" id="prevHint"></p>
+  return `<div class="card"><h2>전월 오차정산 반영</h2>
     ${surchargeRowHtml()}
     <div class="adj-grid">
       ${numField("전월 확정 부가정산금 (과세)", "cs_taxable", 0)}${numField("전월 확정 부가정산금 (비과세)", "cs_exempt", 0)}
@@ -143,10 +138,9 @@ function provisionalFormHtml() {
 }
 
 function trueUpFormHtml() {
-  return `<div class="card"><h2>가정산 (비교 기준)</h2><p class="hint" id="provHint"></p>
+  return `<div class="card"><h2>가정산 (비교 기준)</h2>
       <div class="adj-grid">${numField("공급량 (kWh)", "pv_supply")}${numField("전력량요금 (원)", "pv_energy")}${numField("송배전용 전기설비 이용요금 (원)", "pv_net")}${numField("거래수수료 (원)", "pv_fee")}</div></div>
     <div class="card"><h2>확정 부가정산금 · 전월 차액</h2>
-      <p class="hint">여기 값이 다음 달 가정산서의 '전월 확정 부가정산금'과 '전월 차액'으로 그대로 들어갑니다. 차액(과세)은 [오차정산 계산] 때 전력량요금·망이용요금·거래수수료 차이로 채워지며, 직접 고칠 수 있습니다 (다시 계산하면 덮어씀).</p>
       ${surchargeRowHtml()}
       <div class="adj-grid">
         ${numField("확정 부가정산금 (과세)", "cs_taxable", 0)}${numField("확정 부가정산금 (비과세)", "cs_exempt", 0)}
@@ -159,17 +153,16 @@ function renderBillingBody() {
   const host = $("billBody"); if (!host) return;
   const mode = getSettleMode(), trueUp = mode === "trueup";
   if (!billState.kpx) {
-    host.innerHTML = `<div class="card"><h2>수요기업 ${MODE_LABEL[mode]}서</h2><p class="hint">위 업로드 카드에서 정산 구분(현재: <b>${MODE_LABEL[mode]}</b>)을 고르고 KPX 직접전력거래량·전기사용량 파일을 올리세요.</p></div>`;
+    host.innerHTML = `<div class="card"><h2>수요기업 ${MODE_LABEL[mode]}서</h2></div>`;
     return;
   }
   const apps = Object.keys(billState.kpx.groups);
-  const usageNote = billState.ami ? `사용량: ${esc(billState.amiName)}` : "사용량 파일 없음 → KPX 전기사용량 사용";
   host.innerHTML = `
     <div class="card"><div class="row"><span class="mode-badge ${mode}">${MODE_LABEL[mode]}</span>
       <label>그룹(신청번호)</label><select id="groupSel" style="min-width:380px">${apps.map(a => {
         const g = billState.kpx.groups[a], c = custByApp(a);
         return `<option value="${esc(a)}">${esc(a)} — ${esc(c ? c.name : "미등록")} (${Object.keys(g.plants).length}개 발전소, ${monthLabel(g.month)})</option>`; }).join("")}</select>
-      <span id="billMonthBadge" class="badge"></span><span class="hint" style="margin:0">${usageNote}</span></div></div>
+      <span id="billMonthBadge" class="badge"></span></div></div>
     ${trueUp ? trueUpFormHtml() : provisionalFormHtml()}
     <div id="billResult"></div>
     <div class="row no-print" id="billActions" style="display:none; margin-top:10px"><button class="btn secondary" id="billXlsx">Excel 다운</button><button class="btn secondary" id="billPrint">인쇄 / PDF 저장</button>
@@ -202,11 +195,9 @@ function fillProvisionalForm(app, month) {
     setVal("cs_total", carry.confirmedTotal); setVal("cs_ratio", carry.taxableRatio);
     setVal("cs_taxable", carry.confirmed.taxable); setVal("cs_exempt", carry.confirmed.exempt);
     setVal("pd_taxable", carry.prevDiff.taxable); setVal("pd_exempt", carry.prevDiff.exempt);
-    $("prevHint").textContent = `${monthLabel(prevMonth)} 오차정산 값을 자동으로 채웠습니다. 고치려면 정산 구분을 '오차정산'으로 바꿔 ${monthLabel(prevMonth)} 오차정산을 다시 저장하세요.`;
   } else {
     setVal("cs_total", ""); ["cs_taxable", "cs_exempt", "pd_taxable", "pd_exempt"].forEach(id => setVal(id, 0));
     setVal("cs_ratio", ratesFor(prevMonth).rates.taxableRatio);
-    $("prevHint").textContent = `${monthLabel(prevMonth)} 오차정산 기록이 없습니다. 오차정산을 저장하면 자동으로 채워지고, 지금은 직접 입력해도 됩니다.`;
   }
 }
 
@@ -355,9 +346,6 @@ function fillTrueUpForm(app, month) {
   const prov = hasBill ? bill : (saved && saved.provisional) || {};
   setVal("pv_supply", prov.supplyTotal); setVal("pv_energy", prov.energy); setVal("pv_net", prov.netTotal); setVal("pv_fee", prov.fee);
   ["pv_supply", "pv_energy", "pv_net", "pv_fee"].forEach(id => { $(id).readOnly = hasBill; });
-  $("provHint").textContent = hasBill
-    ? `${monthLabel(month)} 가정산 기록(저장 ${new Date(bill.savedAt).toLocaleString()})과 비교합니다.`
-    : `${monthLabel(month)} 가정산 기록이 시스템에 없습니다. 엑셀 등으로 보낸 가정산서의 값을 직접 입력하세요.`;
   if (saved) {
     setVal("cs_total", saved.confirmedTotal); setVal("cs_ratio", saved.taxableRatio);
     setVal("cs_taxable", saved.confirmed.taxable); setVal("cs_exempt", saved.confirmed.exempt);

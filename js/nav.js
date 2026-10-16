@@ -38,6 +38,7 @@ function showPage(id) {
   document.getElementById("pageTitle").textContent = meta.title;
   const slot = document.querySelector(`#${id} .upload-slot`);
   if (slot) slot.appendChild(document.getElementById("uploadCard"));
+  document.getElementById("uploadCard").dataset.ctx = id === "page-settle-gen" ? "gen" : "cust"; // 발전사업자 정산은 정산 구분 숨김
   try { localStorage.setItem(NAV_KEY, id); } catch (e) { /* 저장 불가 환경 */ }
   document.body.classList.remove("side-shown");
 }

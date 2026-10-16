@@ -35,16 +35,18 @@ function bindDropZone(zoneId, inputId, onFile){
 // KPX 직접전력거래량 파일 하나로 발전사업자 정산과 전기사용자 정산을 함께 처리한다.
 // 오차정산은 수요기업에만 보내므로, 오차정산 모드에서는 발전사업자 집계·실적 기록을 건드리지 않는다.
 function routeKpxFile(file){
+  // 발전사업자 정산 페이지에는 오차정산이 없다: 항상 발전사업자 집계를 하고, 전기사용자 쪽은 가정산일 때만 같이 넘긴다
+  const onGen = document.getElementById("uploadCard").dataset.ctx === "gen";
   const trueUp = typeof getSettleMode === "function" && getSettleMode() === "trueup";
-  if(trueUp){
+  if(onGen || !trueUp){
+    handleFile(file);
+  } else {
     const statusEl = document.getElementById("dataStatus");
     statusEl.style.display = "inline-flex";
-    statusEl.textContent = "오차정산: 발전사업자 정산은 갱신하지 않습니다";
+    statusEl.textContent = "오차정산";
     statusEl.className = "status warn";
-  } else {
-    handleFile(file);
   }
-  if(typeof onKpxFile === "function") onKpxFile(file);
+  if(typeof onKpxFile === "function" && !(onGen && trueUp)) onKpxFile(file);
 }
 
 function num(v){ const n = parseFloat(v); return isNaN(n) ? 0 : n; }

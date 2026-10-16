@@ -182,14 +182,15 @@
   <!-- 업로드 카드: 하나만 두고 정산 페이지를 열 때 그 페이지의 .upload-slot 으로 옮긴다 (js/nav.js) -->
   <div id="uploadHolder" hidden>
     <div class="card" id="uploadCard">
+      <div class="mode-section">
       <h2>정산 구분</h2>
       <div class="mode-boxes">
         <label class="mode-box"><input type="radio" name="settleMode" value="provisional" checked>
-          <span class="mode-box-title">가정산</span><span class="mode-box-desc">월별 가정산서 작성</span></label>
+          <span class="mode-box-title">가정산</span></label>
         <label class="mode-box"><input type="radio" name="settleMode" value="trueup">
-          <span class="mode-box-title">오차정산</span><span class="mode-box-desc">확정 데이터로 가정산과 비교 → 전월 차액</span></label>
+          <span class="mode-box-title">오차정산</span></label>
       </div>
-      <p class="hint" id="modeHint" style="margin-top:8px;"></p>
+      </div>
 
       <div class="upload-pair">
         <div class="upload-col">
@@ -210,7 +211,7 @@
             <input type="file" id="amiFile" accept=".xls,.html,.htm">
           </div>
           <div class="row upload-status">
-            <span id="amiStatus" class="status warn">미선택 (없으면 KPX 전기사용량 사용)</span>
+            <span id="amiStatus" class="status warn">미선택</span>
           </div>
         </div>
       </div>
