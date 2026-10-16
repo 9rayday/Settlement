@@ -33,7 +33,7 @@ function contractOf(kind, key) {
   if (!raw) return null;
   const num = v => Number(v), cap = num(raw["계약용량"]) || 0;
   let g1 = num(raw["연간보장공급량"]);
-  if (!(g1 > 0)) { const hrs = kind === "gen" ? num(raw["발전보장시간"]) * 365 : num(raw["연간보장시간"]); g1 = cap > 0 && hrs > 0 ? cap * hrs : 0; }
+  if (!(g1 > 0)) { const hrs = (kind === "gen" ? num(raw["발전보장시간"]) : hoursPerDay(raw["연간보장시간"])) * 365; g1 = cap > 0 && hrs > 0 ? cap * hrs : 0; } // 보장시간(h/일) × 365
   const start = rStr(raw["계약일자"]), end = rStr(raw["계약해지일"]);
   let years = Math.round(num(raw["계약기간"]) || 0);
   if (!years && YMD.test(start) && YMD.test(end)) years = Math.max(1, Math.round(ymdDays(start, end) / 365.25));

@@ -38,7 +38,7 @@ const PLANT_FORM = [
   { k: "연장통보마감일", label: "연장통보 마감일 (자동 계산)", type: "date", calc: true },
   { k: "비고", label: "비고", type: "textarea", full: true },
   { section: "연간보장공급" },
-  { k: "연간보장시간", label: "연간보장시간 (h/년)", type: "number", placeholder: "1241" }, // 시트에는 정산서용 발전보장시간(h/일)으로도 저장
+  { k: "발전보장시간", label: "연간보장시간 (h/일)", type: "number", placeholder: "3.4" },
   { k: "연간보장공급량", label: "연간보장공급량 (kWh)", type: "number", calc: true },
   { k: "연간효율감소", label: "연간효율감소 (%/년)", type: "number" },
   { section: "위약금" },
@@ -75,7 +75,7 @@ const CUSTOMER_FORM = [
   { k: "한전고객번호", label: "한전고객번호" },
   { section: "연간보장공급" },
   { k: "계약용량", label: "계약용량 (kW, 그룹 발전소 합계)", type: "number", calc: true },
-  { k: "연간보장시간", label: "연간보장시간 (h/년)", type: "number" },
+  { k: "연간보장시간", label: "연간보장시간 (h/일)", type: "number", placeholder: "3.4" },
   { k: "연간보장공급량", label: "연간보장공급량 (kWh)", type: "number", calc: true },
   { k: "연간효율감소", label: "연간효율감소 (%/년)", type: "number" },
   { section: "위약금" },
@@ -186,7 +186,8 @@ function calcContractDates(rec) {
   rec["연장통보마감일"] = YMD.test(end) && notice > 0 ? addMonthsYmd(end, -notice, 0) : "";
   return rec;
 }
-/* ----- 전기사용자 계약용량 = 그룹 발전소 설비용량 합, 연간보장공급량 = 계약용량 × 연간보장시간(h/년) ----- */
+/* ----- 전기사용자 계약용량 = 그룹 발전소 설비용량 합, 연간보장공급량 = 계약용량 × 보장시간(h/일) × 365 ----- */
+const hoursPerDay = v => { v = Number(v); return v > 24 ? v / 365 : v; }; // 예전에 h/년으로 저장된 값도 h/일로 해석
 const groupCapacity = app => Registry.plantsOfGroup(app).reduce((s, p) => s + (Number(Registry.plants()[p]["계약용량"]) || 0), 0);
 const guaranteeOf = (cap, hours) => { cap = Number(cap); hours = Number(hours); return cap > 0 && hours > 0 ? Number((cap * hours).toFixed(3)) : ""; };
 // 그룹 구성이나 발전소 용량이 바뀌면 해당 전기사용자 행의 계약용량·연간보장공급량을 다시 저장한다
@@ -194,7 +195,7 @@ async function syncGroupTotals(apps) {
   for (const app of new Set(apps.map(rStr).filter(Boolean))) {
     const raw = Registry.rawCustomers().find(c => rStr(c["KPX신청번호"]) === app);
     if (!raw) continue;
-    const cap = groupCapacity(app), g = guaranteeOf(cap, raw["연간보장시간"]);
+    const cap = groupCapacity(app), g = guaranteeOf(cap, hoursPerDay(raw["연간보장시간"]) * 365);
     if (Number(raw["계약용량"]) === cap && String(raw["연간보장공급량"]) === String(g)) continue;
     await Registry.save("customer", { "KPX신청번호": app, "계약용량": cap, "연간보장공급량": g }, app);
   }
@@ -207,9 +208,10 @@ function bindContractCalc(hostId) {
   const update = () => {
     const rec = calcContractDates({ "계약일자": el("계약일자").value, "계약기간": el("계약기간").value, "연장통보기한": el("연장통보기한").value, "계약해지일": el("계약해지일").value });
     el("계약해지일").value = rec["계약해지일"] || ""; el("연장통보마감일").value = rec["연장통보마감일"];
-    if (el("계약용량") && el("연간보장시간")) el("연간보장공급량").value = guaranteeOf(el("계약용량").value, el("연간보장시간").value); // 계약용량 × 연간보장시간(h/년)
+    const hEl = el("연간보장시간") || el("발전보장시간"); // 전기사용자 / 발전소
+    if (el("계약용량") && hEl) el("연간보장공급량").value = guaranteeOf(el("계약용량").value, Number(hEl.value) * 365); // 용량 × 시간(h/일) × 365
   };
-  ["계약일자", "계약기간", "연장통보기한", "계약용량", "연간보장시간"].forEach(k => { if (el(k)) el(k).addEventListener("input", update); });
+  ["계약일자", "계약기간", "연장통보기한", "계약용량", "연간보장시간", "발전보장시간"].forEach(k => { if (el(k)) el(k).addEventListener("input", update); });
   update();
 }
 // 발전사업자 정산서는 "사업자명(대표자명)" 한 칸을 쓰므로 저장할 때 합쳐 두고, 열 때는 나눠서 보여준다
@@ -261,6 +263,7 @@ function openCustomer(app, keepScroll) {
   const raw = Object.assign({}, Registry.rawCustomers().find(c => rStr(c["KPX신청번호"]) === app) || { "수요지지역": "비수도권" });
   const isNew = !app, plants = isNew ? [] : Registry.plantsOfGroup(app);
   raw["계약용량"] = isNew ? "" : groupCapacity(app);
+  if (Number(raw["연간보장시간"]) > 24) raw["연간보장시간"] = Number((raw["연간보장시간"] / 365).toFixed(4)); // 예전 h/년 값 → h/일
   r$("regCustDetail").innerHTML = `<div class="reg-detail">
     <div class="reg-head"><h3 class="sub" style="margin:0">${isNew ? "새 전기사용자" : rEsc(raw["수요기업명"]) + " 계약 정보"}</h3><button class="btn secondary" id="regCustClose">닫기</button></div>
     <div id="regCustForm">${regFormHtml(CUSTOMER_FORM, raw, "cf")}</div>
@@ -300,7 +303,6 @@ function openPlant(name, keepScroll) {
   const isNew = !name;
   const raw = isNew ? { "지역(요금구분)": "비수도권", "배전연결": "N" } : splitOwnerName(Object.assign({}, Registry.plants()[name]));
   raw["배전연결"] = rStr(raw["배전연결"]).toUpperCase() === "Y" ? "Y" : "N";
-  if (rStr(raw["발전보장시간"]) !== "") raw["연간보장시간"] = Number((Number(raw["발전보장시간"]) * 365).toFixed(2)); // h/일 → h/년
   r$("regPlantDetail").innerHTML = `<div class="reg-detail">
     <div class="reg-head"><h3 class="sub" style="margin:0">${isNew ? "새 발전소" : rEsc(name)}</h3><button class="btn secondary" id="regPlantClose">닫기</button></div>
     <div id="regPlantForm">${regFormHtml(PLANT_FORM, raw, "pf")}</div>
@@ -425,10 +427,9 @@ async function saveRegistry(kind, formId, form, originalKey, statusId) {
   calcContractDates(rec);
   if (kind === "plant") {
     rec["사업자명(대표자명)"] = joinOwnerName(rec);
-    rec["발전보장시간"] = rec["연간보장시간"] === "" ? "" : Number((rec["연간보장시간"] / 365).toFixed(6)); // 발전사업자 정산서는 h/일 사용
-    rec["연간보장공급량"] = guaranteeOf(rec["계약용량"], rec["연간보장시간"]);
+    rec["연간보장공급량"] = guaranteeOf(rec["계약용량"], Number(rec["발전보장시간"]) * 365);
   }
-  else { rec["계약용량"] = groupCapacity(rec["KPX신청번호"]); rec["연간보장공급량"] = guaranteeOf(rec["계약용량"], rec["연간보장시간"]); }
+  else { rec["계약용량"] = groupCapacity(rec["KPX신청번호"]); rec["연간보장공급량"] = guaranteeOf(rec["계약용량"], hoursPerDay(rec["연간보장시간"]) * 365); }
   const oldGroup = kind === "plant" ? plantGroupOf(originalKey) : "";
   st.textContent = "저장 중..."; st.className = "status warn";
   const r = await Registry.save(kind, rec, originalKey);
