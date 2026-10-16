@@ -4,14 +4,7 @@ function initApp(){
   if(_appInited) return; // 로그인 성공 시 checkAuth()가 다시 부를 수 있어 중복 초기화 방지
   _appInited = true;
 
-  document.querySelectorAll(".tab-btn").forEach(b=>{
-    b.addEventListener("click", ()=>{
-      document.querySelectorAll(".tab-btn").forEach(x=>x.classList.remove("active"));
-      document.querySelectorAll(".panel").forEach(x=>x.classList.remove("active"));
-      b.classList.add("active");
-      document.getElementById(b.dataset.tab).classList.add("active");
-    });
-  });
+  initNav(); // 사이드 메뉴 (js/nav.js)
 
   initUploadZone();
   document.getElementById("adjSaveBtn").addEventListener("click", handleSaveAdjustments);

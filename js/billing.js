@@ -1,6 +1,6 @@
 /* ============ 수요기업 정산 모듈 UI (가정산서 / 오차정산서) ============
- * 탭1: 정산 구분 선택 + KPX 직접전력거래량·고객 사용량 업로드 (upload.js 가 onKpxFile 호출)
- * 탭4: 월별 요율 (발전소·전기사용자 등록은 탭0, js/registry.js)   탭5: 가정산서 계산·저장, 또는 오차정산(가정산과 비교 → 다음 달로 이월)
+ * 정산 > 전기사용자 페이지: 위쪽 업로드 카드(정산 구분 + KPX·사용량 업로드, upload.js 가 onKpxFile 호출) + 가정산서/오차정산서
+ * 정산요율관리 > KPX 요율 관리(#tab4): 월별 요율. 발전소·전기사용자 등록은 js/registry.js
  * 계산은 js/engine.js, 파일 해석은 js/parsers.js. 여기서는 화면과 저장만 다룬다.
  */
 const INVOICE_PREFIX = "200005"; // 수요기업 청구서 번호 접두 (발전사업자 정산서는 BUYER.invoicePrefix)
@@ -62,7 +62,7 @@ async function saveRates() {
   $("rt_status").textContent = where === "remote" ? "저장 완료 (구글시트)" : "이 브라우저에만 저장됨 (GAS 연결 확인 필요)";
 }
 
-/* ---------- 정산 구분 (탭1 라디오: 가정산 / 오차정산) ---------- */
+/* ---------- 정산 구분 (업로드 카드 라디오: 가정산 / 오차정산) ---------- */
 const MODE_LABEL = { provisional: "가정산", trueup: "오차정산" };
 const custByApp = app => Registry.customerByApp(app);
 const monthLabel = m => `${m.slice(0, 4)}.${m.slice(4)}`;
@@ -87,7 +87,7 @@ function onModeChange() {
   updateModeHint(); renderBillingBody();
 }
 
-/* ---------- 업로드 (탭1에서 호출) ---------- */
+/* ---------- 업로드 (업로드 카드에서 호출) ---------- */
 function readFileAsText(file) {
   return file.arrayBuffer().then(buf => {
     try { return new TextDecoder("utf-8", { fatal: true }).decode(buf); } catch (e) { return new TextDecoder("euc-kr").decode(buf); }
@@ -107,8 +107,8 @@ async function onKpxFile(file) {
     st.textContent = `수요기업 ${MODE_LABEL[getSettleMode()]}: 그룹(신청번호) ${apps.length}개` + (unknown ? ` · 미등록 ${unknown}개` : "");
     st.className = "status ok";
     renderBillingBody();
-    // 탭0에서 이 그룹을 열어두었으면 업로드한 달의 집계로 갱신
-    if (regState.openCust && parsed.groups[regState.openCust]) { regState.month = parsed.groups[regState.openCust].month; renderRegistryTab(); }
+    // [그룹화]에서 이 그룹을 열어두었으면 업로드한 달의 집계로 갱신
+    if (regState.openGroup && parsed.groups[regState.openGroup]) { regState.month = parsed.groups[regState.openGroup].month; renderGroupPage(); }
   } catch (e) { billState.kpx = null; st.textContent = "수요기업: " + e.message; st.className = "status bad"; renderBillingBody(); }
 }
 
@@ -123,7 +123,7 @@ async function onAmiFile(file) {
   renderBillingBody();
 }
 
-/* ---------- 탭5 화면 (구분에 따라 가정산서 / 오차정산서) ---------- */
+/* ---------- 전기사용자 정산 화면 #tab5 (구분에 따라 가정산서 / 오차정산서) ---------- */
 const fieldHtml = (label, inner) => `<div class="adj-item"><label class="adj-label">${label}</label>${inner}</div>`;
 const numField = (label, id, val) => fieldHtml(label, `<input type="number" id="${id}" step="any" value="${val == null ? "" : val}">`);
 
@@ -159,7 +159,7 @@ function renderBillingBody() {
   const host = $("billBody"); if (!host) return;
   const mode = getSettleMode(), trueUp = mode === "trueup";
   if (!billState.kpx) {
-    host.innerHTML = `<div class="card"><h2>수요기업 ${MODE_LABEL[mode]}서</h2><p class="hint">[1. 데이터 업로드]에서 정산 구분(현재: <b>${MODE_LABEL[mode]}</b>)을 고르고 KPX 직접전력거래량·고객 전기사용량 파일을 올리세요.</p></div>`;
+    host.innerHTML = `<div class="card"><h2>수요기업 ${MODE_LABEL[mode]}서</h2><p class="hint">위 업로드 카드에서 정산 구분(현재: <b>${MODE_LABEL[mode]}</b>)을 고르고 KPX 직접전력거래량·전기사용량 파일을 올리세요.</p></div>`;
     return;
   }
   const apps = Object.keys(billState.kpx.groups);
@@ -218,12 +218,12 @@ function splitConfirmed() {
 
 /* ---------- 계산 공통 ---------- */
 function prepareGroup(err, warn) {
-  if (!billState.kpx) throw new Error("[1. 데이터 업로드]에서 KPX 직접전력거래량 파일을 먼저 올리세요.");
+  if (!billState.kpx) throw new Error("위 업로드 카드에서 KPX 직접전력거래량 파일을 먼저 올리세요.");
   const app = $("groupSel").value, g = billState.kpx.groups[app];
   const customer = custByApp(app);
-  if (!customer) err.push(`신청번호 ${app} 에 해당하는 전기사용자 계약이 없습니다. [0. 발전소/전기사용자 등록]에서 등록하세요.`);
+  if (!customer) err.push(`신청번호 ${app} 에 해당하는 전기사용자 계약이 없습니다. [정산관리 > 계약관리]에서 등록하세요.`);
   const unreg = Object.keys(g.plants).filter(p => { const i = Registry.plantInfo(p); return !i || !i.region; });
-  if (unreg.length) err.push("등록되지 않았거나 지역이 비어 있는 발전소: " + unreg.join(", ") + " → [0. 발전소/전기사용자 등록]에서 등록하세요.");
+  if (unreg.length) err.push("등록되지 않았거나 지역이 비어 있는 발전소: " + unreg.join(", ") + " → [정산관리 > 계약관리]에서 등록하세요.");
   const { rates, source } = ratesFor(g.month);
   if (!Store.get("rates:" + g.month, null)) warn.push(`${g.month} 요율이 저장되어 있지 않아 ${source}을 사용했습니다.`);
   const plants = {}; Object.keys(g.plants).forEach(p => plants[p] = Registry.plantInfo(p));
@@ -508,4 +508,5 @@ async function initBilling() {
   if (!ok) console.warn("[billing] GAS 앱데이터를 불러오지 못해 이 브라우저의 저장값만 사용합니다.");
   const m = new Date(); const cur = `${m.getFullYear()}${String(m.getMonth() + 1).padStart(2, "0")}`;
   renderRatesCard(cur); renderBillingBody();
+  if (typeof initTariff === "function") initTariff(); // 시간대별 요금제·공휴일 설정 적용 (js/tariff.js)
 }

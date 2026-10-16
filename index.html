@@ -44,28 +44,144 @@
 
 <header class="app">
   <div class="app-title">
+    <button class="side-open" id="sideOpenBtn" aria-label="메뉴 열기"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
     <h1>직접PPA 전력거래대금 정산 시스템</h1>
   </div>
   <div class="badge" id="monthBadge">정산월 미설정</div>
 </header>
 
-<nav class="tabs">
-  <button class="tab-btn" data-tab="tab0">0. 발전소/전기사용자 등록</button>
-  <button class="tab-btn active" data-tab="tab1">1. 데이터 업로드</button>
-  <button class="tab-btn" data-tab="tab2">2. 발전소별 확인/조정</button>
-  <button class="tab-btn" data-tab="tab3">3. 정산서 생성/다운로드</button>
-  <button class="tab-btn" data-tab="tab4">4. 요율 (KPX 통지)</button>
-  <button class="tab-btn" data-tab="tab5">5. 수요기업 정산서</button>
-</nav>
+<div class="layout">
+  <!-- 사이드 메뉴 (js/nav.js): data-page 를 누르면 해당 page 를 보여준다 -->
+  <aside class="sidebar" id="sidebar">
+    <div class="side-toggle">
+      <button type="button" data-group="contract">계약관리</button>
+      <button type="button" data-group="settle">정산관리</button>
+    </div>
 
-<main>
+    <nav class="side-menu" data-group="contract">
+      <div class="side-section"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg><span>전기사용자</span></div>
+      <a class="side-link sub" data-page="page-cust-perf">계약이행현황</a>
+      <div class="side-section"><svg viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg><span>발전사업자</span></div>
+      <a class="side-link sub" data-page="page-gen-perf">계약이행현황</a>
+    </nav>
 
-  <!-- TAB 0 : 발전소 / 전기사용자 등록 (js/registry.js 가 내용을 채운다) -->
-  <div class="panel" id="tab0"></div>
+    <nav class="side-menu" data-group="settle">
+      <a class="side-link" data-page="page-dash"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg><span>정산 대시보드</span></a>
+      <div class="side-folder open">
+        <button type="button" class="side-folder-btn"><svg viewBox="0 0 24 24"><path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5M10 13h6M10 17h6"/></svg><span>계약관리</span><svg class="chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
+        <div class="side-sub">
+          <a class="side-link sub" data-page="page-reg-cust">전기사용자</a>
+          <a class="side-link sub" data-page="page-reg-plant">발전사업자</a>
+          <a class="side-link sub" data-page="page-reg-group">그룹화</a>
+        </div>
+      </div>
+      <div class="side-folder open">
+        <button type="button" class="side-folder-btn"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 7v10M9.5 9.5h4a1.75 1.75 0 0 1 0 3.5h-3a1.75 1.75 0 0 0 0 3.5h4"/></svg><span>정산</span><svg class="chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
+        <div class="side-sub">
+          <a class="side-link sub" data-page="page-settle-cust">전기사용자</a>
+          <a class="side-link sub" data-page="page-settle-gen">발전사업자</a>
+          <div class="side-folder nested open">
+            <button type="button" class="side-folder-btn sub"><span>정산요율관리</span><svg class="chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
+            <div class="side-sub">
+              <a class="side-link sub2" data-page="page-rate-kpx">KPX 요율 관리</a>
+              <a class="side-link sub2" data-page="page-rate-tou">시간대별 요금제 관리</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </nav>
+  </aside>
 
-  <!-- TAB 1 : UPLOAD -->
-  <div class="panel active" id="tab1">
+<main class="content">
+  <div class="page-head"><div class="page-crumb" id="pageCrumb"></div><h1 class="page-title" id="pageTitle"></h1></div>
+
+  <!-- 계약관리 > 계약이행현황 (추후) -->
+  <div class="page" id="page-cust-perf"><div class="card placeholder"><h2>전기사용자 계약이행현황</h2><p class="hint">전기사용자별 계약 이행 현황 (기능 추가 예정)</p><span class="tag">준비 중</span></div></div>
+  <div class="page" id="page-gen-perf"><div class="card placeholder"><h2>발전사업자 계약이행현황</h2><p class="hint">발전사업자별 계약 이행 현황 (기능 추가 예정)</p><span class="tag">준비 중</span></div></div>
+
+  <!-- 정산관리 -->
+  <div class="page" id="page-dash"><div class="card placeholder"><h2>정산 대시보드</h2><p class="hint">연도별 정산 요약, 전기사용자 계약별 정산, 발전소별 연간 보장 공급량 (구성 확정 후 추가)</p><span class="tag">준비 중</span></div></div>
+
+  <!-- 계약관리 (js/registry.js) -->
+  <div class="page" id="page-reg-cust"><div id="regCustPage"></div></div>
+  <div class="page" id="page-reg-plant"><div id="regPlantPage"></div></div>
+  <div class="page" id="page-reg-group"><div id="regGroupPage"></div></div>
+
+  <!-- 정산 > 전기사용자 : 업로드 카드 + 가정산서/오차정산서 (js/billing.js) -->
+  <div class="page" id="page-settle-cust">
+    <div class="upload-slot"></div>
+    <div id="tab5"></div>
+  </div>
+
+  <!-- 정산 > 발전사업자 : 업로드 카드 + 발전소별 확인/조정 + 정산서 -->
+  <div class="page" id="page-settle-gen">
+    <div class="upload-slot"></div>
+    <div class="card" id="aggCard" style="display:none;">
+      <h2>발전소별 집계 결과 (이번 달, 확인용)</h2>
+      <div class="grid-wrap">
+        <table class="grid" id="aggTable"></table>
+      </div>
+    </div>
+    <h3 class="section-title">발전소별 확인 / 조정</h3>
     <div class="card">
+      <div class="row">
+        <label style="font-size:12.5px; color:var(--sub);">발전사업자 선택</label>
+        <select id="plantSelectAdjust" class="plant-select" onchange="onPlantSelectChange(this.value)"></select>
+        <button class="btn secondary" id="refreshMasterBtn">마스터 정보 새로고침</button>
+        <span id="refreshMasterStatus" class="status warn" style="background:none;"></span>
+        <button class="btn accent" id="adjSaveBtn" style="margin-left:auto;">저장</button>
+      </div>
+      <div class="row" style="justify-content:flex-end; margin-top:4px;">
+        <span id="adjStatus" class="status warn" style="background:none;"></span>
+      </div>
+    </div>
+
+    <div class="card" id="plantAdjustHost" style="display:none;">
+      <h2>발전소 월 집계</h2>
+      <div class="kpi-grid" id="plantKpis"></div>
+
+      <h2 style="margin-top:20px;">정산 조정값</h2>
+      <div class="adj-grid">
+        <div class="adj-item">
+          <label class="adj-label">전월 차액 (원)</label>
+          <input type="number" id="adjPrevDiff" class="adj-input" value="0">
+        </div>
+        <div class="adj-item">
+          <label class="adj-label">전월 미지급액 (원)</label>
+          <input type="number" id="adjPrevUnpaid" class="adj-input" value="0">
+        </div>
+        <div class="adj-item">
+          <label class="adj-label">기타정산 (원)</label>
+          <input type="number" id="adjOtherSettle" class="adj-input" value="0">
+        </div>
+      </div>
+    </div>
+    <h3 class="section-title">정산서 생성 / 다운로드</h3>
+    <div class="card">
+      <div class="row">
+        <label style="font-size:12.5px; color:var(--sub);">발전사업자 선택</label>
+        <select id="plantSelectInvoice" class="plant-select" onchange="onPlantSelectChange(this.value)"></select>
+      </div>
+      <div class="action-grid">
+        <button class="action-box" id="exportBtn" disabled>Excel 다운</button>
+        <button class="action-box" id="pdfBtn" disabled>PDF 다운</button>
+        <button class="action-box" id="exportAllBtn" disabled>전체 다운</button>
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <span id="exportAllStatus" class="status warn" style="background:none;"></span>
+      </div>
+    </div>
+
+    <div class="card doc-card" id="invoiceHost" style="display:none;"></div>
+  </div>
+
+  <!-- 정산요율관리 -->
+  <div class="page" id="page-rate-kpx"><div id="tab4"></div></div>
+  <div class="page" id="page-rate-tou"><div id="touPage"></div></div>
+
+  <!-- 업로드 카드: 하나만 두고 정산 페이지를 열 때 그 페이지의 .upload-slot 으로 옮긴다 (js/nav.js) -->
+  <div id="uploadHolder" hidden>
+    <div class="card" id="uploadCard">
       <h2>정산 구분</h2>
       <div class="mode-boxes">
         <label class="mode-box"><input type="radio" name="settleMode" value="provisional" checked>
@@ -100,77 +216,9 @@
       </div>
       <div class="kpi-grid" id="siteKpis" style="display:none;"></div>
     </div>
-
-    <div class="card" id="aggCard" style="display:none;">
-      <h2>발전소별 집계 결과 (이번 달, 확인용)</h2>
-      <div class="grid-wrap">
-        <table class="grid" id="aggTable"></table>
-      </div>
-    </div>
   </div>
-
-  <!-- TAB 2 : PER-PLANT CHECK & ADJUSTMENTS -->
-  <div class="panel" id="tab2">
-    <div class="card">
-      <div class="row">
-        <label style="font-size:12.5px; color:var(--sub);">발전사업자 선택</label>
-        <select id="plantSelectAdjust" class="plant-select" onchange="onPlantSelectChange(this.value)"></select>
-        <button class="btn secondary" id="refreshMasterBtn">마스터 정보 새로고침</button>
-        <span id="refreshMasterStatus" class="status warn" style="background:none;"></span>
-        <button class="btn accent" id="adjSaveBtn" style="margin-left:auto;">저장</button>
-      </div>
-      <div class="row" style="justify-content:flex-end; margin-top:4px;">
-        <span id="adjStatus" class="status warn" style="background:none;"></span>
-      </div>
-    </div>
-
-    <div class="card" id="plantAdjustHost" style="display:none;">
-      <h2>발전소 월 집계</h2>
-      <div class="kpi-grid" id="plantKpis"></div>
-
-      <h2 style="margin-top:20px;">정산 조정값</h2>
-      <div class="adj-grid">
-        <div class="adj-item">
-          <label class="adj-label">전월 차액 (원)</label>
-          <input type="number" id="adjPrevDiff" class="adj-input" value="0">
-        </div>
-        <div class="adj-item">
-          <label class="adj-label">전월 미지급액 (원)</label>
-          <input type="number" id="adjPrevUnpaid" class="adj-input" value="0">
-        </div>
-        <div class="adj-item">
-          <label class="adj-label">기타정산 (원)</label>
-          <input type="number" id="adjOtherSettle" class="adj-input" value="0">
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- TAB 3 : INVOICE GENERATION -->
-  <div class="panel" id="tab3">
-    <div class="card">
-      <div class="row">
-        <label style="font-size:12.5px; color:var(--sub);">발전사업자 선택</label>
-        <select id="plantSelectInvoice" class="plant-select" onchange="onPlantSelectChange(this.value)"></select>
-      </div>
-      <div class="action-grid">
-        <button class="action-box" id="exportBtn" disabled>Excel 다운</button>
-        <button class="action-box" id="pdfBtn" disabled>PDF 다운</button>
-        <button class="action-box" id="exportAllBtn" disabled>전체 다운</button>
-      </div>
-      <div class="row" style="margin-top:8px;">
-        <span id="exportAllStatus" class="status warn" style="background:none;"></span>
-      </div>
-    </div>
-
-    <div class="card doc-card" id="invoiceHost" style="display:none;"></div>
-  </div>
-
-  <!-- TAB 4 / 5 : 수요기업 청구 모듈 (5 = 가정산서·오차정산서) (js/billing.js 가 내용을 채운다) -->
-  <div class="panel" id="tab4"></div>
-  <div class="panel" id="tab5"></div>
-
 </main>
+</div>
 
 </div>
 
@@ -185,6 +233,8 @@
 <script src="js/upload.js"></script>
 <script src="js/invoice.js"></script>
 <script src="js/billing.js"></script>
+<script src="js/tariff.js"></script>
+<script src="js/nav.js"></script>
 <script src="js/exporters/excel.js"></script>
 <script src="js/exporters/pdf.js"></script>
 <script src="js/exporters/zip.js"></script>

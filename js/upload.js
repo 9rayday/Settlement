@@ -32,14 +32,14 @@ function bindDropZone(zoneId, inputId, onFile){
   zone.addEventListener("click", ()=> input.click());
 }
 
-// KPX 직접전력거래량 파일 하나로 발전사업자 정산(탭2~3)과 수요기업 청구(탭5)를 함께 처리한다.
+// KPX 직접전력거래량 파일 하나로 발전사업자 정산과 전기사용자 정산을 함께 처리한다.
 // 오차정산은 수요기업에만 보내므로, 오차정산 모드에서는 발전사업자 집계·실적 기록을 건드리지 않는다.
 function routeKpxFile(file){
   const trueUp = typeof getSettleMode === "function" && getSettleMode() === "trueup";
   if(trueUp){
     const statusEl = document.getElementById("dataStatus");
     statusEl.style.display = "inline-flex";
-    statusEl.textContent = "오차정산: 발전사업자 정산서(탭 2~3)는 갱신하지 않습니다";
+    statusEl.textContent = "오차정산: 발전사업자 정산은 갱신하지 않습니다";
     statusEl.className = "status warn";
   } else {
     handleFile(file);
