@@ -118,18 +118,18 @@ function renderPerfPage(kind) {
       <div class="row"><label class="adj-label">해당 연차</label><select id="${kind}PerfYear" style="min-width:140px"><option value="">진행 중 연차</option>
         ${Array.from({ length: 20 }, (_, i) => `<option value="${i + 1}"${sel === String(i + 1) ? " selected" : ""}>${i + 1}년차</option>`).join("")}</select></div></div>
       <div class="grid-wrap perf-wrap" style="margin-top:10px"><table class="grid perf-table"><tr><th>${label}</th><th class="num">계약용량(kW)</th><th class="num">효율감소</th><th>계약기간</th>
-        <th>해당 연차</th><th style="min-width:170px">연차 남은 기간</th><th class="num">보장량(MWh)</th><th class="num">실적(MWh)</th><th class="num">달성률</th><th>상태</th></tr>
+        <th>해당 연차</th><th>연차 남은 기간</th><th class="num">보장량(MWh)</th><th class="num">실적(MWh)</th><th class="num">달성률</th><th>상태</th></tr>
         ${pg.items.length ? pg.items.map(item => {
           const { c, ys } = item;
           const sub = kind === "cust" ? `${rEsc(c.key)} · 발전소 ${c.plants.length}개` : rEsc(rStr((Registry.plants()[c.key] || {})["사업자명(대표자명)"]));
           const head = `<td><b>${rEsc(c.name)}</b><div class="perf-sub">${sub}</div></td>`;
           if (!ys) return `<tr class="perf-row" data-key="${rEsc(c.key)}">${head}<td colspan="9"><span class="tag bad">계약정보 부족</span></td></tr>`;
           const y = pick(item);
-          const period = `<td class="num">${c.cap ? c.cap.toLocaleString() : "-"}</td><td class="num">${c.decline}%</td><td>${c.years}년<div class="perf-sub">${c.start} ~ ${ys[ys.length - 1].e}</div></td>`;
+          const period = `<td class="num">${c.cap ? c.cap.toLocaleString() : "-"}</td><td class="num">${c.decline}%</td><td>${c.years}년<div class="perf-sub"><span class="nw">${c.start}</span> ~ <span class="nw">${ys[ys.length - 1].e}</span></div></td>`;
           if (!y) return `<tr class="perf-row" data-key="${rEsc(c.key)}">${head}${period}<td colspan="6" class="hint">${sel ? "계약기간 밖" : (ys[0].state === "future" ? "시작 전" : "계약 종료")}</td></tr>`;
           const left = y.state === "current" ? y.remain / y.totalDays : (y.state === "future" ? 1 : 0);
-          const bar = y.state === "current" ? `<div class="perf-bar"><span style="width:${(left * 100).toFixed(1)}%"></span></div><div class="perf-sub">D-${y.remain} · ${y.s} ~ ${y.e}</div>`
-            : `<div class="perf-bar"><span style="width:${left * 100}%"></span></div><div class="perf-sub">${y.state === "future" ? "시작 전" : "종료"} · ${y.s} ~ ${y.e}</div>`;
+          const bar = y.state === "current" ? `<div class="perf-bar"><span style="width:${(left * 100).toFixed(1)}%"></span></div><div class="perf-sub">D-${y.remain} · <span class="nw">${y.s}</span> ~ <span class="nw">${y.e}</span></div>`
+            : `<div class="perf-bar"><span style="width:${left * 100}%"></span></div><div class="perf-sub">${y.state === "future" ? "시작 전" : "종료"} · <span class="nw">${y.s}</span> ~ <span class="nw">${y.e}</span></div>`;
           const future = y.state === "future";
           return `<tr class="perf-row${perfState.open[kind] === c.key ? " active" : ""}" data-key="${rEsc(c.key)}">${head}${period}
             <td>${y.n} / ${c.years}년차</td><td>${bar}</td>
@@ -152,7 +152,7 @@ function renderPerfDetail(kind, item) {
       <span class="hint" style="margin:0">1년차 보장량 ${mwh(c.g1)} MWh · 효율감소 ${c.decline}%/년 · 위약금 처리 ${rEsc(c.penMethod || "미정")}</span></div>
     <div class="grid-wrap" style="max-height:none;margin-top:10px"><table class="grid perf-years"><tr><th>연차</th><th>기간</th><th class="num">보장량(MWh)</th><th class="num">실발전량(MWh)</th>
       <th class="num">초과발전량(MWh)</th><th class="num">합계(MWh)</th><th class="num">미달 비율</th><th class="num">미달량(MWh)</th><th class="num">가중평균 REC(원)</th><th class="num">미달 위약금(원)</th><th>상태</th></tr>
-      ${ys.map(y => `<tr class="yr-${STATUS_CLS[y.status]}"><td>${y.n}년차</td><td>${y.s} ~ ${y.e}</td><td class="num">${mwh(y.guar)}</td>
+      ${ys.map(y => `<tr class="yr-${STATUS_CLS[y.status]}"><td>${y.n}년차</td><td><span class="nw">${y.s}</span> ~ <span class="nw">${y.e}</span></td><td class="num">${mwh(y.guar)}</td>
         <td class="num">${y.state === "future" ? "-" : mwh(y.supply)}</td><td class="num">${y.state === "future" ? "-" : mwh(y.excess)}</td><td class="num">${y.state === "future" ? "-" : mwh(y.actual)}</td>
         <td class="num">${y.state === "future" ? "-" : pct(y.ratio)}</td><td class="num">${y.short ? mwh(y.short) : "-"}</td>
         <td class="num">${y.rec != null ? Math.round(y.rec).toLocaleString() : (y.recMissing ? '<span class="tag bad">REC 미입력</span>' : "-")}</td>
