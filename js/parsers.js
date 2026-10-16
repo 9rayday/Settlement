@@ -117,11 +117,14 @@
     const dates = new Set();
     Object.values(group.plants).forEach(p => Object.keys(p.gen).forEach(d => dates.add(d)));
     return Array.from(dates).sort().map(date => {
-      const gen = {};
-      Object.keys(group.plants).forEach(p => { gen[p] = group.plants[p].gen[date] || new Array(24).fill(0); });
+      const gen = {}, supply = {};
+      Object.keys(group.plants).forEach(p => {
+        gen[p] = group.plants[p].gen[date] || new Array(24).fill(0);
+        supply[p] = group.plants[p].kpxSupply[date] || new Array(24).fill(0); // KPX 재생E공급량 (오차정산용)
+      });
       const u = ami && ami.usage[date] ? ami.usage[date] : null;
       const gaps = u ? u.map((v, h) => v === null ? h : -1).filter(h => h >= 0) : (ami ? "all" : []);
-      return { date, load: P.loadClasses(date, holidays), usage: u, gaps, gen };
+      return { date, load: P.loadClasses(date, holidays), usage: u, gaps, gen, supply, kpxUsage: group.kpxUsage[date] || null };
     });
   };
 

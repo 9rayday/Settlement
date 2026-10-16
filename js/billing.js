@@ -1,5 +1,6 @@
-/* ============ 수요기업 청구(가정산) 모듈 UI ============
- * 탭4: 월별 요율 / 발전소 / 수요기업 계약 등록   탭5: 업로드 → 계산 → 청구서
+/* ============ 수요기업 정산 모듈 UI (가정산서 / 오차정산서) ============
+ * 탭1: 정산 구분 선택 + KPX 직접전력거래량·고객 사용량 업로드 (upload.js 가 onKpxFile 호출)
+ * 탭4: 월별 요율 / 발전소 / 수요기업 계약 등록   탭5: 가정산서 계산·저장, 또는 오차정산(가정산과 비교 → 다음 달로 이월)
  * 계산은 js/engine.js, 파일 해석은 js/parsers.js. 여기서는 화면과 저장만 다룬다.
  */
 const INVOICE_PREFIX = "200005"; // 수요기업 청구서 번호 접두 (발전사업자 정산서는 BUYER.invoicePrefix)
@@ -126,7 +127,32 @@ async function saveCustomers() {
   $("c_status").textContent = (where === "remote" ? "저장 완료 (구글시트) " : "이 브라우저에만 저장됨 ") + list.length + "건";
 }
 
-/* ---------- 업로드 ---------- */
+/* ---------- 정산 구분 (탭1 라디오: 가정산 / 오차정산) ---------- */
+const MODE_LABEL = { provisional: "가정산", trueup: "오차정산" };
+const custByApp = app => Store.get("customers", []).find(c => c.appNo === app);
+const monthLabel = m => `${m.slice(0, 4)}.${m.slice(4)}`;
+const monthKo = m => `${m.slice(0, 4)}년 ${Number(m.slice(4))}월`;
+function prevYm(m) { let y = Number(m.slice(0, 4)), mo = Number(m.slice(4)) - 1; if (!mo) { y--; mo = 12; } return `${y}${String(mo).padStart(2, "0")}`; }
+function nextYm(m) { let y = Number(m.slice(0, 4)), mo = Number(m.slice(4)) + 1; if (mo > 12) { y++; mo = 1; } return `${y}${String(mo).padStart(2, "0")}`; }
+
+function getSettleMode() { const r = document.querySelector('input[name="settleMode"]:checked'); return r ? r.value : "provisional"; }
+
+function updateModeHint() {
+  $("modeHint").textContent = getSettleMode() === "trueup"
+    ? "KPX 확정 파일과 사용량 파일을 다시 올리세요. 공급량은 KPX 재생E공급량을 쓰고, 저장된 가정산과 비교해 전월 차액을 만듭니다."
+    : "월별 가정산서를 만듭니다. 공급량 = 시간별 min(사용량, 발전량).";
+}
+
+// 가정산 파일로 오차정산을 계산하는 실수를 막기 위해, 구분을 바꾸면 수요기업 쪽 업로드를 비우고 다시 올리게 한다.
+function onModeChange() {
+  billState.kpx = null; billState.ami = null; billState.amiName = ""; billState.result = null;
+  $("dataFile").value = ""; $("amiFile").value = "";
+  $("kpxStatus").style.display = "none";
+  $("amiStatus").textContent = "미선택"; $("amiStatus").className = "status warn";
+  updateModeHint(); renderBillingBody();
+}
+
+/* ---------- 업로드 (탭1에서 호출) ---------- */
 function readFileAsText(file) {
   return file.arrayBuffer().then(buf => {
     try { return new TextDecoder("utf-8", { fatal: true }).decode(buf); } catch (e) { return new TextDecoder("euc-kr").decode(buf); }
@@ -134,21 +160,19 @@ function readFileAsText(file) {
 }
 
 async function onKpxFile(file) {
-  const st = $("kpxStatus"); st.textContent = "읽는 중..."; st.className = "status warn";
+  const st = $("kpxStatus"); st.style.display = "inline-flex"; st.textContent = "수요기업: 읽는 중..."; st.className = "status warn";
   try {
     const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: null });
     const parsed = Parsers.parseKpxRows(rows);
     const apps = Object.keys(parsed.groups);
     if (!apps.length) throw new Error("신청번호/발전기명이 있는 행을 찾지 못했습니다. KPX 직접전력거래량 파일이 맞는지 확인하세요.");
-    billState.kpx = parsed;
-    st.textContent = `${file.name} — 그룹(신청번호) ${apps.length}개`; st.className = "status ok";
-    $("groupSel").innerHTML = apps.map(a => {
-      const g = parsed.groups[a]; const c = (Store.get("customers", [])).find(x => x.appNo === a);
-      return `<option value="${esc(a)}">${esc(a)} — ${esc(c ? c.name : "미등록")} (${Object.keys(g.plants).length}개 발전소, ${g.month})</option>`;
-    }).join("");
-    onGroupChange();
-  } catch (e) { st.textContent = "오류: " + e.message; st.className = "status bad"; }
+    billState.kpx = parsed; billState.result = null;
+    const unknown = apps.filter(a => !custByApp(a)).length;
+    st.textContent = `수요기업 ${MODE_LABEL[getSettleMode()]}: 그룹(신청번호) ${apps.length}개` + (unknown ? ` · 미등록 ${unknown}개` : "");
+    st.className = "status ok";
+    renderBillingBody();
+  } catch (e) { billState.kpx = null; st.textContent = "수요기업: " + e.message; st.className = "status bad"; renderBillingBody(); }
 }
 
 async function onAmiFile(file) {
@@ -156,80 +180,148 @@ async function onAmiFile(file) {
   try {
     const ami = Parsers.parseAmiHtml(await readFileAsText(file));
     if (!ami.dates.length) throw new Error(ami.warnings[0] || "읽을 수 있는 데이터가 없습니다.");
-    billState.ami = ami; billState.amiName = file.name;
+    billState.ami = ami; billState.amiName = file.name; billState.result = null;
     st.textContent = `${file.name} — ${ami.dates.length}일 (${ami.dates[0]} ~ ${ami.dates[ami.dates.length - 1]})`; st.className = "status ok";
   } catch (e) { billState.ami = null; st.textContent = "오류: " + e.message; st.className = "status bad"; }
+  renderBillingBody();
+}
+
+/* ---------- 탭5 화면 (구분에 따라 가정산서 / 오차정산서) ---------- */
+const fieldHtml = (label, inner) => `<div class="adj-item"><label class="adj-label">${label}</label>${inner}</div>`;
+const numField = (label, id, val) => fieldHtml(label, `<input type="number" id="${id}" step="any" value="${val == null ? "" : val}">`);
+
+function surchargeRowHtml() {
+  return `<div class="row"><label>확정 부가정산금 총액</label><input type="number" id="cs_total" style="width:130px"><label>과세 비율</label><input type="number" id="cs_ratio" step="any" style="width:90px"><button class="btn secondary" id="cs_split">분할</button>
+    <span class="hint" style="margin:0">비율은 부가정산금이 발생한 달의 KPX 통지값입니다. 통지서에 과세/비과세 금액이 따로 있으면 그 금액으로 고쳐 쓰세요.</span></div>`;
+}
+
+function provisionalFormHtml() {
+  return `<div class="card"><h2>전월 오차정산 반영</h2><p class="hint" id="prevHint"></p>
+    ${surchargeRowHtml()}
+    <div class="adj-grid">
+      ${numField("전월 확정 부가정산금 (과세)", "cs_taxable", 0)}${numField("전월 확정 부가정산금 (비과세)", "cs_exempt", 0)}
+      ${numField("전월 차액 (과세)", "pd_taxable", 0)}${numField("전월 차액 (비과세)", "pd_exempt", 0)}
+      ${fieldHtml("납부기한", `<input type="date" id="dueDate">`)}</div>
+    <div class="row" style="margin-top:10px"><button class="btn accent" id="calcBtn">가정산서 계산</button></div></div>`;
+}
+
+function trueUpFormHtml() {
+  return `<div class="card"><h2>가정산 (비교 기준)</h2><p class="hint" id="provHint"></p>
+      <div class="adj-grid">${numField("공급량 (kWh)", "pv_supply")}${numField("전력량요금 (원)", "pv_energy")}${numField("송배전용 전기설비 이용요금 (원)", "pv_net")}${numField("거래수수료 (원)", "pv_fee")}</div></div>
+    <div class="card"><h2>확정 부가정산금 · 전월 차액</h2>
+      <p class="hint">여기 값이 다음 달 가정산서의 '전월 확정 부가정산금'과 '전월 차액'으로 그대로 들어갑니다. 차액(과세)은 [오차정산 계산] 때 전력량요금·망이용요금·거래수수료 차이로 채워지며, 직접 고칠 수 있습니다 (다시 계산하면 덮어씀).</p>
+      ${surchargeRowHtml()}
+      <div class="adj-grid">
+        ${numField("확정 부가정산금 (과세)", "cs_taxable", 0)}${numField("확정 부가정산금 (비과세)", "cs_exempt", 0)}
+        ${numField("차액 (과세)", "pd_taxable", 0)}${numField("차액 (비과세)", "pd_exempt", 0)}
+        ${fieldHtml("메모", `<input id="tu_note">`)}</div>
+      <div class="row" style="margin-top:10px"><button class="btn accent" id="calcBtn">오차정산 계산</button></div></div>`;
+}
+
+function renderBillingBody() {
+  const host = $("billBody"); if (!host) return;
+  const mode = getSettleMode(), trueUp = mode === "trueup";
+  if (!billState.kpx) {
+    host.innerHTML = `<div class="card"><h2>수요기업 ${MODE_LABEL[mode]}서</h2><p class="hint">[1. 데이터 업로드]에서 정산 구분(현재: <b>${MODE_LABEL[mode]}</b>)을 고르고 KPX 직접전력거래량·고객 전기사용량 파일을 올리세요.</p></div>`;
+    return;
+  }
+  const apps = Object.keys(billState.kpx.groups);
+  const usageNote = billState.ami ? `사용량: ${esc(billState.amiName)}` : (trueUp ? "사용량 파일 없음 → KPX 전기사용량 사용" : "사용량 파일 없음 → 발전량 전량 공급으로 계산");
+  host.innerHTML = `
+    <div class="card"><div class="row"><span class="mode-badge ${mode}">${MODE_LABEL[mode]}</span>
+      <label>그룹(신청번호)</label><select id="groupSel" style="min-width:380px">${apps.map(a => {
+        const g = billState.kpx.groups[a], c = custByApp(a);
+        return `<option value="${esc(a)}">${esc(a)} — ${esc(c ? c.name : "미등록")} (${Object.keys(g.plants).length}개 발전소, ${monthLabel(g.month)})</option>`; }).join("")}</select>
+      <span id="billMonthBadge" class="badge"></span><span class="hint" style="margin:0">${usageNote}</span></div></div>
+    ${trueUp ? trueUpFormHtml() : provisionalFormHtml()}
+    <div id="billResult"></div>
+    <div class="row no-print" id="billActions" style="display:none; margin-top:10px"><button class="btn secondary" id="billXlsx">Excel 다운</button><button class="btn secondary" id="billPrint">인쇄 / PDF 저장</button>
+      <button class="btn accent" id="billSave">${trueUp ? "오차정산 저장 (다음 달 가정산으로 이월)" : "가정산 기록 저장"}</button><span id="billSaveStatus" class="status warn" style="background:none"></span></div>`;
+  $("groupSel").onchange = onGroupChange;
+  $("cs_split").onclick = splitConfirmed;
+  $("cs_total").oninput = $("cs_ratio").oninput = splitConfirmed;
+  $("calcBtn").onclick = trueUp ? runTrueUp : runCalc;
+  $("billXlsx").onclick = trueUp ? exportTrueUpExcel : exportBillExcel;
+  $("billPrint").onclick = () => { if (!trueUp || renderTrueUpResult()) window.print(); }; // 오차정산은 입력값을 다시 읽어 문서 갱신 후 인쇄
+  $("billSave").onclick = trueUp ? saveTrueUp : saveBill;
+  onGroupChange();
 }
 
 function onGroupChange() {
   const app = $("groupSel").value; if (!app || !billState.kpx) return;
   const g = billState.kpx.groups[app];
+  billState.result = null; $("billResult").innerHTML = ""; $("billActions").style.display = "none"; $("billSaveStatus").textContent = "";
   $("billMonthBadge").textContent = `정산월 ${monthLabel(g.month)}`;
-  const prevMonth = prevYm(g.month);
-  const set = (id, v) => { $(id).value = v; };
-  // 탭6에서 저장한 전월 오차정산 값이 있으면 그대로 채운다. 없으면 비우고 전월 청구 기록을 참고로 보여준다.
-  const carry = Store.get(`carry:${g.month}:${app}`, null);
+  if (getSettleMode() === "trueup") fillTrueUpForm(app, g.month); else fillProvisionalForm(app, g.month);
+}
+
+const setVal = (id, v) => { $(id).value = v == null ? "" : v; };
+
+// 가정산: 전월 오차정산(carry:<이번달>:<신청번호>)이 있으면 그대로 채운다
+function fillProvisionalForm(app, month) {
+  const prevMonth = prevYm(month);
+  const carry = Store.get(`carry:${month}:${app}`, null);
   if (carry) {
-    set("cs_total", carry.confirmedTotal); set("cs_ratio", carry.taxableRatio);
-    set("cs_taxable", carry.confirmed.taxable); set("cs_exempt", carry.confirmed.exempt);
-    set("pd_taxable", carry.prevDiff.taxable); set("pd_exempt", carry.prevDiff.exempt);
-    $("prevHint").textContent = `${monthLabel(prevMonth)} 오차정산서 값을 자동으로 채웠습니다. 고치려면 [6. 오차정산]에서 수정 후 저장하세요.`;
+    setVal("cs_total", carry.confirmedTotal); setVal("cs_ratio", carry.taxableRatio);
+    setVal("cs_taxable", carry.confirmed.taxable); setVal("cs_exempt", carry.confirmed.exempt);
+    setVal("pd_taxable", carry.prevDiff.taxable); setVal("pd_exempt", carry.prevDiff.exempt);
+    $("prevHint").textContent = `${monthLabel(prevMonth)} 오차정산 값을 자동으로 채웠습니다. 고치려면 정산 구분을 '오차정산'으로 바꿔 ${monthLabel(prevMonth)} 오차정산을 다시 저장하세요.`;
   } else {
-    set("cs_total", ""); ["cs_taxable", "cs_exempt", "pd_taxable", "pd_exempt"].forEach(id => set(id, 0));
-    set("cs_ratio", ratesFor(prevMonth).rates.taxableRatio); // 과세 비율은 부가정산금이 발생한 달(전월)의 통지값
-    const prev = Store.get(`bill:${prevMonth}:${app}`, null);
-    $("prevHint").textContent = (prev ? `${monthLabel(prevMonth)} 청구 기록: 예상 부가정산금 ${won(prev.expectedSurcharge)}. ` : "전월 청구 기록 없음. ")
-      + "[6. 오차정산]에서 확정값을 저장하면 이 칸이 자동으로 채워집니다. (직접 입력해도 됩니다)";
+    setVal("cs_total", ""); ["cs_taxable", "cs_exempt", "pd_taxable", "pd_exempt"].forEach(id => setVal(id, 0));
+    setVal("cs_ratio", ratesFor(prevMonth).rates.taxableRatio);
+    $("prevHint").textContent = `${monthLabel(prevMonth)} 오차정산 기록이 없습니다. 오차정산을 저장하면 자동으로 채워지고, 지금은 직접 입력해도 됩니다.`;
   }
 }
-function prevYm(m) { let y = Number(m.slice(0, 4)), mo = Number(m.slice(4)) - 1; if (!mo) { y--; mo = 12; } return `${y}${String(mo).padStart(2, "0")}`; }
-function nextYm(m) { let y = Number(m.slice(0, 4)), mo = Number(m.slice(4)) + 1; if (mo > 12) { y++; mo = 1; } return `${y}${String(mo).padStart(2, "0")}`; }
-const monthLabel = m => `${m.slice(0, 4)}.${m.slice(4)}`;
 
 function splitConfirmed() {
-  const total = Number($("cs_total").value) || 0, ratio = Number($("cs_ratio").value);
-  const taxable = Engine.round(total * ratio);
-  $("cs_taxable").value = taxable; $("cs_exempt").value = total - taxable;
+  if ($("cs_total").value === "") return;
+  const s = Engine.splitSurcharge(Number($("cs_total").value) || 0, { taxableRatio: Number($("cs_ratio").value) || 0 });
+  $("cs_taxable").value = s.taxable; $("cs_exempt").value = s.exempt;
 }
 
-/* ---------- 계산 ---------- */
+/* ---------- 계산 공통 ---------- */
+function prepareGroup(err, warn) {
+  if (!billState.kpx) throw new Error("[1. 데이터 업로드]에서 KPX 직접전력거래량 파일을 먼저 올리세요.");
+  const app = $("groupSel").value, g = billState.kpx.groups[app];
+  const customer = custByApp(app);
+  if (!customer) err.push(`신청번호 ${app} 에 해당하는 수요기업 계약이 없습니다. [4. 등록·요율]에서 수요기업을 등록하세요.`);
+  const plantReg = Store.get("plants", {});
+  const unreg = Object.keys(g.plants).filter(p => !plantReg[p]);
+  if (unreg.length) err.push("등록되지 않은 발전소: " + unreg.join(", ") + " → [4. 등록·요율]에서 지역(요금구분)을 지정하세요.");
+  const { rates, source } = ratesFor(g.month);
+  if (!Store.get("rates:" + g.month, null)) warn.push(`${g.month} 요율이 저장되어 있지 않아 ${source}을 사용했습니다.`);
+  const plants = {}; Object.keys(g.plants).forEach(p => plants[p] = plantReg[p]);
+  return { app, g, customer, rates, plants, days: Parsers.buildDays(g, billState.ami) };
+}
+const noticeHtml = (list, cls) => list.length ? `<div class="notice ${cls}">${list.map(esc).join("<br>")}</div>` : "";
+
+/* ---------- 가정산 계산 ---------- */
 function runCalc() {
   const out = $("billResult"); const warn = [], err = [];
   try {
-    if (!billState.kpx) throw new Error("KPX 직접전력거래량 파일을 먼저 업로드하세요.");
-    const app = $("groupSel").value, g = billState.kpx.groups[app];
-    const customer = Store.get("customers", []).find(c => c.appNo === app);
-    if (!customer) err.push(`신청번호 ${app} 에 해당하는 수요기업 계약이 없습니다. [4. 등록·요율]에서 수요기업을 등록하세요.`);
-    const plantReg = Store.get("plants", {});
-    const unreg = Object.keys(g.plants).filter(p => !plantReg[p]);
-    if (unreg.length) err.push("등록되지 않은 발전소: " + unreg.join(", ") + " → [4. 등록·요율]에서 지역(요금구분)을 지정하세요.");
-    const { rates, source } = ratesFor(g.month);
-    if (!Store.get("rates:" + g.month, null)) warn.push(`${g.month} 요율이 저장되어 있지 않아 ${source}을 사용했습니다.`);
-    if (err.length) { out.innerHTML = `<div class="notice bad">${err.map(esc).join("<br>")}</div>`; return; }
-
-    const days = Parsers.buildDays(g, billState.ami);
+    const P = prepareGroup(err, warn);
+    if (err.length) { out.innerHTML = noticeHtml(err, "bad"); return; }
     if (billState.ami) {
-      const miss = Parsers.missingDates(g.month, billState.ami.dates);
+      const miss = Parsers.missingDates(P.g.month, billState.ami.dates);
       if (miss.length) warn.push(`사용량 파일에 없는 날짜 ${miss.length}일 (${miss.join(", ")}) — 해당일은 발전량 전량 공급으로 간주되어 공급량이 과대할 수 있습니다.`);
-      days.filter(d => d.usage && d.gaps.length).forEach(d => warn.push(`${d.date}: 사용량 미수신 ${d.gaps.length}시간 (${d.gaps.map(h => h + "시").join(", ")}) — 해당 시간은 발전량 전량 공급으로 간주됩니다.`));
+      P.days.filter(d => d.usage && d.gaps.length).forEach(d => warn.push(`${d.date}: 사용량 미수신 ${d.gaps.length}시간 (${d.gaps.map(h => h + "시").join(", ")}) — 해당 시간은 발전량 전량 공급으로 간주됩니다.`));
       billState.ami.warnings.filter(w => /합계 불일치|96칸/.test(w)).forEach(w => warn.push(w));
     } else {
       warn.push("고객 사용량 파일이 없어 전기사용량 = 발전량(전량 공급)으로 계산했습니다 (엑셀 가정산 방식).");
     }
-    const match = Engine.matchMonth(days, rates);
-    const plants = {}; Object.keys(g.plants).forEach(p => plants[p] = plantReg[p]);
+    const match = Engine.matchMonth(P.days, P.rates);
     const ctx = {
-      unitPrice: customer.unitPrice, demandRegion: customer.demandRegion, plants,
+      unitPrice: P.customer.unitPrice, demandRegion: P.customer.demandRegion, plants: P.plants,
       confirmedSurcharge: { taxable: Number($("cs_taxable").value) || 0, exempt: Number($("cs_exempt").value) || 0 },
       prevDiff: { taxable: Number($("pd_taxable").value) || 0, exempt: Number($("pd_exempt").value) || 0 }
     };
-    const carry = Store.get(`carry:${g.month}:${app}`, null);
+    const carry = Store.get(`carry:${P.g.month}:${P.app}`, null);
     if (carry && (ctx.confirmedSurcharge.taxable !== carry.confirmed.taxable || ctx.confirmedSurcharge.exempt !== carry.confirmed.exempt
       || ctx.prevDiff.taxable !== carry.prevDiff.taxable || ctx.prevDiff.exempt !== carry.prevDiff.exempt))
-      warn.push("전월 오차정산 칸이 [6. 오차정산]에 저장된 값과 다릅니다. 직접 고친 값으로 계산했습니다.");
-    const inv = Engine.invoice(match, ctx, rates);
-    billState.result = { app, month: g.month, customer, rates, match, inv, ctx, dueDate: $("dueDate").value };
-    out.innerHTML = (warn.length ? `<div class="notice warn">${warn.map(esc).join("<br>")}</div>` : "") + invoiceHtml(billState.result);
+      warn.push("전월 오차정산 칸이 저장된 오차정산 값과 다릅니다. 직접 고친 값으로 계산했습니다.");
+    const inv = Engine.invoice(match, ctx, P.rates);
+    billState.result = { mode: "provisional", app: P.app, month: P.g.month, customer: P.customer, rates: P.rates, match, inv, ctx, dueDate: $("dueDate").value };
+    out.innerHTML = noticeHtml(warn, "warn") + invoiceHtml(billState.result);
     $("billActions").style.display = "flex";
   } catch (e) { out.innerHTML = `<div class="notice bad">계산 오류: ${esc(e.message)}</div>`; }
 }
@@ -272,12 +364,19 @@ function invoiceHtml(R) {
   </div>`;
 }
 
+// 가정산 스냅샷: 오차정산 때 비교 기준이 된다 (bill:YYYYMM:신청번호)
 async function saveBill() {
-  const R = billState.result; if (!R) return;
-  const where = await Store.set(`bill:${R.month}:${R.app}`, { expectedSurcharge: R.inv.expectedSurcharge, supply: R.inv.supplyTotal, fund: R.inv.fund,
-    grandTotal: R.inv.grandTotal, customerName: R.customer.name, savedAt: new Date().toISOString() });
+  const R = billState.result; if (!R || R.mode !== "provisional") return;
+  const key = `bill:${R.month}:${R.app}`;
+  if (Store.get(key, null) && !confirm(`${monthLabel(R.month)} ${R.customer.name} 가정산 기록이 이미 있습니다. 덮어쓸까요?\n(오차정산은 이 기록과 비교합니다)`)) return;
+  const inv = R.inv, netByPlant = {};
+  Object.keys(inv.netByPlant).forEach(p => netByPlant[p] = inv.netByPlant[p].fee);
+  const where = await Store.set(key, {
+    supplyTotal: inv.supplyTotal, supply: inv.supplyTotal, energy: inv.energy, netTotal: inv.netTotal, netByPlant, fee: inv.fee,
+    expectedSurcharge: inv.expectedSurcharge, fund: inv.fund, grandTotal: inv.grandTotal,
+    unitPrice: R.ctx.unitPrice, customerName: R.customer.name, savedAt: new Date().toISOString()
+  });
   $("billSaveStatus").textContent = where === "remote" ? "저장 완료 (구글시트)" : "이 브라우저에만 저장됨";
-  renderTrueUpTab(); // 탭6 목록에 이번 청구를 추가
 }
 
 function exportBillExcel() {
@@ -296,165 +395,167 @@ function exportBillExcel() {
   XLSX.writeFile(wb, `청구서_${R.customer.name}_${R.month}.xlsx`);
 }
 
-/* ---------- 오차정산 (탭6): 확정 부가정산금 → 익월 청구 이월 ----------
- * 가정산 청구(bill:YYYYMM:신청번호)에 KPX 확정 부가정산금을 입력하면 과세/비과세로 나눠
- * carry:<익월>:<신청번호> 로 저장한다. 탭5에서 익월 그룹을 고르면 전월 오차정산 칸이 자동으로 채워진다.
- * 시스템 밖(엑셀)에서 만든 청구도 "직접 입력"으로 이월할 수 있다.
+/* ---------- 오차정산 ----------
+ * 같은 달을 KPX 확정 파일(재생E공급량)로 다시 계산해 저장된 가정산(bill:)과 전력량요금·망이용요금·거래수수료를 비교한다.
+ * 확정 부가정산금(과세/비과세)과 차액(과세/비과세)을 carry:<다음달>:<신청번호> 로 저장 → 다음 달 가정산서에 자동으로 들어간다.
+ * 시스템 밖(엑셀)에서 만든 가정산은 비교 기준 값을 직접 입력한다.
  */
-const TU_MANUAL = "__manual";
-const custByApp = app => Store.get("customers", []).find(c => c.appNo === app);
-const monthKo = m => `${m.slice(0, 4)}년 ${Number(m.slice(4))}월`;
-const tuState = { last: null };
-
-function trueUpItems() { // 청구 기록 + 이월 기록의 (대상월, 신청번호) 목록, 최신순
-  const items = {};
-  Store.keys("bill:").forEach(k => { const [, month, app] = k.split(":"); items[month + ":" + app] = { month, app }; });
-  Store.keys("carry:").forEach(k => { const t = Store.get(k, null); if (t && t.sourceMonth) items[t.sourceMonth + ":" + t.app] = { month: t.sourceMonth, app: t.app }; });
-  return Object.keys(items).sort().reverse().map(k => items[k]);
+function fillTrueUpForm(app, month) {
+  const bill = Store.get(`bill:${month}:${app}`, null);
+  const hasBill = !!(bill && bill.energy != null);
+  const saved = Store.get(`carry:${nextYm(month)}:${app}`, null);
+  const prov = hasBill ? bill : (saved && saved.provisional) || {};
+  setVal("pv_supply", prov.supplyTotal); setVal("pv_energy", prov.energy); setVal("pv_net", prov.netTotal); setVal("pv_fee", prov.fee);
+  ["pv_supply", "pv_energy", "pv_net", "pv_fee"].forEach(id => { $(id).readOnly = hasBill; });
+  $("provHint").textContent = hasBill
+    ? `${monthLabel(month)} 가정산 기록(저장 ${new Date(bill.savedAt).toLocaleString()})과 비교합니다.`
+    : `${monthLabel(month)} 가정산 기록이 시스템에 없습니다. 엑셀 등으로 보낸 가정산서의 값을 직접 입력하세요.`;
+  if (saved) {
+    setVal("cs_total", saved.confirmedTotal); setVal("cs_ratio", saved.taxableRatio);
+    setVal("cs_taxable", saved.confirmed.taxable); setVal("cs_exempt", saved.confirmed.exempt);
+    setVal("pd_taxable", saved.prevDiff.taxable); setVal("pd_exempt", saved.prevDiff.exempt); setVal("tu_note", saved.note);
+    $("billSaveStatus").textContent = `저장된 오차정산 있음 (${new Date(saved.savedAt).toLocaleString()})`;
+  } else {
+    setVal("cs_total", ""); setVal("cs_ratio", ratesFor(month).rates.taxableRatio); setVal("tu_note", "");
+    ["cs_taxable", "cs_exempt", "pd_taxable", "pd_exempt"].forEach(id => setVal(id, 0));
+  }
 }
 
-function renderTrueUpTab() {
-  const keep = $("tu_sel") ? $("tu_sel").value : null;
-  const items = trueUpItems();
-  $("tab6").innerHTML = `
-    <div class="card"><h2>오차정산 (확정 부가정산금 → 익월 청구 이월)</h2>
-      <p class="hint">[5. 수요기업 청구]에서 "청구 기록 저장"한 가정산 청구가 목록에 나옵니다. KPX 확정 부가정산금을 입력해 저장하면 다음 달 청구서의 전월 확정 부가정산금·전월 차액 칸이 자동으로 채워집니다.</p>
-      <div class="row"><label>가정산 청구</label><select id="tu_sel" style="min-width:380px">
-        ${items.map(it => { const c = custByApp(it.app); const done = Store.get(`carry:${nextYm(it.month)}:${it.app}`, null);
-          return `<option value="${esc(it.month + ":" + it.app)}">${monthLabel(it.month)} — ${esc(c ? c.name : "미등록")} (${esc(it.app)})${done ? " ✓ 이월 저장됨" : ""}</option>`; }).join("")}
-        <option value="${TU_MANUAL}">직접 입력 (시스템 밖에서 만든 청구)</option></select></div>
-      <div id="tu_form"></div></div>
-    <div id="tu_doc"></div>
-    <div class="row no-print" id="tu_actions" style="display:none; margin-top:10px"><button class="btn secondary" id="tu_xlsx">Excel 다운</button><button class="btn secondary" id="tu_print">인쇄 / PDF 저장</button></div>`;
-  if (keep && Array.from($("tu_sel").options).some(o => o.value === keep)) $("tu_sel").value = keep;
-  $("tu_sel").onchange = renderTrueUpForm;
-  $("tu_xlsx").onclick = exportTrueUpExcel;
-  $("tu_print").onclick = () => window.print();
-  renderTrueUpForm();
+function readProvisional(month, app) {
+  const v = id => $(id).value === "" ? NaN : Number($(id).value);
+  const p = { supplyTotal: v("pv_supply"), energy: v("pv_energy"), netTotal: v("pv_net"), fee: v("pv_fee") };
+  if (Object.values(p).some(isNaN)) return null;
+  const bill = Store.get(`bill:${month}:${app}`, null);
+  if (bill && bill.netByPlant) p.netByPlant = bill.netByPlant;
+  if (bill && bill.expectedSurcharge != null) p.expectedSurcharge = bill.expectedSurcharge;
+  return p;
 }
 
-function renderTrueUpForm() {
-  const sel = $("tu_sel").value, manual = sel === TU_MANUAL;
-  const [month, app] = manual ? ["", ""] : sel.split(":");
-  const bill = manual ? null : Store.get(`bill:${month}:${app}`, null);
-  const carry = manual ? null : Store.get(`carry:${nextYm(month)}:${app}`, null);
-  const c = carry || { confirmed: { taxable: 0, exempt: 0 }, prevDiff: { taxable: 0, exempt: 0 } };
-  const ratio = carry ? carry.taxableRatio : ratesFor(month || cur6()).rates.taxableRatio;
-  const expected = bill ? bill.expectedSurcharge : (carry ? carry.expectedSurcharge : 0);
-  const field = (label, html) => `<div class="adj-item"><label class="adj-label">${label}</label>${html}</div>`;
-  const num = (id, v, extra) => `<input type="number" id="${id}" value="${v == null ? "" : v}" step="any"${extra || ""}>`;
-  $("tu_form").innerHTML = `
-    <div class="adj-grid">
-      ${field("대상 정산월 (YYYYMM)", `<input id="tu_month" value="${esc(month)}" maxlength="6"${manual ? ' placeholder="예: 202608"' : " readonly"}>`)}
-      ${field("수요기업 (신청번호)", manual
-        ? `<select id="tu_app">${Store.get("customers", []).map(x => `<option value="${esc(x.appNo)}">${esc(x.name)} (${esc(x.appNo)})</option>`).join("")}</select>`
-        : `<input id="tu_app" value="${esc(app)}" readonly>`)}
-      ${field("가정산 예상 부가정산금 (원)", num("tu_expected", expected, bill ? " readonly" : ""))}
-    </div>
-    <h3 class="sub">KPX 확정 부가정산금</h3>
-    <div class="adj-grid">
-      ${field("확정 부가정산금 총액 (원)", num("tu_total", carry ? carry.confirmedTotal : ""))}
-      ${field("과세 비율 (대상월 KPX 통지값)", num("tu_ratio", ratio))}
-      ${field("과세분 / 비과세분 (원)", `<div class="row" style="gap:6px; margin:0">${num("tu_taxable", c.confirmed.taxable)}${num("tu_exempt", c.confirmed.exempt)}</div>`)}
-    </div>
-    <p class="hint">총액·비율을 입력하면 자동으로 나눕니다. KPX 통지서에 과세/비과세 금액이 따로 있으면 그 금액으로 고쳐 쓰세요.</p>
-    <h3 class="sub">전월 차액 (오차정산 결과, 익월 청구서에 가감)</h3>
-    <div class="adj-grid">
-      ${field("차액 (과세, 원)", num("tu_pd_taxable", c.prevDiff.taxable))}
-      ${field("차액 (비과세, 원)", num("tu_pd_exempt", c.prevDiff.exempt))}
-      ${field("메모", `<input id="tu_note" value="${esc(carry ? carry.note : "")}">`)}
-    </div>
-    <div class="row" style="margin-top:10px"><button class="btn secondary" id="tu_view">오차정산서 보기</button><button class="btn accent" id="tu_save">저장 (익월 청구로 이월)</button>
-      <span id="tu_status" class="status warn" style="background:none">${carry ? "저장됨: " + new Date(carry.savedAt).toLocaleString() : ""}</span></div>`;
-  $("tu_total").oninput = $("tu_ratio").oninput = splitTrueUp;
-  $("tu_view").onclick = () => showTrueUp(false);
-  $("tu_save").onclick = () => showTrueUp(true);
-  $("tu_doc").innerHTML = ""; $("tu_actions").style.display = "none"; tuState.last = null;
-  if (carry) showTrueUp(false);
-}
-function cur6() { const d = new Date(); return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}`; }
-
-function splitTrueUp() {
-  if ($("tu_total").value === "") return;
-  const s = Engine.splitSurcharge(Number($("tu_total").value) || 0, { taxableRatio: Number($("tu_ratio").value) || 0 });
-  $("tu_taxable").value = s.taxable; $("tu_exempt").value = s.exempt;
-}
-
-function readTrueUp() {
+function readTrueUpFields() {
   const n = id => Number($(id).value) || 0;
   const t = {
-    sourceMonth: $("tu_month").value.trim(), app: $("tu_app").value.trim(),
-    expectedSurcharge: n("tu_expected"), confirmedTotal: n("tu_total"), taxableRatio: Number($("tu_ratio").value),
-    confirmed: { taxable: n("tu_taxable"), exempt: n("tu_exempt") },
-    prevDiff: { taxable: n("tu_pd_taxable"), exempt: n("tu_pd_exempt") }, note: $("tu_note").value.trim()
+    confirmedTotal: n("cs_total"), taxableRatio: Number($("cs_ratio").value),
+    confirmed: { taxable: n("cs_taxable"), exempt: n("cs_exempt") },
+    prevDiff: { taxable: n("pd_taxable"), exempt: n("pd_exempt") }, note: $("tu_note").value.trim()
   };
-  if (!/^\d{6}$/.test(t.sourceMonth)) throw new Error("대상 정산월은 YYYYMM 6자리입니다.");
-  if (!t.app) throw new Error("수요기업을 선택하세요. (없으면 [4. 등록·요율]에서 먼저 등록)");
   if (t.confirmed.taxable + t.confirmed.exempt !== t.confirmedTotal)
-    throw new Error(`과세분+비과세분(${(t.confirmed.taxable + t.confirmed.exempt).toLocaleString()})이 확정 총액(${t.confirmedTotal.toLocaleString()})과 다릅니다.`);
+    throw new Error(`확정 부가정산금 과세+비과세(${(t.confirmed.taxable + t.confirmed.exempt).toLocaleString()})가 총액(${t.confirmedTotal.toLocaleString()})과 다릅니다.`);
   return t;
 }
 
-async function showTrueUp(save) {
-  const st = $("tu_status");
+function runTrueUp() {
+  const out = $("billResult"); const warn = [], err = [];
   try {
-    const t = readTrueUp();
-    if (save) {
-      const key = `carry:${nextYm(t.sourceMonth)}:${t.app}`;
-      if (t.sourceMonth !== ($("tu_sel").value.split(":")[0]) && Store.get(key, null) && !confirm(`${monthLabel(t.sourceMonth)} ${t.app} 오차정산이 이미 있습니다. 덮어쓸까요?`)) return;
-      t.savedAt = new Date().toISOString();
-      const where = await Store.set(key, t);
-      // 탭5에서 바로 그 그룹·월을 보고 있으면 즉시 반영
-      const g = billState.kpx && billState.kpx.groups[$("groupSel").value];
-      if (g && $("groupSel").value === t.app && g.month === nextYm(t.sourceMonth)) onGroupChange();
-      // 목록(✓ 표시)을 새로 그리고 방금 저장한 항목을 다시 연다
-      renderTrueUpTab(); $("tu_sel").value = t.sourceMonth + ":" + t.app; renderTrueUpForm();
-      $("tu_status").textContent = (where === "remote" ? "저장 완료 (구글시트)" : "이 브라우저에만 저장됨") + ` → ${monthLabel(nextYm(t.sourceMonth))} 청구서에 반영됩니다.`;
-      $("tu_status").className = "status " + (where === "remote" ? "ok" : "warn");
-      return;
+    const P = prepareGroup(err, warn);
+    const prov = readProvisional(P.g.month, P.app);
+    if (!prov) err.push("가정산 값(공급량·전력량요금·망이용요금·거래수수료)을 모두 입력하세요.");
+    if (err.length) { out.innerHTML = noticeHtml(err, "bad"); return; }
+    if (billState.ami) {
+      const miss = Parsers.missingDates(P.g.month, billState.ami.dates);
+      if (miss.length) warn.push(`사용량 파일에 없는 날짜 ${miss.length}일 — 해당일은 KPX 전기사용량으로 표시합니다. (공급량·금액에는 영향 없음)`);
+      P.days.forEach(d => {
+        if (!d.usage) { d.usage = d.kpxUsage; return; }
+        if (d.kpxUsage) d.usage = d.usage.map((v, h) => v == null ? d.kpxUsage[h] : v); // 미수신 시간은 KPX 값으로
+      });
+    } else {
+      P.days.forEach(d => { d.usage = d.kpxUsage; });
+      warn.push("고객 사용량 파일이 없어 KPX 파일의 전기사용량으로 표시했습니다. (공급량·금액에는 영향 없음)");
     }
-    tuState.last = t;
-    $("tu_doc").innerHTML = trueUpHtml(t);
-    $("tu_actions").style.display = "flex";
-  } catch (e) { st.textContent = e.message; st.className = "status bad"; }
+    const match = Engine.matchMonthConfirmed(P.days, P.rates);
+    if (!match.totals.supply) warn.push("KPX 재생E공급량 합계가 0입니다. 확정 파일이 맞는지 확인하세요.");
+    const conf = Engine.invoice(match, { unitPrice: P.customer.unitPrice, demandRegion: P.customer.demandRegion, plants: P.plants }, P.rates);
+    const diff = Engine.trueUpDiff(prov, conf);
+    setVal("pd_taxable", diff.taxable); // 비교 결과로 채움 (직접 고친 값은 다시 계산하면 덮어씀)
+    billState.result = { mode: "trueup", app: P.app, month: P.g.month, customer: P.customer, rates: P.rates, match, conf, prov, diff, warn };
+    renderTrueUpResult();
+  } catch (e) { out.innerHTML = `<div class="notice bad">계산 오류: ${esc(e.message)}</div>`; }
 }
 
-function trueUpHtml(t) {
-  const c = custByApp(t.app) || { name: t.app };
-  const nm = nextYm(t.sourceMonth), vatRate = ratesFor(nm).rates.vatRate, vat = x => Engine.round(x * vatRate);
-  const m = Number(t.sourceMonth.slice(4));
+function renderTrueUpResult() {
+  const R = billState.result;
+  try { R.fields = readTrueUpFields(); } catch (e) { $("billResult").innerHTML = `<div class="notice bad">${esc(e.message)}</div>`; $("billActions").style.display = "none"; return false; }
+  $("billResult").innerHTML = noticeHtml(R.warn, "warn") + trueUpHtml(R);
+  $("billActions").style.display = "flex";
+  return true;
+}
+
+function trueUpHtml(R) {
+  const { customer: c, prov, conf, diff, match, fields: t, rates } = R;
+  const m = Number(R.month.slice(4)), nm = nextYm(R.month);
+  const vatRate = ratesFor(nm).rates.vatRate, vat = x => Engine.round(x * vatRate);
+  const loads = ["경부하", "중간부하", "최대부하"];
+  const sign = n => (n > 0 ? "+" : "") + Math.round(n).toLocaleString();
+  const cmp = (l, a, b, d, unit) => `<tr><td class="label">${l}</td><td class="num">${a == null ? "-" : Math.round(a).toLocaleString()}${unit}</td><td class="num">${Math.round(b).toLocaleString()}${unit}</td><td class="num">${d == null ? "-" : sign(d) + unit}</td></tr>`;
   const row = (l, a, basis, cls) => `<tr${cls ? ` class="${cls}"` : ""}><td class="label">${l}</td><td class="num">${a}</td><td class="basis">${basis || ""}</td></tr>`;
+  const provSum = prov.energy + prov.netTotal + prov.fee, confSum = conf.energy + conf.netTotal + conf.fee;
   const taxableSum = t.confirmed.taxable + t.prevDiff.taxable, exemptSum = t.confirmed.exempt + t.prevDiff.exempt;
   const vatSum = vat(t.confirmed.taxable) + vat(t.prevDiff.taxable);
   return `<div class="doc">
-    <h1 class="title">직접PPA 부가정산금 오차정산서</h1><div class="month">(${monthKo(t.sourceMonth)} 확정 → ${monthKo(nm)} 청구 반영)</div>
-    <table class="doc-table"><tr><td class="label">수요기업</td><td>${esc(c.name)}</td><td class="label">KPX 신청번호</td><td>${esc(t.app)}</td></tr></table>
+    <h1 class="title">직접PPA 전력거래대금 오차정산서</h1><div class="month">(${monthKo(R.month)} 확정)</div>
+    <table class="doc-table"><tr><td class="label">수요기업</td><td>${esc(c.name)}</td><td class="label">사업자등록번호</td><td>${esc(c.bizNo)}</td></tr>
+      <tr><td class="label">전기사용장소</td><td>${esc(c.address)}</td><td class="label">담당자/연락처</td><td>${esc(c.manager)} ${esc(c.contact)}</td></tr></table>
+    <table class="doc-table"><tr><th>구분 (확정)</th><th>전기사용량</th><th>공급량</th><th>부족전력량(단순)</th><th>부족전력량(손실률)</th></tr>
+      ${loads.map(l => { const b = match.byLoad[l] || { usage: 0, supply: 0, deficitSimple: 0, deficitLoss: 0 };
+        return `<tr><td>${l}</td><td class="num">${kwhStr(b.usage)}</td><td class="num">${kwhStr(b.supply)}</td><td class="num">${kwhStr(b.deficitSimple)}</td><td class="num">${kwhStr(b.deficitLoss)}</td></tr>`; }).join("")}
+      <tr class="total"><td>계</td><td class="num">${kwhStr(match.totals.usage)}</td><td class="num">${kwhStr(match.totals.supply)}</td><td class="num">${kwhStr(match.totals.deficitSimple)}</td><td class="num">${kwhStr(match.totals.deficitLoss)}</td></tr></table>
+    <table class="doc-table"><tr><th>항목</th><th>가정산</th><th>확정</th><th>차액 (확정 − 가정산)</th></tr>
+      ${cmp("공급량", prov.supplyTotal, conf.supplyTotal, diff.supply, " kWh")}
+      ${cmp(`전력량요금 (${c.unitPrice} 원/kWh)`, prov.energy, conf.energy, diff.energy, " 원")}
+      ${cmp("송배전용 전기설비 이용요금", prov.netTotal, conf.netTotal, diff.net, " 원")}
+      ${cmp(`거래수수료 (${rates.tradeFee} 원/kWh)`, prov.fee, conf.fee, diff.fee, " 원")}
+      <tr class="total"><td class="label">계 (과세)</td><td class="num">${won(provSum)}</td><td class="num">${won(confSum)}</td><td class="num">${sign(diff.taxable)} 원</td></tr></table>
+    <h3 class="sub">${m}월 부가정산금</h3>
     <table class="doc-table"><tr><th>항목</th><th>금액</th><th>산출근거</th></tr>
-      ${row(`${m}월 예상 부가정산금 (가정산)`, won(t.expectedSurcharge), "가정산 청구 시 기반기금 산정에만 사용 (청구 미포함)")}
+      ${prov.expectedSurcharge != null ? row(`${m}월 예상 부가정산금 (가정산)`, won(prov.expectedSurcharge), "가정산 시 기반기금 산정에만 사용 (청구 미포함)") : ""}
       ${row(`${m}월 확정 부가정산금`, won(t.confirmedTotal), "KPX 확정 통지")}
-      ${row("차이 (확정 − 예상)", won(t.confirmedTotal - t.expectedSurcharge), "참고")}
-      ${row("과세분", won(t.confirmed.taxable), `확정 총액 × 과세 비율 ${t.taxableRatio}`)}
-      ${row("비과세분", won(t.confirmed.exempt), "확정 총액 − 과세분")}</table>
-    <h3 class="sub">${monthKo(nm)} 청구서 반영 내역</h3>
+      ${row("과세분", won(t.confirmed.taxable), `과세 비율 ${t.taxableRatio}`)}
+      ${row("비과세분", won(t.confirmed.exempt), "총액 − 과세분")}</table>
+    <h3 class="sub">${monthKo(nm)} 가정산서 반영 내역</h3>
     <table class="doc-table"><tr><th>항목</th><th>금액</th><th>비고</th></tr>
-      ${row(`${m}월 확정 부가정산금 (과세)`, won(t.confirmed.taxable), `세금계산서 · 부가세 ${won(vat(t.confirmed.taxable))} 별도`)}
-      ${row("전월 차액 (과세)", won(t.prevDiff.taxable), `세금계산서 · 부가세 ${won(vat(t.prevDiff.taxable))} 별도`)}
-      ${row(`${m}월 확정 부가정산금 (비과세)`, won(t.confirmed.exempt), "청구서 계")}
-      ${row("전월 차액 (비과세)", won(t.prevDiff.exempt), "청구서 계")}
+      ${row(`${m}월 확정 부가정산금 (과세)`, won(t.confirmed.taxable), `부가세 ${won(vat(t.confirmed.taxable))} 별도`)}
+      ${row("전월 차액 (과세)", won(t.prevDiff.taxable), `부가세 ${won(vat(t.prevDiff.taxable))} 별도` + (t.prevDiff.taxable !== diff.taxable ? ` · ※ 비교 결과(${sign(diff.taxable)})와 다르게 입력` : ""))}
+      ${row(`${m}월 확정 부가정산금 (비과세)`, won(t.confirmed.exempt), "")}
+      ${row("전월 차액 (비과세)", won(t.prevDiff.exempt), "")}
       ${row("반영 합계 (부가세 포함)", won(taxableSum + vatSum + exemptSum), `과세 ${won(taxableSum)} + 부가세 ${won(vatSum)} + 비과세 ${won(exemptSum)}`, "pay")}</table>
+    <h3 class="sub">발전소별 망이용요금</h3>
+    <table class="doc-table"><tr><th>발전소</th><th>확정 공급량(반올림)</th><th>가정산</th><th>확정</th><th>차액</th></tr>
+      ${Object.keys(conf.netByPlant).map(p => { const d = diff.netByPlant[p];
+        return `<tr><td>${esc(p)}</td><td class="num">${conf.netByPlant[p].supplyRounded.toLocaleString()} kWh</td><td class="num">${d.prov == null ? "-" : won(d.prov)}</td><td class="num">${won(d.conf)}</td><td class="num">${d.diff == null ? "-" : sign(d.diff) + " 원"}</td></tr>`; }).join("")}</table>
     ${t.note ? `<p class="hint">메모: ${esc(t.note)}</p>` : ""}
+    <table class="doc-table"><tr><td class="label">발행처</td><td>${esc(BUYER.bizName)}</td><td class="label">사업자등록번호</td><td>${esc(BUYER.bizRegNo)}</td></tr></table>
   </div>`;
 }
 
+async function saveTrueUp() {
+  const R = billState.result; if (!R || R.mode !== "trueup") return;
+  if (!renderTrueUpResult()) return; // 입력값을 다시 읽어 문서를 갱신하고 검증
+  const key = `carry:${nextYm(R.month)}:${R.app}`;
+  const pick = o => ({ supplyTotal: o.supplyTotal, energy: o.energy, netTotal: o.netTotal, fee: o.fee });
+  const rec = Object.assign({
+    sourceMonth: R.month, app: R.app, customerName: R.customer.name,
+    provisional: pick(R.prov), confirmedCalc: pick(R.conf),
+    diff: { supply: R.diff.supply, energy: R.diff.energy, net: R.diff.net, fee: R.diff.fee, taxable: R.diff.taxable },
+    expectedSurcharge: R.prov.expectedSurcharge == null ? null : R.prov.expectedSurcharge
+  }, R.fields, { savedAt: new Date().toISOString() });
+  const where = await Store.set(key, rec);
+  $("billSaveStatus").textContent = (where === "remote" ? "저장 완료 (구글시트)" : "이 브라우저에만 저장됨") + ` → ${monthLabel(nextYm(R.month))} 가정산서에 자동 반영`;
+}
+
 function exportTrueUpExcel() {
-  const t = tuState.last; if (!t) return;
-  const c = custByApp(t.app) || { name: t.app };
-  const aoa = [["직접PPA 부가정산금 오차정산서", t.sourceMonth, "→ " + nextYm(t.sourceMonth) + " 청구 반영"], ["수요기업", c.name, t.app], [],
-    ["항목", "금액"], ["예상 부가정산금(가정산)", t.expectedSurcharge], ["확정 부가정산금", t.confirmedTotal], ["차이(확정-예상)", t.confirmedTotal - t.expectedSurcharge],
-    ["과세 비율", t.taxableRatio], ["과세분", t.confirmed.taxable], ["비과세분", t.confirmed.exempt],
-    ["전월 차액(과세)", t.prevDiff.taxable], ["전월 차액(비과세)", t.prevDiff.exempt], ["메모", t.note]];
+  const R = billState.result; if (!R || R.mode !== "trueup" || !renderTrueUpResult()) return;
+  const { prov, conf, diff, fields: t } = R;
+  const aoa = [["직접PPA 전력거래대금 오차정산서", R.month + " 확정"], ["수요기업", R.customer.name, R.app], [],
+    ["항목", "가정산", "확정", "차액"],
+    ["공급량(kWh)", prov.supplyTotal, conf.supplyTotal, diff.supply], ["전력량요금", prov.energy, conf.energy, diff.energy],
+    ["망이용요금", prov.netTotal, conf.netTotal, diff.net], ["거래수수료", prov.fee, conf.fee, diff.fee],
+    ["계(과세)", prov.energy + prov.netTotal + prov.fee, conf.energy + conf.netTotal + conf.fee, diff.taxable], [],
+    ["확정 부가정산금", t.confirmedTotal], ["과세 비율", t.taxableRatio], ["과세분", t.confirmed.taxable], ["비과세분", t.confirmed.exempt], [],
+    [nextYm(R.month) + " 가정산 반영"], ["전월 확정 부가정산금(과세)", t.confirmed.taxable], ["전월 차액(과세)", t.prevDiff.taxable],
+    ["전월 확정 부가정산금(비과세)", t.confirmed.exempt], ["전월 차액(비과세)", t.prevDiff.exempt], ["메모", t.note], [],
+    ["발전소", "확정 공급량", "가정산 망이용", "확정 망이용", "차액"],
+    ...Object.keys(conf.netByPlant).map(p => [p, conf.netByPlant[p].supplyRounded, diff.netByPlant[p].prov, diff.netByPlant[p].conf, diff.netByPlant[p].diff])];
   const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), "오차정산서");
-  XLSX.writeFile(wb, `오차정산서_${c.name}_${t.sourceMonth}.xlsx`);
+  XLSX.writeFile(wb, `오차정산서_${R.customer.name}_${R.month}.xlsx`);
 }
 
 /* ---------- 초기화 ---------- */
@@ -463,36 +564,16 @@ function renderBillingTabs() {
     <div class="card"><h2>월별 요율 (KPX 통지서)</h2><div id="ratesBody"></div></div>
     <div class="card"><h2>발전소 등록</h2><p class="hint">발전기명은 KPX 직접전력거래량 파일의 "발전기명"과 정확히 같아야 합니다. 지역은 최초 등록 시 한 번만 지정합니다.</p><div id="plantsBody"></div></div>
     <div class="card"><h2>수요기업 계약</h2><p class="hint">KPX 신청번호가 같은 발전소들이 한 그룹입니다. 신청번호로 업로드 파일과 수요기업이 자동으로 연결됩니다.</p><div id="custBody"></div></div>`;
-  $("tab5").innerHTML = `
-    <div class="card"><div class="row"><label>① KPX 직접전력거래량 (.xlsx)</label><input type="file" id="kpxFile" accept=".xlsx,.xls"><span id="kpxStatus" class="status warn" style="display:inline-flex">미선택</span></div>
-      <div class="row"><label>② 고객 15분 사용량 (.xls)</label><input type="file" id="amiFile" accept=".xls,.html,.htm"><span id="amiStatus" class="status warn" style="display:inline-flex">미선택 (없으면 발전량 전량 공급으로 계산)</span></div>
-      <div class="row"><label>③ 그룹(신청번호)</label><select id="groupSel" style="min-width:380px"></select><span id="billMonthBadge" class="badge"></span></div></div>
-    <div class="card"><h2>전월 오차정산 반영</h2><p class="hint" id="prevHint"></p>
-      <div class="row"><label>확정 부가정산금 총액</label><input type="number" id="cs_total" style="width:130px"><label>과세 비율</label><input type="number" id="cs_ratio" step="any" style="width:90px"><button class="btn secondary" id="cs_split">분할</button>
-        <span class="hint">비율은 해당 부가정산금 월의 KPX 통지값입니다.</span></div>
-      <div class="adj-grid">
-        <div class="adj-item"><label class="adj-label">전월 확정 부가정산금 (과세)</label><input type="number" id="cs_taxable" value="0"></div>
-        <div class="adj-item"><label class="adj-label">전월 확정 부가정산금 (비과세)</label><input type="number" id="cs_exempt" value="0"></div>
-        <div class="adj-item"><label class="adj-label">전월 차액 (과세)</label><input type="number" id="pd_taxable" value="0"></div>
-        <div class="adj-item"><label class="adj-label">전월 차액 (비과세)</label><input type="number" id="pd_exempt" value="0"></div>
-        <div class="adj-item"><label class="adj-label">납부기한</label><input type="date" id="dueDate"></div></div>
-      <div class="row" style="margin-top:10px"><button class="btn accent" id="calcBtn">계산하기</button></div></div>
-    <div id="billResult"></div>
-    <div class="row no-print" id="billActions" style="display:none; margin-top:10px"><button class="btn secondary" id="billXlsx">Excel 다운</button><button class="btn secondary" id="billPrint">인쇄 / PDF 저장</button><button class="btn accent" id="billSave">청구 기록 저장</button><span id="billSaveStatus" class="status warn" style="background:none"></span></div>`;
-  $("kpxFile").onchange = e => e.target.files[0] && onKpxFile(e.target.files[0]);
-  $("amiFile").onchange = e => e.target.files[0] && onAmiFile(e.target.files[0]);
-  $("groupSel").onchange = onGroupChange;
-  $("cs_split").onclick = splitConfirmed;
-  $("calcBtn").onclick = runCalc;
-  $("billXlsx").onclick = exportBillExcel;
-  $("billPrint").onclick = () => window.print();
-  $("billSave").onclick = saveBill;
+  $("tab5").innerHTML = `<div id="billBody"></div>`;
 }
 
 async function initBilling() {
   renderBillingTabs();
+  document.querySelectorAll('input[name="settleMode"]').forEach(r => r.addEventListener("change", onModeChange));
+  $("amiFile").addEventListener("change", e => e.target.files[0] && onAmiFile(e.target.files[0]));
+  updateModeHint(); renderBillingBody();
   const ok = await Store.load();
   if (!ok) console.warn("[billing] GAS 앱데이터를 불러오지 못해 이 브라우저의 저장값만 사용합니다.");
   const m = new Date(); const cur = `${m.getFullYear()}${String(m.getMonth() + 1).padStart(2, "0")}`;
-  renderRatesCard(cur); renderPlantsCard(); renderCustomersCard(); renderTrueUpTab();
+  renderRatesCard(cur); renderPlantsCard(); renderCustomersCard(); renderBillingBody();
 }

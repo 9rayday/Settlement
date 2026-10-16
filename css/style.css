@@ -127,16 +127,23 @@ table.doc-table tr.pay td{ font-weight:700; font-size:13.5px; }
   .note{ font-size:10px; }
 }
 
-/* ===== 수요기업 청구 모듈 (탭4/5/6) ===== */
+/* ===== 수요기업 정산 모듈 (탭1 정산 구분, 탭4/5) ===== */
 .hint{ font-size:12px; color:var(--sub); margin:2px 0 8px; }
 h3.sub{ font-size:13px; color:var(--navy); margin:16px 0 6px; }
 .notice{ border-radius:8px; padding:10px 14px; margin:0 0 12px; font-size:12.5px; line-height:1.7; }
 .notice.warn{ background:#FFF6E5; border:1px solid #E8C27A; color:#6B4A0E; }
 .notice.bad{ background:#FDECEA; border:1px solid #E3A09A; color:var(--danger); }
-#tab4 input, #tab5 input:not([type=file]):not([type=checkbox]), #tab6 input{ padding:6px 8px; border-radius:6px; border:1px solid var(--line); font-size:13px; }
-#tab5 .adj-item input, #tab6 .adj-item input, #tab6 .adj-item select{ width:100%; box-sizing:border-box; min-width:0; }
-#tab6 input[readonly]{ background:#F3F4F6; color:var(--sub); }
+.mode-row{ display:flex; flex-wrap:wrap; align-items:center; gap:10px 16px; padding-bottom:12px; border-bottom:1px solid var(--line); }
+.mode-title{ font-weight:700; color:var(--navy); font-size:13px; }
+.mode-opt{ display:inline-flex; align-items:center; gap:6px; padding:6px 12px; border:1px solid var(--line); border-radius:999px; cursor:pointer; font-size:13px; background:#fff; }
+.mode-opt:has(input:checked){ border-color:var(--accent); color:var(--accent); font-weight:700; background:#FBEFE3; }
+.mode-badge{ display:inline-flex; padding:4px 12px; border-radius:999px; font-size:12.5px; font-weight:700; }
+.mode-badge.provisional{ background:#E6F5F1; color:var(--accent-2); }
+.mode-badge.trueup{ background:#FBEFE3; color:var(--accent); }
+#tab4 input, #tab5 input:not([type=file]):not([type=checkbox]){ padding:6px 8px; border-radius:6px; border:1px solid var(--line); font-size:13px; }
+#tab5 .adj-item input{ width:100%; box-sizing:border-box; min-width:0; }
+#tab5 input[readonly]{ background:#F3F4F6; color:var(--sub); }
 #tab4 table.grid input{ width:100%; box-sizing:border-box; }
 #tab4 table.grid select{ min-width:0; }
-#tab5 #billResult .doc, #tab6 #tu_doc .doc{ background:#fff; border:1px solid var(--line); border-radius:10px; padding:20px 22px; margin-bottom:12px; }
-@media print{ .notice, #billActions, #tu_actions{ display:none !important; } #tab4{ display:none !important; } }
+#tab5 #billResult .doc{ background:#fff; border:1px solid var(--line); border-radius:10px; padding:20px 22px; margin-bottom:12px; }
+@media print{ .notice, #billActions{ display:none !important; } #tab4{ display:none !important; } }

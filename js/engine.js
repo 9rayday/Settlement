@@ -75,6 +75,51 @@
     return { supplyByPlant, genByPlant, excessByPlant, byLoad, totals: tot };
   };
 
+  /* ---------- 1-b) 확정(오차정산) 매칭 ----------
+   * KPX 확정 파일의 재생E공급량(발전소·시간별)을 그대로 공급량으로 쓴다. 금액 계산(invoice)은 가정산과 같다.
+   * days: [{date, load, usage:[24]|null, gen:{plant:[24]}, supply:{plant:[24]}}]  반환 형태는 matchMonth 와 같다.
+   * 사용량이 없는 시간은 사용량 = 공급량(부족 0)으로 본다.
+   */
+  E.matchMonthConfirmed = function (days, rates) {
+    const loss = (rates && rates.transLossRate != null) ? rates.transLossRate : E.DEFAULT_RATES.transLossRate;
+    const supplyByPlant = {}, genByPlant = {}, excessByPlant = {};
+    const byLoad = {};
+    const tot = { usage: 0, gen: 0, supply: 0, excess: 0, deficitSimple: 0, deficitLoss: 0 };
+    days.forEach(d => {
+      for (let h = 0; h < 24; h++) {
+        let st = 0, gt = 0;
+        Object.keys(d.gen).forEach(p => {
+          const g = d.gen[p][h] || 0, s = ((d.supply || {})[p] || [])[h] || 0;
+          supplyByPlant[p] = (supplyByPlant[p] || 0) + s;
+          genByPlant[p] = (genByPlant[p] || 0) + g;
+          excessByPlant[p] = (excessByPlant[p] || 0) + (g - s);
+          st += s; gt += g;
+        });
+        const u = (d.usage && d.usage[h] != null) ? d.usage[h] : st;
+        const deficit = Math.max(0, u - st);
+        const b = byLoad[d.load[h]] || (byLoad[d.load[h]] = { usage: 0, supply: 0, deficitSimple: 0, deficitLoss: 0 });
+        b.usage += u; b.supply += st; b.deficitSimple += deficit; b.deficitLoss += st * loss;
+        tot.usage += u; tot.gen += gt; tot.supply += st; tot.excess += gt - st; tot.deficitSimple += deficit; tot.deficitLoss += st * loss;
+      }
+    });
+    return { supplyByPlant, genByPlant, excessByPlant, byLoad, totals: tot };
+  };
+
+  /* ---------- 1-c) 오차정산 비교 ----------
+   * 가정산 청구(prov)와 확정 재계산(conf)의 전력량요금·망이용요금·거래수수료 차이 (확정 − 가정산). 모두 과세 항목.
+   * prov: { supplyTotal, energy, netTotal, fee, netByPlant?:{plant: fee} }  conf: E.invoice 결과
+   */
+  E.trueUpDiff = function (prov, conf) {
+    const d = { supply: conf.supplyTotal - prov.supplyTotal, energy: conf.energy - prov.energy, net: conf.netTotal - prov.netTotal, fee: conf.fee - prov.fee };
+    d.taxable = d.energy + d.net + d.fee;
+    d.netByPlant = {};
+    Object.keys(conf.netByPlant).forEach(p => {
+      const before = prov.netByPlant && prov.netByPlant[p] != null ? prov.netByPlant[p] : null;
+      d.netByPlant[p] = { prov: before, conf: conf.netByPlant[p].fee, diff: before == null ? null : conf.netByPlant[p].fee - before };
+    });
+    return d;
+  };
+
   /* ---------- 2) 망이용요금 (발전소별) ----------
    * TRUNC(ROUND(공급량)×발전측) + TRUNC(ROUND(공급량)×(1−송전손실률)×수요측) [+ 배전연결: TRUNC(ROUND(공급량)×(1−종합손실률)×3.05)]
    */
