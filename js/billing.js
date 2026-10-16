@@ -1,6 +1,6 @@
 /* ============ 수요기업 정산 모듈 UI (가정산서 / 오차정산서) ============
  * 정산 > 전기사용자 페이지: 위쪽 업로드 카드(정산 구분 + KPX·사용량 업로드, upload.js 가 onKpxFile 호출) + 가정산서/오차정산서
- * 정산요율관리 > KPX 요율 관리(#tab4): 월별 요율. 발전소·전기사용자 등록은 js/registry.js
+ * 정산요율관리 > KPX 요율 관리(#tab4): js/kpxrates.js (월별 통지값 카드만 여기). 발전소·전기사용자 등록은 js/registry.js
  * 계산은 js/engine.js, 파일 해석은 js/parsers.js. 여기서는 화면과 저장만 다룬다.
  */
 const INVOICE_PREFIX = "200005"; // 수요기업 청구서 번호 접두 (발전사업자 정산서는 BUYER.invoicePrefix)
@@ -12,18 +12,28 @@ const $ = id => document.getElementById(id);
 
 const billState = { kpx: null, ami: null, amiName: "", result: null };
 
-/* ---------- 요율 ---------- */
+/* ---------- 요율 ----------
+ * 월별 KPX 통지값(rates:YYYYMM: 부가정산금 단가·과세 비율·거래수수료·기금율·부가세율) +
+ * 송전요금·배전요금·손실률은 KPX 요율 관리의 버전(적용일자 <= 정산월 1일) 값으로 덮어쓴다 (js/kpxrates.js)
+ */
 function ratesFor(month) {
+  let base, source;
   const exact = Store.get("rates:" + month, null);
-  if (exact) return { rates: exact, source: "저장된 값" };
   const earlier = Store.keys("rates:").filter(k => k.slice(6) < month).pop();
-  if (earlier) return { rates: Object.assign({}, Store.get(earlier), { month }), source: `${earlier.slice(6)} 값 복사` };
-  return { rates: Object.assign({}, Engine.DEFAULT_RATES, { month }), source: "기본값" };
+  if (exact) { base = exact; source = "저장된 값"; }
+  else if (earlier) { base = Store.get(earlier); source = `${earlier.slice(6)} 값 복사`; }
+  else { base = {}; source = "기본값"; }
+  let rates = Object.assign({}, Engine.DEFAULT_RATES, base, { month });
+  if (/^\d{6}$/.test(month) && typeof netVersionFor === "function") rates = applyNetVersion(rates, netVersionFor(`${month.slice(0, 4)}-${month.slice(4)}-01`));
+  return { rates, source };
 }
+function cur6() { const d = new Date(); return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}`; }
 
 function numInput(id, val, step) { return `<input type="number" id="${id}" value="${val}" step="${step || "any"}" style="width:110px">`; }
 
 function renderRatesCard(month) {
+  if (!$("ratesBody")) return;
+  month = month || cur6();
   const { rates: r, source } = ratesFor(month);
   $("ratesBody").innerHTML = `
     <div class="row"><label>정산월(YYYYMM)</label><input id="rt_month" value="${esc(month)}" maxlength="6" style="width:90px">
@@ -32,17 +42,10 @@ function renderRatesCard(month) {
       <div class="adj-item"><label class="adj-label">예상 부가정산금 단가 (원/kWh)</label>${numInput("rt_surcharge", r.surcharge)}</div>
       <div class="adj-item"><label class="adj-label">확정 부가정산금 과세 비율</label>${numInput("rt_taxable", r.taxableRatio)}</div>
       <div class="adj-item"><label class="adj-label">거래수수료 (원/kWh)</label>${numInput("rt_tradeFee", r.tradeFee)}</div>
-      <div class="adj-item"><label class="adj-label">송전손실률</label>${numInput("rt_transLoss", r.transLossRate)}</div>
-      <div class="adj-item"><label class="adj-label">종합손실률 (배전연결)</label>${numInput("rt_totalLoss", r.totalLossRate)}</div>
-      <div class="adj-item"><label class="adj-label">배전 이용요금 (원/kWh)</label>${numInput("rt_dist", r.distribution)}</div>
       <div class="adj-item"><label class="adj-label">전력산업기반기금율</label>${numInput("rt_fund", r.fundRate)}</div>
       <div class="adj-item"><label class="adj-label">부가세율</label>${numInput("rt_vat", r.vatRate)}</div>
     </div>
-    <h3 class="sub">발전측 송전요금 (원/kWh, 발전소 지역별)</h3>
-    <div class="adj-grid">${GEN_REGIONS.map(k => `<div class="adj-item"><label class="adj-label">${k}</label>${numInput("rt_g_" + k, r.genSide[k])}</div>`).join("")}</div>
-    <h3 class="sub">수요측 송전요금 (원/kWh, 수요지 지역별)</h3>
-    <div class="adj-grid">${DEMAND_REGIONS.map(k => `<div class="adj-item"><label class="adj-label">${k}</label>${numInput("rt_d_" + k, r.demandSide[k])}</div>`).join("")}</div>
-    <div class="row" style="margin-top:10px"><button class="btn accent" id="rt_save">이 월 요율 저장</button><span id="rt_status" class="status warn" style="background:none"></span></div>`;
+    <div class="row" style="margin-top:10px"><button class="btn accent" id="rt_save">이 월 통지값 저장</button><span id="rt_status" class="status warn" style="background:none"></span></div>`;
   $("rt_load").onclick = () => renderRatesCard($("rt_month").value.trim());
   $("rt_save").onclick = saveRates;
 }
@@ -51,13 +54,7 @@ async function saveRates() {
   const month = $("rt_month").value.trim();
   if (!/^\d{6}$/.test(month)) { $("rt_status").textContent = "정산월은 YYYYMM 6자리입니다."; return; }
   const v = id => Number($(id).value);
-  const rates = {
-    month, tradeFee: v("rt_tradeFee"), surcharge: v("rt_surcharge"), taxableRatio: v("rt_taxable"), fundRate: v("rt_fund"),
-    vatRate: v("rt_vat"), transLossRate: v("rt_transLoss"), totalLossRate: v("rt_totalLoss"), distribution: v("rt_dist"),
-    genSide: {}, demandSide: {}
-  };
-  GEN_REGIONS.forEach(k => rates.genSide[k] = v("rt_g_" + k));
-  DEMAND_REGIONS.forEach(k => rates.demandSide[k] = v("rt_d_" + k));
+  const rates = { month, tradeFee: v("rt_tradeFee"), surcharge: v("rt_surcharge"), taxableRatio: v("rt_taxable"), fundRate: v("rt_fund"), vatRate: v("rt_vat") };
   const where = await Store.set("rates:" + month, rates);
   $("rt_status").textContent = where === "remote" ? "저장 완료 (구글시트)" : "이 브라우저에만 저장됨 (GAS 연결 확인 필요)";
 }
@@ -484,7 +481,6 @@ function exportTrueUpExcel() {
 
 /* ---------- 초기화 ---------- */
 function renderBillingTabs() {
-  $("tab4").innerHTML = `<div class="card"><h2>월별 요율 (KPX 통지서)</h2><div id="ratesBody"></div></div>`;
   $("tab5").innerHTML = `<div id="billBody"></div>`;
 }
 
@@ -494,7 +490,7 @@ async function initBilling() {
   updateModeHint(); renderBillingBody();
   const ok = await Store.load();
   if (!ok) console.warn("[billing] GAS 앱데이터를 불러오지 못해 이 브라우저의 저장값만 사용합니다.");
-  const m = new Date(); const cur = `${m.getFullYear()}${String(m.getMonth() + 1).padStart(2, "0")}`;
-  renderRatesCard(cur); renderBillingBody();
+  if (typeof renderKpxPage === "function") renderKpxPage(); // KPX 요율 관리 (js/kpxrates.js)
+  renderBillingBody();
   if (typeof initTariff === "function") initTariff(); // 시간대별 요금제·공휴일 설정 적용 (js/tariff.js)
 }
