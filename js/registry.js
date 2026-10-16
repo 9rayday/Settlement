@@ -39,7 +39,7 @@ const PLANT_FORM = [
   { k: "비고", label: "비고", type: "textarea", full: true },
   { section: "연간보장공급" },
   { k: "발전보장시간", label: "연간보장시간 (h/일)", type: "number", placeholder: "3.4" },
-  { k: "연간보장공급량", label: "연간보장공급량 (kWh)", type: "number" },
+  { k: "연간보장공급량", label: "연간보장공급량 (kWh)", type: "number", calc: true },
   { k: "연간효율감소", label: "연간효율감소 (%/년)", type: "number" },
   { section: "위약금" },
   { k: "위약금유형", label: "위약금 유형", type: "select", options: [["", "미정 (방식 정리 후 추가)"]] }
@@ -188,7 +188,7 @@ function bindContractCalc(hostId) {
     el("계약해지일").value = rec["계약해지일"] || ""; el("연장통보마감일").value = rec["연장통보마감일"];
     if (el("계약용량") && el("발전보장시간")) {
       const cap = Number(el("계약용량").value), h = Number(el("발전보장시간").value);
-      el("연간보장공급량").placeholder = cap > 0 && h > 0 ? `참고 ${Math.round(cap * h * 365).toLocaleString()}` : "";
+      el("연간보장공급량").value = guaranteeOf(cap, h * 365); // 발전소: 설비용량 × 보장시간(h/일) × 365
     }
     if (el("계약용량") && el("연간보장시간")) el("연간보장공급량").value = guaranteeOf(el("계약용량").value, el("연간보장시간").value); // 전기사용자
   };
@@ -401,7 +401,7 @@ async function saveRegistry(kind, formId, form, originalKey, statusId) {
   let rec;
   try { rec = readRegForm(formId, form); } catch (e) { st.textContent = e.message; st.className = "status bad"; return; }
   calcContractDates(rec);
-  if (kind === "plant") rec["사업자명(대표자명)"] = joinOwnerName(rec);
+  if (kind === "plant") { rec["사업자명(대표자명)"] = joinOwnerName(rec); rec["연간보장공급량"] = guaranteeOf(rec["계약용량"], Number(rec["발전보장시간"]) * 365); }
   else { rec["계약용량"] = groupCapacity(rec["KPX신청번호"]); rec["연간보장공급량"] = guaranteeOf(rec["계약용량"], rec["연간보장시간"]); }
   const oldGroup = kind === "plant" ? plantGroupOf(originalKey) : "";
   st.textContent = "저장 중..."; st.className = "status warn";
