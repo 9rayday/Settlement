@@ -164,14 +164,27 @@ async function onAmiFile(file) {
 function onGroupChange() {
   const app = $("groupSel").value; if (!app || !billState.kpx) return;
   const g = billState.kpx.groups[app];
-  const { rates } = ratesFor(g.month);
-  $("cs_ratio").value = rates.taxableRatio;
-  $("billMonthBadge").textContent = `정산월 ${g.month.slice(0, 4)}.${g.month.slice(4)}`;
-  // 전월 청구 기록이 있으면 예상 부가정산금을 참고로 보여준다
-  const prevMonth = prevYm(g.month); const prev = Store.get(`bill:${prevMonth}:${app}`, null);
-  $("prevHint").textContent = prev ? `${prevMonth} 청구 기록: 예상 부가정산금 ${won(prev.expectedSurcharge)} (확정 후 아래에 입력)` : "전월 청구 기록 없음";
+  $("billMonthBadge").textContent = `정산월 ${monthLabel(g.month)}`;
+  const prevMonth = prevYm(g.month);
+  const set = (id, v) => { $(id).value = v; };
+  // 탭6에서 저장한 전월 오차정산 값이 있으면 그대로 채운다. 없으면 비우고 전월 청구 기록을 참고로 보여준다.
+  const carry = Store.get(`carry:${g.month}:${app}`, null);
+  if (carry) {
+    set("cs_total", carry.confirmedTotal); set("cs_ratio", carry.taxableRatio);
+    set("cs_taxable", carry.confirmed.taxable); set("cs_exempt", carry.confirmed.exempt);
+    set("pd_taxable", carry.prevDiff.taxable); set("pd_exempt", carry.prevDiff.exempt);
+    $("prevHint").textContent = `${monthLabel(prevMonth)} 오차정산서 값을 자동으로 채웠습니다. 고치려면 [6. 오차정산]에서 수정 후 저장하세요.`;
+  } else {
+    set("cs_total", ""); ["cs_taxable", "cs_exempt", "pd_taxable", "pd_exempt"].forEach(id => set(id, 0));
+    set("cs_ratio", ratesFor(prevMonth).rates.taxableRatio); // 과세 비율은 부가정산금이 발생한 달(전월)의 통지값
+    const prev = Store.get(`bill:${prevMonth}:${app}`, null);
+    $("prevHint").textContent = (prev ? `${monthLabel(prevMonth)} 청구 기록: 예상 부가정산금 ${won(prev.expectedSurcharge)}. ` : "전월 청구 기록 없음. ")
+      + "[6. 오차정산]에서 확정값을 저장하면 이 칸이 자동으로 채워집니다. (직접 입력해도 됩니다)";
+  }
 }
 function prevYm(m) { let y = Number(m.slice(0, 4)), mo = Number(m.slice(4)) - 1; if (!mo) { y--; mo = 12; } return `${y}${String(mo).padStart(2, "0")}`; }
+function nextYm(m) { let y = Number(m.slice(0, 4)), mo = Number(m.slice(4)) + 1; if (mo > 12) { y++; mo = 1; } return `${y}${String(mo).padStart(2, "0")}`; }
+const monthLabel = m => `${m.slice(0, 4)}.${m.slice(4)}`;
 
 function splitConfirmed() {
   const total = Number($("cs_total").value) || 0, ratio = Number($("cs_ratio").value);
@@ -210,6 +223,10 @@ function runCalc() {
       confirmedSurcharge: { taxable: Number($("cs_taxable").value) || 0, exempt: Number($("cs_exempt").value) || 0 },
       prevDiff: { taxable: Number($("pd_taxable").value) || 0, exempt: Number($("pd_exempt").value) || 0 }
     };
+    const carry = Store.get(`carry:${g.month}:${app}`, null);
+    if (carry && (ctx.confirmedSurcharge.taxable !== carry.confirmed.taxable || ctx.confirmedSurcharge.exempt !== carry.confirmed.exempt
+      || ctx.prevDiff.taxable !== carry.prevDiff.taxable || ctx.prevDiff.exempt !== carry.prevDiff.exempt))
+      warn.push("전월 오차정산 칸이 [6. 오차정산]에 저장된 값과 다릅니다. 직접 고친 값으로 계산했습니다.");
     const inv = Engine.invoice(match, ctx, rates);
     billState.result = { app, month: g.month, customer, rates, match, inv, ctx, dueDate: $("dueDate").value };
     out.innerHTML = (warn.length ? `<div class="notice warn">${warn.map(esc).join("<br>")}</div>` : "") + invoiceHtml(billState.result);
@@ -257,8 +274,10 @@ function invoiceHtml(R) {
 
 async function saveBill() {
   const R = billState.result; if (!R) return;
-  const where = await Store.set(`bill:${R.month}:${R.app}`, { expectedSurcharge: R.inv.expectedSurcharge, supply: R.inv.supplyTotal, grandTotal: R.inv.grandTotal, savedAt: new Date().toISOString() });
+  const where = await Store.set(`bill:${R.month}:${R.app}`, { expectedSurcharge: R.inv.expectedSurcharge, supply: R.inv.supplyTotal, fund: R.inv.fund,
+    grandTotal: R.inv.grandTotal, customerName: R.customer.name, savedAt: new Date().toISOString() });
   $("billSaveStatus").textContent = where === "remote" ? "저장 완료 (구글시트)" : "이 브라우저에만 저장됨";
+  renderTrueUpTab(); // 탭6 목록에 이번 청구를 추가
 }
 
 function exportBillExcel() {
@@ -275,6 +294,167 @@ function exportBillExcel() {
     ["발전소", "공급량", "망이용요금"], ...Object.keys(inv.netByPlant).map(p => [p, inv.netByPlant[p].supplyRounded, inv.netByPlant[p].fee])];
   const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), "청구서");
   XLSX.writeFile(wb, `청구서_${R.customer.name}_${R.month}.xlsx`);
+}
+
+/* ---------- 오차정산 (탭6): 확정 부가정산금 → 익월 청구 이월 ----------
+ * 가정산 청구(bill:YYYYMM:신청번호)에 KPX 확정 부가정산금을 입력하면 과세/비과세로 나눠
+ * carry:<익월>:<신청번호> 로 저장한다. 탭5에서 익월 그룹을 고르면 전월 오차정산 칸이 자동으로 채워진다.
+ * 시스템 밖(엑셀)에서 만든 청구도 "직접 입력"으로 이월할 수 있다.
+ */
+const TU_MANUAL = "__manual";
+const custByApp = app => Store.get("customers", []).find(c => c.appNo === app);
+const monthKo = m => `${m.slice(0, 4)}년 ${Number(m.slice(4))}월`;
+const tuState = { last: null };
+
+function trueUpItems() { // 청구 기록 + 이월 기록의 (대상월, 신청번호) 목록, 최신순
+  const items = {};
+  Store.keys("bill:").forEach(k => { const [, month, app] = k.split(":"); items[month + ":" + app] = { month, app }; });
+  Store.keys("carry:").forEach(k => { const t = Store.get(k, null); if (t && t.sourceMonth) items[t.sourceMonth + ":" + t.app] = { month: t.sourceMonth, app: t.app }; });
+  return Object.keys(items).sort().reverse().map(k => items[k]);
+}
+
+function renderTrueUpTab() {
+  const keep = $("tu_sel") ? $("tu_sel").value : null;
+  const items = trueUpItems();
+  $("tab6").innerHTML = `
+    <div class="card"><h2>오차정산 (확정 부가정산금 → 익월 청구 이월)</h2>
+      <p class="hint">[5. 수요기업 청구]에서 "청구 기록 저장"한 가정산 청구가 목록에 나옵니다. KPX 확정 부가정산금을 입력해 저장하면 다음 달 청구서의 전월 확정 부가정산금·전월 차액 칸이 자동으로 채워집니다.</p>
+      <div class="row"><label>가정산 청구</label><select id="tu_sel" style="min-width:380px">
+        ${items.map(it => { const c = custByApp(it.app); const done = Store.get(`carry:${nextYm(it.month)}:${it.app}`, null);
+          return `<option value="${esc(it.month + ":" + it.app)}">${monthLabel(it.month)} — ${esc(c ? c.name : "미등록")} (${esc(it.app)})${done ? " ✓ 이월 저장됨" : ""}</option>`; }).join("")}
+        <option value="${TU_MANUAL}">직접 입력 (시스템 밖에서 만든 청구)</option></select></div>
+      <div id="tu_form"></div></div>
+    <div id="tu_doc"></div>
+    <div class="row no-print" id="tu_actions" style="display:none; margin-top:10px"><button class="btn secondary" id="tu_xlsx">Excel 다운</button><button class="btn secondary" id="tu_print">인쇄 / PDF 저장</button></div>`;
+  if (keep && Array.from($("tu_sel").options).some(o => o.value === keep)) $("tu_sel").value = keep;
+  $("tu_sel").onchange = renderTrueUpForm;
+  $("tu_xlsx").onclick = exportTrueUpExcel;
+  $("tu_print").onclick = () => window.print();
+  renderTrueUpForm();
+}
+
+function renderTrueUpForm() {
+  const sel = $("tu_sel").value, manual = sel === TU_MANUAL;
+  const [month, app] = manual ? ["", ""] : sel.split(":");
+  const bill = manual ? null : Store.get(`bill:${month}:${app}`, null);
+  const carry = manual ? null : Store.get(`carry:${nextYm(month)}:${app}`, null);
+  const c = carry || { confirmed: { taxable: 0, exempt: 0 }, prevDiff: { taxable: 0, exempt: 0 } };
+  const ratio = carry ? carry.taxableRatio : ratesFor(month || cur6()).rates.taxableRatio;
+  const expected = bill ? bill.expectedSurcharge : (carry ? carry.expectedSurcharge : 0);
+  const field = (label, html) => `<div class="adj-item"><label class="adj-label">${label}</label>${html}</div>`;
+  const num = (id, v, extra) => `<input type="number" id="${id}" value="${v == null ? "" : v}" step="any"${extra || ""}>`;
+  $("tu_form").innerHTML = `
+    <div class="adj-grid">
+      ${field("대상 정산월 (YYYYMM)", `<input id="tu_month" value="${esc(month)}" maxlength="6"${manual ? ' placeholder="예: 202608"' : " readonly"}>`)}
+      ${field("수요기업 (신청번호)", manual
+        ? `<select id="tu_app">${Store.get("customers", []).map(x => `<option value="${esc(x.appNo)}">${esc(x.name)} (${esc(x.appNo)})</option>`).join("")}</select>`
+        : `<input id="tu_app" value="${esc(app)}" readonly>`)}
+      ${field("가정산 예상 부가정산금 (원)", num("tu_expected", expected, bill ? " readonly" : ""))}
+    </div>
+    <h3 class="sub">KPX 확정 부가정산금</h3>
+    <div class="adj-grid">
+      ${field("확정 부가정산금 총액 (원)", num("tu_total", carry ? carry.confirmedTotal : ""))}
+      ${field("과세 비율 (대상월 KPX 통지값)", num("tu_ratio", ratio))}
+      ${field("과세분 / 비과세분 (원)", `<div class="row" style="gap:6px; margin:0">${num("tu_taxable", c.confirmed.taxable)}${num("tu_exempt", c.confirmed.exempt)}</div>`)}
+    </div>
+    <p class="hint">총액·비율을 입력하면 자동으로 나눕니다. KPX 통지서에 과세/비과세 금액이 따로 있으면 그 금액으로 고쳐 쓰세요.</p>
+    <h3 class="sub">전월 차액 (오차정산 결과, 익월 청구서에 가감)</h3>
+    <div class="adj-grid">
+      ${field("차액 (과세, 원)", num("tu_pd_taxable", c.prevDiff.taxable))}
+      ${field("차액 (비과세, 원)", num("tu_pd_exempt", c.prevDiff.exempt))}
+      ${field("메모", `<input id="tu_note" value="${esc(carry ? carry.note : "")}">`)}
+    </div>
+    <div class="row" style="margin-top:10px"><button class="btn secondary" id="tu_view">오차정산서 보기</button><button class="btn accent" id="tu_save">저장 (익월 청구로 이월)</button>
+      <span id="tu_status" class="status warn" style="background:none">${carry ? "저장됨: " + new Date(carry.savedAt).toLocaleString() : ""}</span></div>`;
+  $("tu_total").oninput = $("tu_ratio").oninput = splitTrueUp;
+  $("tu_view").onclick = () => showTrueUp(false);
+  $("tu_save").onclick = () => showTrueUp(true);
+  $("tu_doc").innerHTML = ""; $("tu_actions").style.display = "none"; tuState.last = null;
+  if (carry) showTrueUp(false);
+}
+function cur6() { const d = new Date(); return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}`; }
+
+function splitTrueUp() {
+  if ($("tu_total").value === "") return;
+  const s = Engine.splitSurcharge(Number($("tu_total").value) || 0, { taxableRatio: Number($("tu_ratio").value) || 0 });
+  $("tu_taxable").value = s.taxable; $("tu_exempt").value = s.exempt;
+}
+
+function readTrueUp() {
+  const n = id => Number($(id).value) || 0;
+  const t = {
+    sourceMonth: $("tu_month").value.trim(), app: $("tu_app").value.trim(),
+    expectedSurcharge: n("tu_expected"), confirmedTotal: n("tu_total"), taxableRatio: Number($("tu_ratio").value),
+    confirmed: { taxable: n("tu_taxable"), exempt: n("tu_exempt") },
+    prevDiff: { taxable: n("tu_pd_taxable"), exempt: n("tu_pd_exempt") }, note: $("tu_note").value.trim()
+  };
+  if (!/^\d{6}$/.test(t.sourceMonth)) throw new Error("대상 정산월은 YYYYMM 6자리입니다.");
+  if (!t.app) throw new Error("수요기업을 선택하세요. (없으면 [4. 등록·요율]에서 먼저 등록)");
+  if (t.confirmed.taxable + t.confirmed.exempt !== t.confirmedTotal)
+    throw new Error(`과세분+비과세분(${(t.confirmed.taxable + t.confirmed.exempt).toLocaleString()})이 확정 총액(${t.confirmedTotal.toLocaleString()})과 다릅니다.`);
+  return t;
+}
+
+async function showTrueUp(save) {
+  const st = $("tu_status");
+  try {
+    const t = readTrueUp();
+    if (save) {
+      const key = `carry:${nextYm(t.sourceMonth)}:${t.app}`;
+      if (t.sourceMonth !== ($("tu_sel").value.split(":")[0]) && Store.get(key, null) && !confirm(`${monthLabel(t.sourceMonth)} ${t.app} 오차정산이 이미 있습니다. 덮어쓸까요?`)) return;
+      t.savedAt = new Date().toISOString();
+      const where = await Store.set(key, t);
+      // 탭5에서 바로 그 그룹·월을 보고 있으면 즉시 반영
+      const g = billState.kpx && billState.kpx.groups[$("groupSel").value];
+      if (g && $("groupSel").value === t.app && g.month === nextYm(t.sourceMonth)) onGroupChange();
+      // 목록(✓ 표시)을 새로 그리고 방금 저장한 항목을 다시 연다
+      renderTrueUpTab(); $("tu_sel").value = t.sourceMonth + ":" + t.app; renderTrueUpForm();
+      $("tu_status").textContent = (where === "remote" ? "저장 완료 (구글시트)" : "이 브라우저에만 저장됨") + ` → ${monthLabel(nextYm(t.sourceMonth))} 청구서에 반영됩니다.`;
+      $("tu_status").className = "status " + (where === "remote" ? "ok" : "warn");
+      return;
+    }
+    tuState.last = t;
+    $("tu_doc").innerHTML = trueUpHtml(t);
+    $("tu_actions").style.display = "flex";
+  } catch (e) { st.textContent = e.message; st.className = "status bad"; }
+}
+
+function trueUpHtml(t) {
+  const c = custByApp(t.app) || { name: t.app };
+  const nm = nextYm(t.sourceMonth), vatRate = ratesFor(nm).rates.vatRate, vat = x => Engine.round(x * vatRate);
+  const m = Number(t.sourceMonth.slice(4));
+  const row = (l, a, basis, cls) => `<tr${cls ? ` class="${cls}"` : ""}><td class="label">${l}</td><td class="num">${a}</td><td class="basis">${basis || ""}</td></tr>`;
+  const taxableSum = t.confirmed.taxable + t.prevDiff.taxable, exemptSum = t.confirmed.exempt + t.prevDiff.exempt;
+  const vatSum = vat(t.confirmed.taxable) + vat(t.prevDiff.taxable);
+  return `<div class="doc">
+    <h1 class="title">직접PPA 부가정산금 오차정산서</h1><div class="month">(${monthKo(t.sourceMonth)} 확정 → ${monthKo(nm)} 청구 반영)</div>
+    <table class="doc-table"><tr><td class="label">수요기업</td><td>${esc(c.name)}</td><td class="label">KPX 신청번호</td><td>${esc(t.app)}</td></tr></table>
+    <table class="doc-table"><tr><th>항목</th><th>금액</th><th>산출근거</th></tr>
+      ${row(`${m}월 예상 부가정산금 (가정산)`, won(t.expectedSurcharge), "가정산 청구 시 기반기금 산정에만 사용 (청구 미포함)")}
+      ${row(`${m}월 확정 부가정산금`, won(t.confirmedTotal), "KPX 확정 통지")}
+      ${row("차이 (확정 − 예상)", won(t.confirmedTotal - t.expectedSurcharge), "참고")}
+      ${row("과세분", won(t.confirmed.taxable), `확정 총액 × 과세 비율 ${t.taxableRatio}`)}
+      ${row("비과세분", won(t.confirmed.exempt), "확정 총액 − 과세분")}</table>
+    <h3 class="sub">${monthKo(nm)} 청구서 반영 내역</h3>
+    <table class="doc-table"><tr><th>항목</th><th>금액</th><th>비고</th></tr>
+      ${row(`${m}월 확정 부가정산금 (과세)`, won(t.confirmed.taxable), `세금계산서 · 부가세 ${won(vat(t.confirmed.taxable))} 별도`)}
+      ${row("전월 차액 (과세)", won(t.prevDiff.taxable), `세금계산서 · 부가세 ${won(vat(t.prevDiff.taxable))} 별도`)}
+      ${row(`${m}월 확정 부가정산금 (비과세)`, won(t.confirmed.exempt), "청구서 계")}
+      ${row("전월 차액 (비과세)", won(t.prevDiff.exempt), "청구서 계")}
+      ${row("반영 합계 (부가세 포함)", won(taxableSum + vatSum + exemptSum), `과세 ${won(taxableSum)} + 부가세 ${won(vatSum)} + 비과세 ${won(exemptSum)}`, "pay")}</table>
+    ${t.note ? `<p class="hint">메모: ${esc(t.note)}</p>` : ""}
+  </div>`;
+}
+
+function exportTrueUpExcel() {
+  const t = tuState.last; if (!t) return;
+  const c = custByApp(t.app) || { name: t.app };
+  const aoa = [["직접PPA 부가정산금 오차정산서", t.sourceMonth, "→ " + nextYm(t.sourceMonth) + " 청구 반영"], ["수요기업", c.name, t.app], [],
+    ["항목", "금액"], ["예상 부가정산금(가정산)", t.expectedSurcharge], ["확정 부가정산금", t.confirmedTotal], ["차이(확정-예상)", t.confirmedTotal - t.expectedSurcharge],
+    ["과세 비율", t.taxableRatio], ["과세분", t.confirmed.taxable], ["비과세분", t.confirmed.exempt],
+    ["전월 차액(과세)", t.prevDiff.taxable], ["전월 차액(비과세)", t.prevDiff.exempt], ["메모", t.note]];
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), "오차정산서");
+  XLSX.writeFile(wb, `오차정산서_${c.name}_${t.sourceMonth}.xlsx`);
 }
 
 /* ---------- 초기화 ---------- */
@@ -314,5 +494,5 @@ async function initBilling() {
   const ok = await Store.load();
   if (!ok) console.warn("[billing] GAS 앱데이터를 불러오지 못해 이 브라우저의 저장값만 사용합니다.");
   const m = new Date(); const cur = `${m.getFullYear()}${String(m.getMonth() + 1).padStart(2, "0")}`;
-  renderRatesCard(cur); renderPlantsCard(); renderCustomersCard();
+  renderRatesCard(cur); renderPlantsCard(); renderCustomersCard(); renderTrueUpTab();
 }
