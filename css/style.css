@@ -196,7 +196,7 @@ button.btn.secondary.danger{ color:var(--danger); border-color:var(--danger); }
 
 /* ===== 사이드 메뉴 레이아웃 (js/nav.js) ===== */
 :root{ --side-bg:#26292E; --side-line:#363A41; --side-text:#B9BFC8; --side-dim:#868D97; --side-hover:#30343A; --side-w:248px; }
-.layout{ display:grid; grid-template-columns:minmax(240px, 30%) minmax(0, 70%); min-height:calc(100vh - 72px); } /* 사이드 메뉴 30% : 본문 70% */
+.layout{ display:grid; grid-template-columns:minmax(240px, 20%) minmax(0, 80%); min-height:calc(100vh - 72px); } /* 사이드 메뉴 20% : 본문 80% */
 .sidebar{ background:var(--side-bg); color:var(--side-text); position:sticky; top:0; align-self:start; height:100vh; overflow-y:auto; padding-bottom:24px; }
 .side-toggle{ display:grid; grid-template-columns:1fr 1fr; border-bottom:1px solid var(--side-line); }
 .side-toggle button{ background:none; border:none; border-bottom:2px solid transparent; color:var(--side-dim); font:inherit; font-size:13.5px; font-weight:600; padding:15px 0 13px; cursor:pointer; }
