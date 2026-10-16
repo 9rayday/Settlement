@@ -1,6 +1,6 @@
 /* ============ 수요기업 정산 모듈 UI (가정산서 / 오차정산서) ============
  * 정산 > 전기사용자 페이지: 위쪽 업로드 카드(정산 구분 + KPX·사용량 업로드, upload.js 가 onKpxFile 호출) + 가정산서/오차정산서
- * 정산요율관리 > KPX 요율 관리(#tab4): js/kpxrates.js (월별 통지값 카드만 여기). 발전소·전기사용자 등록은 js/registry.js
+ * 정산요율관리 > KPX 요율 관리(#tab4): js/kpxrates.js 발전소·전기사용자 등록은 js/registry.js
  * 계산은 js/engine.js, 파일 해석은 js/parsers.js. 여기서는 화면과 저장만 다룬다.
  */
 const INVOICE_PREFIX = "200005"; // 수요기업 청구서 번호 접두 (발전사업자 정산서는 BUYER.invoicePrefix)
@@ -13,50 +13,12 @@ const $ = id => document.getElementById(id);
 const billState = { kpx: null, ami: null, amiName: "", result: null };
 
 /* ---------- 요율 ----------
- * 월별 KPX 통지값(rates:YYYYMM: 부가정산금 단가·과세 비율·거래수수료·기금율·부가세율) +
- * 송전요금·배전요금·손실률은 KPX 요율 관리의 버전(적용일자 <= 정산월 1일) 값으로 덮어쓴다 (js/kpxrates.js)
+ * 기본값(Engine.DEFAULT_RATES) 위에 KPX 요율 관리의 버전(적용일자 <= 정산월 1일 중 최신) 값을 덮어쓴다 (js/kpxrates.js)
  */
 function ratesFor(month) {
-  let base, source;
-  const exact = Store.get("rates:" + month, null);
-  const earlier = Store.keys("rates:").filter(k => k.slice(6) < month).pop();
-  if (exact) { base = exact; source = "저장된 값"; }
-  else if (earlier) { base = Store.get(earlier); source = `${earlier.slice(6)} 값 복사`; }
-  else { base = {}; source = "기본값"; }
-  let rates = Object.assign({}, Engine.DEFAULT_RATES, base, { month });
-  if (/^\d{6}$/.test(month) && typeof netVersionFor === "function") rates = applyNetVersion(rates, netVersionFor(`${month.slice(0, 4)}-${month.slice(4)}-01`));
-  return { rates, source };
-}
-function cur6() { const d = new Date(); return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}`; }
-
-function numInput(id, val, step) { return `<input type="number" id="${id}" value="${val}" step="${step || "any"}" style="width:110px">`; }
-
-function renderRatesCard(month) {
-  if (!$("ratesBody")) return;
-  month = month || cur6();
-  const { rates: r, source } = ratesFor(month);
-  $("ratesBody").innerHTML = `
-    <div class="row"><label>정산월(YYYYMM)</label><input id="rt_month" value="${esc(month)}" maxlength="6" style="width:90px">
-      <button class="btn secondary" id="rt_load">불러오기</button><span class="status warn" style="background:none">${esc(source)}</span></div>
-    <div class="adj-grid">
-      <div class="adj-item"><label class="adj-label">예상 부가정산금 단가 (원/kWh)</label>${numInput("rt_surcharge", r.surcharge)}</div>
-      <div class="adj-item"><label class="adj-label">확정 부가정산금 과세 비율</label>${numInput("rt_taxable", r.taxableRatio)}</div>
-      <div class="adj-item"><label class="adj-label">거래수수료 (원/kWh)</label>${numInput("rt_tradeFee", r.tradeFee)}</div>
-      <div class="adj-item"><label class="adj-label">전력산업기반기금율</label>${numInput("rt_fund", r.fundRate)}</div>
-      <div class="adj-item"><label class="adj-label">부가세율</label>${numInput("rt_vat", r.vatRate)}</div>
-    </div>
-    <div class="row" style="margin-top:10px"><button class="btn accent" id="rt_save">이 월 통지값 저장</button><span id="rt_status" class="status warn" style="background:none"></span></div>`;
-  $("rt_load").onclick = () => renderRatesCard($("rt_month").value.trim());
-  $("rt_save").onclick = saveRates;
-}
-
-async function saveRates() {
-  const month = $("rt_month").value.trim();
-  if (!/^\d{6}$/.test(month)) { $("rt_status").textContent = "정산월은 YYYYMM 6자리입니다."; return; }
-  const v = id => Number($(id).value);
-  const rates = { month, tradeFee: v("rt_tradeFee"), surcharge: v("rt_surcharge"), taxableRatio: v("rt_taxable"), fundRate: v("rt_fund"), vatRate: v("rt_vat") };
-  const where = await Store.set("rates:" + month, rates);
-  $("rt_status").textContent = where === "remote" ? "저장 완료 (구글시트)" : "이 브라우저에만 저장됨 (GAS 연결 확인 필요)";
+  const v = /^\d{6}$/.test(month) && typeof netVersionFor === "function" ? netVersionFor(`${month.slice(0, 4)}-${month.slice(4)}-01`) : null;
+  const rates = Object.assign({}, Engine.DEFAULT_RATES, { month });
+  return { rates: v ? applyNetVersion(rates, v) : rates, version: v };
 }
 
 /* ---------- 정산 구분 (업로드 카드 라디오: 가정산 / 오차정산) ---------- */
@@ -212,8 +174,8 @@ function prepareGroup(err, warn) {
   if (!customer) err.push(`신청번호 ${app} 에 해당하는 전기사용자 계약이 없습니다. [정산관리 > 계약관리]에서 등록하세요.`);
   const unreg = Object.keys(g.plants).filter(p => { const i = Registry.plantInfo(p); return !i || !i.region; });
   if (unreg.length) err.push("등록되지 않았거나 지역이 비어 있는 발전소: " + unreg.join(", ") + " → [정산관리 > 계약관리]에서 등록하세요.");
-  const { rates, source } = ratesFor(g.month);
-  if (!Store.get("rates:" + g.month, null)) warn.push(`${g.month} 요율이 저장되어 있지 않아 ${source}을 사용했습니다.`);
+  const { rates, version } = ratesFor(g.month);
+  if (!version) warn.push(`${g.month} 에 적용되는 KPX 요율 버전이 없어 기본값으로 계산했습니다.`);
   const plants = {}; Object.keys(g.plants).forEach(p => plants[p] = Registry.plantInfo(p));
   const days = Parsers.buildDays(g, billState.ami);
   // 사용량은 부하구분별 사용량·부족전력량 표시에만 쓴다 (공급량은 KPX 재생E공급량). 파일이 없거나 빈 시간은 KPX 전기사용량으로.

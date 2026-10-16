@@ -28,9 +28,10 @@
   P.loadClasses = function (dateStr, holidays) { // 24개 (0시~23시 = 해당 시각에 시작하는 1시간)
     const mon = Number(dateStr.slice(5, 7)) - 1;
     const t = P.dayType(dateStr, holidays);
+    const table = (P.tariffFor && P.tariffFor(dateStr)) || P.TARIFF; // 날짜별 부하 테이블 버전 (js/tariff.js 가 지정)
     const out = [];
     for (let h = 0; h < 24; h++) {
-      let c = P.TARIFF[mon][h];
+      let c = table[mon][h];
       if (t === "공") c = "L"; else if (t === "토" && c === "H") c = "M";
       out.push(NAME[c]);
     }

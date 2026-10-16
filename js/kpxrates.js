@@ -1,5 +1,5 @@
 /* ============ 정산요율관리 > KPX 요율 관리 (#tab4) ============
- * 망이용 유형 참고표 + KPX 요금·손실률 버전(적용일자 기준) + 월별 KPX 통지값(부가정산금 단가 등, billing.js renderRatesCard)
+ * 망이용 유형 참고표 + KPX 요금·손실률·정산 요율 버전(적용일자 기준)
  * 버전은 앱데이터 "netrate:<저장시각 ms>" 키로 쌓는다. 정산월에는 적용일자가 그 달 1일 이전(포함)인 버전 중 가장 최근 것을 쓴다.
  */
 const NET_TYPES = [
@@ -17,13 +17,18 @@ const NET_SECTIONS = [
   ["gen", "1. 발전지역 송전 요금 (원/kWh)", "발전지역", "사용요금", [["수도권북", "수도권 북부"], ["수도권남", "수도권 남부"], ["비수도권", "비수도권"], ["제주", "제주지역"]]],
   ["demand", "2. 수요지역 송전 요금 (원/kWh)", "수요지역", "사용요금", [["수도권", "수도권"], ["비수도권", "비수도권"], ["제주", "제주지역"]]],
   ["dist", "3. 배전이용 요금 (원/kWh)", "이용전압별", "사용요금", [["low", "저압 (600V 이하)"], ["high", "고압 (600V 초과)"]]],
-  ["loss", "4. 손실률 (%)", "종류", "손실률(%)", [["trans", "송전손실률"], ["dist", "배전손실률"], ["total", "종합손실률"]]]
+  ["loss", "4. 손실률 (%)", "종류", "손실률(%)", [["trans", "송전손실률"], ["dist", "배전손실률"], ["total", "종합손실률"]]],
+  ["etc", "5. 정산 요율", "항목", "값", [["surcharge", "예상 부가정산금 단가 (원/kWh)"], ["taxable", "확정 부가정산금 과세 비율 (%)"],
+    ["tradeFee", "거래수수료 (원/kWh)"], ["fund", "전력산업기반기금 (%)"], ["vat", "부가가치세 (%)"]]]
 ];
 const NET_DEFAULT = {
   effective: "", savedAt: "",
   gen: Object.assign({}, Engine.DEFAULT_RATES.genSide), demand: Object.assign({}, Engine.DEFAULT_RATES.demandSide),
   dist: { low: 11.33, high: Engine.DEFAULT_RATES.distribution },
-  loss: { trans: 1.57, dist: 1.98, total: 3.52 }, memo: {}
+  loss: { trans: 1.57, dist: 1.98, total: 3.52 },
+  etc: { surcharge: Engine.DEFAULT_RATES.surcharge, taxable: Engine.DEFAULT_RATES.taxableRatio * 100, tradeFee: Engine.DEFAULT_RATES.tradeFee,
+    fund: Engine.DEFAULT_RATES.fundRate * 100, vat: Engine.DEFAULT_RATES.vatRate * 100 },
+  memo: {}
 };
 const kpxState = { key: null };
 
@@ -34,10 +39,11 @@ function netVersionFor(dateStr) { // 적용일자 <= dateStr 인 버전 중 적�
   return netVersions().filter(v => v.effective && v.effective <= dateStr)
     .sort((a, b) => (a.effective === b.effective ? (a.savedAt < b.savedAt ? 1 : -1) : (a.effective < b.effective ? 1 : -1)))[0] || null;
 }
-// 정산 엔진 rates 에 버전 값을 덮어쓴다 (손실률은 % → 비율)
+// 정산 엔진 rates 에 버전 값을 덮어쓴다 (% 항목은 비율로)
 function applyNetVersion(rates, v) {
   if (!v) return rates;
-  return Object.assign({}, rates, {
+  const etc = v.etc ? { surcharge: v.etc.surcharge, taxableRatio: v.etc.taxable / 100, tradeFee: v.etc.tradeFee, fundRate: v.etc.fund / 100, vatRate: v.etc.vat / 100 } : {};
+  return Object.assign({}, rates, etc, {
     genSide: Object.assign({}, v.gen), demandSide: Object.assign({}, v.demand),
     distribution: v.dist.high, distributionLow: v.dist.low,
     transLossRate: v.loss.trans / 100, distLossRate: v.loss.dist / 100, totalLossRate: v.loss.total / 100,
@@ -70,23 +76,21 @@ function renderKpxPage() {
         <div class="kpx-sec"><h3 class="sub">${title}</h3>
           <table class="grid kpx-table"><tr><th style="width:130px">${c1}</th><th style="width:110px">${c2}</th><th>메모</th></tr>
             ${rows.map(([k, label]) => `<tr><td>${e(label)}</td>
-              <td><input type="number" step="any" class="kpx-val" data-sec="${sec}" data-k="${e(k)}" value="${e(v[sec] && v[sec][k])}"></td>
+              <td><input type="number" step="any" class="kpx-val" data-sec="${sec}" data-k="${e(k)}" value="${e((v[sec] || NET_DEFAULT[sec])[k])}"></td>
               <td><input class="kpx-memo" data-memo="${sec}.${e(k)}" value="${e((v.memo || {})[sec + "." + k])}" placeholder="메모를 입력하세요"></td></tr>`).join("")}
           </table></div>`).join("")}
       </div>
       <div class="row" style="margin-top:12px"><button class="btn accent" id="kpxSave">새 버전으로 저장</button><span id="kpxStatus" class="status warn" style="background:none"></span></div>
-    </div>
-    <div class="card"><h2>월별 KPX 통지값</h2><div id="ratesBody"></div></div>`;
+    </div>`;
   document.getElementById("kpxVer").onchange = ev => { kpxState.key = ev.target.value || null; renderKpxPage(); };
   document.getElementById("kpxSave").onclick = saveNetVersion;
-  if (typeof renderRatesCard === "function") renderRatesCard(); // 월별 KPX 통지값 (billing.js)
 }
 
 async function saveNetVersion() {
   const st = document.getElementById("kpxStatus");
   const effective = document.getElementById("kpxEff").value;
   if (!effective) { st.textContent = "적용일자를 입력하세요."; st.className = "status bad"; return; }
-  const v = { effective, savedAt: new Date().toISOString(), gen: {}, demand: {}, dist: {}, loss: {}, memo: {} };
+  const v = { effective, savedAt: new Date().toISOString(), gen: {}, demand: {}, dist: {}, loss: {}, etc: {}, memo: {} };
   let bad = false;
   document.querySelectorAll("#tab4 .kpx-val").forEach(el => { const n = Number(el.value); if (el.value === "" || isNaN(n)) bad = true; v[el.dataset.sec][el.dataset.k] = n; });
   if (bad) { st.textContent = "요금·손실률을 모두 숫자로 입력하세요."; st.className = "status bad"; return; }
