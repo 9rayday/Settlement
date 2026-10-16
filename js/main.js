@@ -5,6 +5,7 @@ function initApp(){
   _appInited = true;
 
   initNav(); // 사이드 메뉴 (js/nav.js)
+  initHeader(); // 헤더: 정산월·사용자·알림·로그아웃·자동 로그아웃 (js/header.js)
 
   initUploadZone();
   document.getElementById("adjSaveBtn").addEventListener("click", handleSaveAdjustments);

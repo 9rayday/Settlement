@@ -45,9 +45,35 @@
 <header class="app">
   <div class="app-title">
     <button class="side-open" id="sideOpenBtn" aria-label="메뉴 열기"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
-    <h1>직접PPA 전력거래대금 정산 시스템</h1>
+    <!-- E-PPA 태양 로고 -->
+    <svg class="brand-sun" viewBox="0 0 34 34" fill="none" aria-hidden="true">
+      <g class="brand-rays">
+        <line x1="17" y1="1.5" x2="17" y2="7.5" stroke="#da7756" stroke-width="1.8" stroke-linecap="round"/>
+        <line x1="17" y1="26.5" x2="17" y2="32.5" stroke="#da7756" stroke-width="1.8" stroke-linecap="round"/>
+        <line x1="1.5" y1="17" x2="7.5" y2="17" stroke="#da7756" stroke-width="1.8" stroke-linecap="round"/>
+        <line x1="26.5" y1="17" x2="32.5" y2="17" stroke="#da7756" stroke-width="1.8" stroke-linecap="round"/>
+        <line x1="5.7" y1="5.7" x2="9.9" y2="9.9" stroke="#da7756" stroke-width="1.4" stroke-linecap="round" opacity=".7"/>
+        <line x1="24.1" y1="24.1" x2="28.3" y2="28.3" stroke="#da7756" stroke-width="1.4" stroke-linecap="round" opacity=".7"/>
+        <line x1="28.3" y1="5.7" x2="24.1" y2="9.9" stroke="#da7756" stroke-width="1.4" stroke-linecap="round" opacity=".7"/>
+        <line x1="9.9" y1="24.1" x2="5.7" y2="28.3" stroke="#da7756" stroke-width="1.4" stroke-linecap="round" opacity=".7"/>
+      </g>
+      <circle class="brand-core" cx="17" cy="17" r="6.5" fill="#da7756"/>
+      <circle cx="17" cy="17" r="4" fill="#e8926e" opacity=".55"/>
+    </svg>
+    <h1>정산시스템</h1>
   </div>
-  <div class="badge" id="monthBadge">정산월 미설정</div>
+  <div class="hdr-right">
+    <label class="hdr-month"><span>정산월</span><input type="month" id="monthPicker"></label>
+    <span class="hdr-user" id="hdrUser"></span>
+    <div class="bell-wrap">
+      <button type="button" class="hdr-icon" id="bellBtn" aria-label="알림">
+        <svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+        <span class="bell-dot" id="bellDot" hidden></span>
+      </button>
+      <div class="bell-panel" id="bellPanel" hidden></div>
+    </div>
+    <button type="button" class="hdr-logout" id="logoutBtn">로그아웃</button>
+  </div>
 </header>
 
 <div class="layout">
@@ -237,6 +263,7 @@
 <script src="js/tariff.js"></script>
 <script src="js/kpxrates.js"></script>
 <script src="js/nav.js"></script>
+<script src="js/header.js"></script>
 <script src="js/exporters/excel.js"></script>
 <script src="js/exporters/pdf.js"></script>
 <script src="js/exporters/zip.js"></script>

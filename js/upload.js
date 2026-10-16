@@ -178,7 +178,7 @@ function aggregate(rows){
     }
   });
 
-  document.getElementById("monthBadge").textContent = settleMonth ? `정산월 ${settleMonth.slice(0,4)}.${settleMonth.slice(4,6)}` : "정산월 미설정";
+  if(settleMonth && typeof setHeaderMonth === "function") setHeaderMonth(settleMonth); // 헤더 정산월을 업로드한 달로
   renderSiteKpis();
   renderAggTable();
   refreshPlantSelect();

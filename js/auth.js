@@ -11,6 +11,13 @@ function isAuthed(){
 
 function checkAuth(){
   const authed = isAuthed();
+  // 자동 로그아웃 등으로 돌아온 경우 안내 문구
+  const msg = sessionStorage.getItem("settlement_logout_msg");
+  if(!authed && msg){
+    const errEl = document.getElementById("loginError");
+    errEl.textContent = msg; errEl.style.display = "inline-flex";
+    sessionStorage.removeItem("settlement_logout_msg");
+  }
   document.getElementById("loginGate").style.display = authed ? "none" : "flex";
   document.getElementById("appRoot").style.display = authed ? "block" : "none";
   return authed;
@@ -36,6 +43,7 @@ async function handleLogin(){
     return;
   }
   sessionStorage.setItem(AUTH_KEY, "1");
+  sessionStorage.setItem("settlement_user", (result.data && result.data.name) || id); // 헤더 사용자 표시
   if(checkAuth()) initApp();
 }
 

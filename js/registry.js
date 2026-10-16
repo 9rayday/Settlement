@@ -124,7 +124,24 @@ const Registry = (function () {
 })();
 
 /* ---------- 화면: 정산관리 > 계약관리 (전기사용자 / 발전사업자 / 그룹화) ---------- */
-const regState = { openCust: null, openPlant: null, openGroup: null, month: "" };
+const regState = { openCust: null, openPlant: null, openGroup: null, month: "", pages: { cust: 1, plant: 1, group: 1 } };
+// 목록이 길면 페이지로 나눠 보여준다
+const PAGE_SIZE = { cust: 12, plant: 10, group: 8 };
+function pageSlice(kind, items) {
+  const pages = Math.max(1, Math.ceil(items.length / PAGE_SIZE[kind]));
+  const page = Math.min(Math.max(1, regState.pages[kind] || 1), pages);
+  regState.pages[kind] = page;
+  return { items: items.slice((page - 1) * PAGE_SIZE[kind], page * PAGE_SIZE[kind]), page, pages };
+}
+function pagerHtml(kind, page, pages) {
+  if (pages <= 1) return "";
+  const from = Math.max(1, Math.min(page - 2, pages - 4)), to = Math.min(pages, from + 4), nums = [];
+  for (let i = from; i <= to; i++) nums.push(`<button type="button" data-kind="${kind}" data-page="${i}"${i === page ? ' class="active"' : ""}>${i}</button>`);
+  return `<div class="pager"><button type="button" data-kind="${kind}" data-page="${page - 1}"${page === 1 ? " disabled" : ""}>이전</button>${nums.join("")}<button type="button" data-kind="${kind}" data-page="${page + 1}"${page === pages ? " disabled" : ""}>다음</button></div>`;
+}
+function bindPager(host, rerender) {
+  host.querySelectorAll(".pager button[data-page]").forEach(b => b.onclick = () => { regState.pages[b.dataset.kind] = Number(b.dataset.page); rerender(); });
+}
 const r$ = id => document.getElementById(id);
 const rEsc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const rNum = n => (n == null || isNaN(n)) ? "-" : Math.round(n).toLocaleString();
@@ -210,8 +227,7 @@ const loadFailNotice = () => Registry.isLoaded() ? "" : `<div class="notice warn
 function markActive(selector, attr, value) {
   document.querySelectorAll(selector).forEach(el => el.classList.toggle("active", el.dataset[attr] === value));
 }
-function custCardsHtml(activeApp, cls) {
-  const custs = Registry.rawCustomers();
+function custCardsHtml(activeApp, cls, custs) {
   if (!custs.length) return `<div class="hint">등록된 전기사용자가 없습니다.</div>`;
   return custs.map(c => {
     const app = rStr(c["KPX신청번호"]), n = Registry.plantsOfGroup(app).length;
@@ -224,11 +240,13 @@ function custCardsHtml(activeApp, cls) {
 /* ----- 전기사용자 ----- */
 function renderCustomerPage() {
   const host = r$("regCustPage"); if (!host) return;
+  const pg = pageSlice("cust", Registry.rawCustomers());
   host.innerHTML = `${loadFailNotice()}<div class="card">
       <div class="reg-head"><h2>전기사용자 (수요기업) 계약</h2><button class="btn secondary" id="regAddCust">+ 전기사용자 추가</button></div>
       <p class="hint">카드를 누르면 계약 정보를 보고 수정할 수 있습니다. 발전소 묶기와 월별 집계는 [그룹화]에서 합니다.</p>
-      <div class="reg-cards">${custCardsHtml(regState.openCust, "cust-card")}</div>
+      <div class="reg-cards">${custCardsHtml(regState.openCust, "cust-card", pg.items)}</div>${pagerHtml("cust", pg.page, pg.pages)}
       <div id="regCustDetail"></div></div>`;
+  bindPager(host, renderCustomerPage);
   host.querySelectorAll(".cust-card").forEach(b => b.onclick = () => openCustomer(b.dataset.app));
   r$("regAddCust").onclick = () => openCustomer("");
   if (regState.openCust !== null) openCustomer(regState.openCust, true);
@@ -256,17 +274,18 @@ function openCustomer(app, keepScroll) {
 /* ----- 발전사업자 ----- */
 function renderPlantPage() {
   const host = r$("regPlantPage"); if (!host) return;
-  const plants = Registry.plants();
+  const plants = Registry.plants(), pg = pageSlice("plant", Object.keys(plants));
   host.innerHTML = `${loadFailNotice()}<div class="card">
       <div class="reg-head"><h2>발전소 (발전사업자)</h2><button class="btn secondary" id="regAddPlant">+ 발전소 추가</button></div>
       <p class="hint">발전소명은 KPX 직접전력거래량 파일의 "발전기명"과 정확히 같아야 합니다. 행을 누르면 수정할 수 있습니다.</p>
       <div class="grid-wrap"><table class="grid reg-table"><tr><th>발전소명</th><th>사업자명</th><th>지역</th><th>배전</th><th>그룹 (전기사용자)</th><th>계약용량(kW)</th><th>매입단가</th><th>계약일자</th></tr>
-        ${Object.keys(plants).map(p => { const m = plants[p], app = rStr(m["KPX신청번호"]);
+        ${pg.items.map(p => { const m = plants[p], app = rStr(m["KPX신청번호"]);
           return `<tr class="reg-row${regState.openPlant === p ? " active" : ""}" data-plant="${rEsc(p)}"><td><b>${rEsc(p)}</b></td><td>${rEsc(m["사업자명(대표자명)"])}</td>
             <td>${m["지역(요금구분)"] ? rEsc(m["지역(요금구분)"]) : '<span class="tag bad">미지정</span>'}</td><td>${rStr(m["배전연결"]).toUpperCase() === "Y" ? "Y" : "-"}</td>
             <td>${app ? `${rEsc(custName(app) || "계약 미등록")} <span class="hint" style="margin:0">${rEsc(app)}</span>` : '<span class="hint" style="margin:0">미연결</span>'}</td>
-            <td class="num">${rEsc(m["계약용량"])}</td><td class="num">${rEsc(m["계약단가"])}</td><td>${rEsc(m["계약일자"])}</td></tr>`; }).join("")}</table></div>
+            <td class="num">${rEsc(m["계약용량"])}</td><td class="num">${rEsc(m["계약단가"])}</td><td>${rEsc(m["계약일자"])}</td></tr>`; }).join("")}</table></div>${pagerHtml("plant", pg.page, pg.pages)}
       <div id="regPlantDetail"></div></div>`;
+  bindPager(host, renderPlantPage);
   host.querySelectorAll(".reg-row").forEach(tr => tr.onclick = () => openPlant(tr.dataset.plant));
   r$("regAddPlant").onclick = () => openPlant("");
   if (regState.openPlant !== null) openPlant(regState.openPlant, true);
@@ -296,11 +315,13 @@ function renderGroupPage() {
   const custs = Registry.rawCustomers(), all = Registry.plants();
   const unlinked = Object.keys(all).filter(p => { const a = rStr(all[p]["KPX신청번호"]); return !a || !Registry.customerByApp(a); });
   if (regState.openGroup === null && custs.length) regState.openGroup = rStr(custs[0]["KPX신청번호"]);
+  const pg = pageSlice("group", custs);
   host.innerHTML = `${loadFailNotice()}<div class="group-layout">
     <div class="card group-list"><h2>계약</h2>
-      <div class="reg-cards single">${custCardsHtml(regState.openGroup, "group-card")}</div>
+      <div class="reg-cards single">${custCardsHtml(regState.openGroup, "group-card", pg.items)}</div>${pagerHtml("group", pg.page, pg.pages)}
       <p class="hint" style="margin-top:10px">그룹 미연결 발전소: <b>${unlinked.length}</b>개</p></div>
     <div class="card group-main" id="regGroupMain"></div></div>`;
+  bindPager(host, renderGroupPage);
   host.querySelectorAll(".group-card").forEach(b => b.onclick = () => { regState.openGroup = b.dataset.app; markActive(".group-card", "app", b.dataset.app); renderGroupMain(); });
   renderGroupMain();
 }
@@ -428,6 +449,7 @@ async function deleteRegistry(kind, key, label, statusId) {
 // 등록 정보가 바뀌면 계약관리 화면과 정산 화면(그룹 이름·발전소 지역)을 다시 그린다
 function afterRegistryChange() {
   renderRegistry();
+  if (typeof renderAlerts === "function") renderAlerts();
   if (typeof renderBillingBody === "function") renderBillingBody();
   if (typeof refreshPlantSelect === "function" && typeof plants !== "undefined" && plants.length) refreshPlantSelect(); // 발전사업자 정산서 미리보기 갱신
 }
@@ -438,5 +460,6 @@ async function initRegistry() {
   ["regCustPage", "regPlantPage", "regGroupPage"].forEach(id => { r$(id).innerHTML = `<div class="card"><div class="hint">등록 정보를 불러오는 중...</div></div>`; });
   await Registry.load();
   renderRegistry();
+  if (typeof renderAlerts === "function") renderAlerts(); // 헤더 알림 (계약 마감 임박)
   if (typeof renderBillingBody === "function") renderBillingBody();
 }
