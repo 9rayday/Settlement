@@ -456,5 +456,6 @@ async function initBilling() {
   if (!ok) console.warn("[billing] GAS 앱데이터를 불러오지 못해 이 브라우저의 저장값만 사용합니다.");
   if (typeof renderKpxPage === "function") renderKpxPage(); // KPX 요율 관리 (js/kpxrates.js)
   renderBillingBody();
+  if (typeof renderMarketPage === "function") renderMarketPage(); // SMP·REC 가격 (js/market.js)
   if (typeof initTariff === "function") initTariff(); // 시간대별 요금제·공휴일 설정 적용 (js/tariff.js)
 }

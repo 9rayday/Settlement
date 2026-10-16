@@ -13,7 +13,8 @@ const PAGES = {
   "page-settle-cust": { group: "settle", crumb: ["정산관리", "정산"], title: "전기사용자 정산" },
   "page-settle-gen":  { group: "settle", crumb: ["정산관리", "정산"], title: "발전사업자 정산" },
   "page-rate-kpx":    { group: "settle", crumb: ["정산관리", "정산", "정산요율관리"], title: "KPX 요율 관리" },
-  "page-rate-tou":    { group: "settle", crumb: ["정산관리", "정산", "정산요율관리"], title: "시간대별 요금제 관리" }
+  "page-rate-tou":    { group: "settle", crumb: ["정산관리", "정산", "정산요율관리"], title: "시간대별 요금제 관리" },
+  "page-rate-market": { group: "settle", crumb: ["정산관리", "정산", "정산요율관리"], title: "SMP · REC 가격" }
 };
 const DEFAULT_PAGE = "page-settle-cust";
 const NAV_KEY = "settlement.page";

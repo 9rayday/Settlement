@@ -357,3 +357,10 @@ table.perf-years tr.yr-ok td{ background:#F1FAF4; }
 table.perf-years tr.yr-bad td{ background:#FDF1F0; }
 table.perf-years tr.yr-wait td{ color:#9CA3AF; }
 @media (max-width:1000px){ .perf-kpis{ grid-template-columns:repeat(2, minmax(0, 1fr)); } }
+.reg-info{ padding:7px 9px; border:1px dashed var(--line); border-radius:6px; font-size:12.5px; color:var(--sub); background:#F7F8FA; }
+/* SMP·REC 가격 (js/market.js) */
+table.mkt-table th.rowh{ text-align:left; white-space:nowrap; }
+table.mkt-table td{ padding:5px 4px; }
+table.mkt-table input{ width:100%; min-width:64px; box-sizing:border-box; padding:6px; border:1px solid var(--line); border-radius:5px; font-size:12.5px; text-align:right; font-family:inherit; font-variant-numeric:tabular-nums; }
+table.mkt-table td.num{ text-align:right; font-weight:700; white-space:nowrap; }
+table.perf-years td:nth-child(-n+2), table.perf-years .perf-sub{ white-space:nowrap; }

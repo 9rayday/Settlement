@@ -27,7 +27,7 @@ const PLANT_FORM = [
   { k: "지역(요금구분)", label: "지역 (송전요금 구분)", type: "select", options: GEN_REGIONS, req: true },
   { k: "KPX신청번호", label: "그룹 (전기사용자 계약)", type: "group" },
   { section: "계약정보" },
-  { k: "정산방식", label: "정산방식" },
+  { k: "정산방식", label: "정산방식", type: "select", options: ["", "실시간 정산", "월간균등 정산"] },
   { k: "계약단가", label: "계약단가 (원/kWh)", type: "number" },
   { k: "수수료율", label: "거래수수료 (원/kWh)", type: "number", placeholder: "0.1193" },
   { k: "계약기간", label: "계약기간 (년)", type: "number" },
@@ -42,8 +42,8 @@ const PLANT_FORM = [
   { k: "연간보장공급량", label: "연간보장공급량 (kWh)", type: "number", calc: true },
   { k: "연간효율감소", label: "연간효율감소 (%/년)", type: "number" },
   { section: "위약금" },
-  { k: "위약금유형", label: "위약금 유형", type: "select", options: [["", "미정"], ["단가", "미달량 × 위약금 단가"]] },
-  { k: "위약금단가", label: "위약금 단가 (원/kWh)", type: "number" },
+  { info: "미달 위약금", text: "미달량 × 연차 기간 가중평균 REC 단가" },
+  { info: "해지 위약금", text: "방식 정리 후 추가" },
   { k: "위약금처리방식", label: "처리 방식", type: "select", options: [["", "선택"], ["직접 납부", "직접 납부"], ["청구서 차감", "청구서 청구 (전력대금에서 차감)"]] }
 ];
 const CUSTOMER_FORM = [
@@ -79,8 +79,8 @@ const CUSTOMER_FORM = [
   { k: "연간보장공급량", label: "연간보장공급량 (kWh)", type: "number", calc: true },
   { k: "연간효율감소", label: "연간효율감소 (%/년)", type: "number" },
   { section: "위약금" },
-  { k: "위약금유형", label: "위약금 유형", type: "select", options: [["", "미정"], ["단가", "미달량 × 위약금 단가"]] },
-  { k: "위약금단가", label: "위약금 단가 (원/kWh)", type: "number" },
+  { info: "미달 위약금", text: "미달량 × 연차 기간 가중평균 REC 단가" },
+  { info: "해지 위약금", text: "방식 정리 후 추가" },
   { k: "위약금처리방식", label: "처리 방식", type: "select", options: [["", "선택"], ["직접 납부", "직접 납부"], ["청구서 차감", "청구서 청구 (전력대금에서 차감)"]] }
 ];
 
@@ -155,6 +155,7 @@ const custName = app => { const c = Registry.customerByApp(app); return c ? c.na
 function regFormHtml(form, rec, prefix) {
   return `<div class="reg-form">${form.map((f, i) => {
     if (f.section) return `<div class="reg-section">${rEsc(f.section)}</div>`;
+    if (f.info) return `<div class="reg-field"><label>${rEsc(f.info)}</label><div class="reg-info">${rEsc(f.text)}</div></div>`; // 입력 없는 안내 칸
     const v = rec[f.k] == null ? "" : String(rec[f.k]);
     const id = `${prefix}_${i}`, attrs = `id="${id}" data-k="${rEsc(f.k)}"`;
     let input;
@@ -234,7 +235,7 @@ function markActive(selector, attr, value) {
   document.querySelectorAll(selector).forEach(el => el.classList.toggle("active", el.dataset[attr] === value));
 }
 function custCardsHtml(activeApp, cls, custs) {
-  if (!custs.length) return `<div class="hint">등록된 전기사용자가 없습니다.</div>`;
+  if (!custs.length) return `<div class="hint">등록된 계약이 없습니다.</div>`;
   return custs.map(c => {
     const app = rStr(c["KPX신청번호"]), n = Registry.plantsOfGroup(app).length;
     return `<button class="reg-card ${cls}${activeApp === app ? " active" : ""}" data-app="${rEsc(app)}">
@@ -248,8 +249,7 @@ function renderCustomerPage() {
   const host = r$("regCustPage"); if (!host) return;
   const pg = pageSlice("cust", Registry.rawCustomers());
   host.innerHTML = `${loadFailNotice()}<div class="card">
-      <div class="reg-head"><h2>전기사용자 (수요기업) 계약</h2><button class="btn secondary" id="regAddCust">+ 전기사용자 추가</button></div>
-      <p class="hint">카드를 누르면 계약 정보를 보고 수정할 수 있습니다. 발전소 묶기와 월별 집계는 [그룹화]에서 합니다.</p>
+      <div class="reg-head"><h2>전력거래계약</h2><button class="btn secondary" id="regAddCust">+ 전기사용자 추가</button></div>
       <div class="reg-cards">${custCardsHtml(regState.openCust, "cust-card", pg.items)}</div>${pagerHtml("cust", pg.page, pg.pages)}
       <div id="regCustDetail"></div></div>`;
   bindPager(host, renderCustomerPage);
@@ -283,8 +283,7 @@ function renderPlantPage() {
   const host = r$("regPlantPage"); if (!host) return;
   const plants = Registry.plants(), pg = pageSlice("plant", Object.keys(plants));
   host.innerHTML = `${loadFailNotice()}<div class="card">
-      <div class="reg-head"><h2>발전소 (발전사업자)</h2><button class="btn secondary" id="regAddPlant">+ 발전소 추가</button></div>
-      <p class="hint">발전소명은 KPX 직접전력거래량 파일의 "발전기명"과 정확히 같아야 합니다. 행을 누르면 수정할 수 있습니다.</p>
+      <div class="reg-head"><h2>전력공급계약</h2><button class="btn secondary" id="regAddPlant">+ 발전소 추가</button></div>
       <div class="grid-wrap"><table class="grid reg-table"><tr><th>발전소명</th><th>사업자명</th><th>지역</th><th>배전</th><th>그룹 (전기사용자)</th><th>계약용량(kW)</th><th>매입단가</th><th>계약일자</th></tr>
         ${pg.items.map(p => { const m = plants[p], app = rStr(m["KPX신청번호"]);
           return `<tr class="reg-row${regState.openPlant === p ? " active" : ""}" data-plant="${rEsc(p)}"><td><b>${rEsc(p)}</b></td><td>${rEsc(m["사업자명(대표자명)"])}</td>
@@ -323,7 +322,7 @@ function renderGroupPage() {
   if (regState.openGroup === null && custs.length) regState.openGroup = rStr(custs[0]["KPX신청번호"]);
   const pg = pageSlice("group", custs);
   host.innerHTML = `${loadFailNotice()}<div class="group-layout">
-    <div class="card group-list"><h2>계약</h2>
+    <div class="card group-list"><h2>PPA 계약</h2>
       <div class="reg-cards single">${custCardsHtml(regState.openGroup, "group-card", pg.items)}</div>${pagerHtml("group", pg.page, pg.pages)}
       <p class="hint" style="margin-top:10px">그룹 미연결 발전소: <b>${unlinked.length}</b>개</p></div>
     <div class="card group-main" id="regGroupMain"></div></div>`;
@@ -335,7 +334,7 @@ function renderGroupPage() {
 function renderGroupMain() {
   const host = r$("regGroupMain"); if (!host) return;
   const app = regState.openGroup, c = app && Registry.customerByApp(app);
-  if (!c) { host.innerHTML = `<div class="hint">왼쪽에서 전기사용자 계약을 고르세요. 계약은 [전기사용자]에서 등록합니다.</div>`; return; }
+  if (!c) { host.innerHTML = `<div class="hint">등록된 계약이 없습니다.</div>`; return; }
   const members = Registry.plantsOfGroup(app), all = Registry.plants();
   const others = Object.keys(all).filter(p => !members.includes(p));
   if (!regState.month) regState.month = defaultMonth(app);
@@ -417,7 +416,7 @@ async function renderGroupAgg(app) {
       <div class="kpi"><div class="label">초과발전량 (kWh)</div><div class="value">${rNum(tot.excess)}</div></div></div>
     <div class="grid-wrap" style="margin-top:10px"><table class="grid"><tr><th>발전소</th><th>지역</th><th>발전량 (kWh)</th><th>공급량 (kWh)</th><th>초과발전량 (kWh)</th></tr>${body}
       <tr class="total"><td><b>계</b></td><td></td><td class="num"><b>${rNum(tot.generation)}</b></td><td class="num"><b>${rNum(tot.supply)}</b></td><td class="num"><b>${rNum(tot.excess)}</b></td></tr></table></div>
-    <p class="hint">${hasData ? `출처: ${rEsc(source)} · 초과발전량 = 발전량 − 공급량` : `${month.slice(0, 4)}.${month.slice(4)} 실적이 없습니다. [정산 > 전기사용자/발전사업자]에서 이 달 파일을 올리면 표시됩니다.`}</p>`;
+    ${hasData ? "" : `<p class="hint">${month.slice(0, 4)}.${month.slice(4)} 실적이 없습니다.</p>`}`;
 }
 
 async function saveRegistry(kind, formId, form, originalKey, statusId) {
