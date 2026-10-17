@@ -29,49 +29,58 @@
   };
 
   /* ---------- 1) 시간별 매칭 ----------
-   * hourly: 한 시간 단위 { usage, gen: {plant: kWh} }
-   * supply(h) = min(usage, Σgen) , 발전소별 배분은 발전량 비율, 초과분은 발전량 비율로 초과발전
-   * usage 가 null/undefined 이면 "가정산 간주": 사용량 = 발전량 합(전량 공급) 으로 본다.
+   * U=사용량, G=Σ발전량, L=송전손실률
+   * 공급량 S = U > G×(1−L) ? G : U/(1−L)  (소수 3자리 반올림, G=0 → 0)
+   * 초과 E = G − S, 발전소별 배분 S_p = ROUND(S×g_p/G,3), E_p = ROUND(E×g_p/G,3)
+   * 부족(단순) = U − S (음수 허용), 부족(손실) = S × L
+   * usage 가 null/undefined 이면 "가정산 간주": U = G → S = G, E = 0
    */
-  E.matchHour = function (usage, gen) {
+  E.matchHour = function (usage, gen, loss) {
+    if (loss == null) loss = E.DEFAULT_RATES.transLossRate;
     const plants = Object.keys(gen);
-    const total = plants.reduce((s, p) => s + (gen[p] || 0), 0);
-    const u = (usage === null || usage === undefined) ? total : usage;
-    const supplyTotal = Math.min(u, total);
-    const out = { supply: {}, excess: {}, supplyTotal, excessTotal: total - supplyTotal, deficit: Math.max(0, u - total), usage: u, genTotal: total };
+    const G = plants.reduce((s, p) => s + (gen[p] || 0), 0);
+    const U = (usage === null || usage === undefined) ? G : usage;
+    const S = G > 0 ? E.round(U > G * (1 - loss) ? G : U / (1 - loss), 3) : 0;
+    const X = G - S;
+    const out = { supply: {}, excess: {}, supplyTotal: S, excessTotal: X, deficitSimple: U - S, deficitLoss: S * loss, usage: U, genTotal: G };
     plants.forEach(p => {
-      const share = total > 0 ? (gen[p] || 0) / total : 0;
-      out.supply[p] = supplyTotal * share;
-      out.excess[p] = (total - supplyTotal) * share;
+      const g = gen[p] || 0;
+      out.supply[p] = G > 0 ? E.round(S * g / G, 3) : 0;
+      out.excess[p] = G > 0 ? E.round(X * g / G, 3) : 0;
     });
     return out;
   };
 
   /* days: [{date, load:[24 × '경부하'|'중간부하'|'최대부하'], usage:[24]|null, gen:{plant:[24]}}]
    * 반환: { supplyByPlant, genByPlant, excessByPlant, byLoad:{구분:{usage,supply,deficitSimple,deficitLoss}}, totals }
+   * totals.supply = 발전소별 공급량 합 (청구 기준), totals.supplyHourly = 시간별 S 합 (부하별 표 기준)
    */
   E.matchMonth = function (days, rates) {
     const loss = (rates && rates.transLossRate != null) ? rates.transLossRate : E.DEFAULT_RATES.transLossRate;
     const supplyByPlant = {}, genByPlant = {}, excessByPlant = {};
     const byLoad = {};
-    const tot = { usage: 0, gen: 0, supply: 0, excess: 0, deficitSimple: 0, deficitLoss: 0 };
+    const tot = { usage: 0, gen: 0, supply: 0, supplyHourly: 0, excess: 0, deficitSimple: 0, deficitLoss: 0 };
     days.forEach(d => {
       for (let h = 0; h < 24; h++) {
         const gen = {};
         Object.keys(d.gen).forEach(p => { gen[p] = d.gen[p][h] || 0; });
-        const m = E.matchHour(d.usage ? d.usage[h] : null, gen);
+        const m = E.matchHour(d.usage ? d.usage[h] : null, gen, loss);
         const lc = d.load[h];
         const b = byLoad[lc] || (byLoad[lc] = { usage: 0, supply: 0, deficitSimple: 0, deficitLoss: 0 });
-        b.usage += m.usage; b.supply += m.supplyTotal; b.deficitSimple += m.deficit; b.deficitLoss += m.supplyTotal * loss;
+        b.usage += m.usage; b.supply += m.supplyTotal; b.deficitSimple += m.deficitSimple; b.deficitLoss += m.deficitLoss;
         Object.keys(gen).forEach(p => {
           supplyByPlant[p] = (supplyByPlant[p] || 0) + m.supply[p];
           excessByPlant[p] = (excessByPlant[p] || 0) + m.excess[p];
           genByPlant[p] = (genByPlant[p] || 0) + gen[p];
         });
-        tot.usage += m.usage; tot.gen += m.genTotal; tot.supply += m.supplyTotal; tot.excess += m.excessTotal;
-        tot.deficitSimple += m.deficit; tot.deficitLoss += m.supplyTotal * loss;
+        tot.usage += m.usage; tot.gen += m.genTotal; tot.supplyHourly += m.supplyTotal;
+        tot.deficitSimple += m.deficitSimple; tot.deficitLoss += m.deficitLoss;
       }
     });
+    const r3 = o => Object.keys(o).forEach(p => { o[p] = E.round(o[p], 3); });
+    r3(supplyByPlant); r3(excessByPlant); r3(genByPlant);
+    tot.supply = E.round(Object.values(supplyByPlant).reduce((s, v) => s + v, 0), 3);
+    tot.excess = E.round(Object.values(excessByPlant).reduce((s, v) => s + v, 0), 3);
     return { supplyByPlant, genByPlant, excessByPlant, byLoad, totals: tot };
   };
 
