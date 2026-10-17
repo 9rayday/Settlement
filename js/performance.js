@@ -115,7 +115,7 @@ function penaltyDueGroup(app, month) {
 function perfAlerts() {
   const out = [];
   [["cust", "전기사용자", "cust-perf"], ["gen", "발전소", "gen-perf"]].forEach(([kind, label, page]) => perfContracts(kind).forEach(({ c, cur }) => {
-    if (cur && cur.status === "미달 위험") out.push({ d: cur.remain, page,
+    if (cur && cur.status === "미달 위험") out.push({ id: `perf|${kind}|${c.key}|${cur.n}`, d: cur.remain, page,
       text: `${label} ${c.name}: ${cur.n}년차 미달 위험 (종료 ${cur.e}, D-${cur.remain}, 달성률 ${Math.round((cur.ratio + 1) * 100)}%)` });
   }));
   return out;

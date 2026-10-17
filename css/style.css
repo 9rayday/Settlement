@@ -372,3 +372,9 @@ table.perf-years td:nth-child(-n+2), table.perf-years .perf-sub{ white-space:now
 #perfCustPage table.grid th, #perfGenPage table.grid th{ min-width:0 !important; white-space:normal; }
 #perfCustPage table.perf-years td:nth-child(-n+2), #perfGenPage table.perf-years td:nth-child(-n+2){ white-space:normal; }
 .nw{ white-space:nowrap; }
+.bell-head{ display:flex; align-items:center; justify-content:space-between; }
+.bell-all{ background:none; border:none; color:var(--accent); font:inherit; font-size:12px; font-weight:700; cursor:pointer; }
+.bell-row{ display:flex; align-items:center; border-bottom:1px solid #F1F3F5; }
+.bell-row .bell-item{ flex:1; border-bottom:none; }
+.bell-x{ flex:none; margin-right:10px; background:#F1F3F5; border:none; border-radius:6px; padding:4px 8px; font:inherit; font-size:11.5px; color:var(--sub); cursor:pointer; }
+.bell-x:hover{ background:#E5E7EB; color:var(--ink); }
