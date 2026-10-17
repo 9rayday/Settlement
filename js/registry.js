@@ -114,7 +114,7 @@ const Registry = (function () {
   function toCustomer(c) {
     return { name: str(c["수요기업명"]), ceo: str(c["대표자명"]), bizNo: str(c["사업자등록번호"]), address: str(c["전기사용장소"]),
       manager: str(c["담당자"]), contact: str(c["연락처"]), email: str(c["이메일"]), demandRegion: str(c["수요지지역"]),
-      unitPrice: Number(c["계약단가"]), appNo: str(c["KPX신청번호"]), consumeAppNo: str(c["소비계약신청번호"]),
+      unitPrice: Number(c["계약단가"]), appNo: str(c["KPX신청번호"]), consumeAppNo: str(c["소비계약신청번호"]), settleMethod: str(c["정산방식"]),
       start: str(c["계약일자"]), end: str(c["계약해지일"]), contractId: custKey(c) };
   }
   // 계약 키 = 계약ID (예전 행은 KPX신청번호). 같은 신청번호에 계약이 여러 건일 수 있다.

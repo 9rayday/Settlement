@@ -55,7 +55,7 @@
    * 반환: { supplyByPlant, genByPlant, excessByPlant, byLoad:{구분:{usage,supply,deficitSimple,deficitLoss}}, totals }
    * totals.supply = 발전소별 공급량 합 (청구 기준), totals.supplyHourly = 시간별 S 합 (부하별 표 기준)
    */
-  E.matchMonth = function (days, rates) {
+  E.matchMonth = function (days, rates, onHour) {
     const loss = (rates && rates.transLossRate != null) ? rates.transLossRate : E.DEFAULT_RATES.transLossRate;
     const supplyByPlant = {}, genByPlant = {}, excessByPlant = {};
     const byLoad = {};
@@ -65,6 +65,7 @@
         const gen = {};
         Object.keys(d.gen).forEach(p => { gen[p] = d.gen[p][h] || 0; });
         const m = E.matchHour(d.usage ? d.usage[h] : null, gen, loss);
+        if (onHour) onHour(d, h, m);
         const lc = d.load[h];
         const b = byLoad[lc] || (byLoad[lc] = { usage: 0, supply: 0, deficitSimple: 0, deficitLoss: 0 });
         b.usage += m.usage; b.supply += m.supplyTotal; b.deficitSimple += m.deficitSimple; b.deficitLoss += m.deficitLoss;
@@ -82,6 +83,22 @@
     tot.supply = E.round(Object.values(supplyByPlant).reduce((s, v) => s + v, 0), 3);
     tot.excess = E.round(Object.values(excessByPlant).reduce((s, v) => s + v, 0), 3);
     return { supplyByPlant, genByPlant, excessByPlant, byLoad, totals: tot };
+  };
+
+  /* 월간균등정산: 발전기별 K = ROUND(월발전량합 / 월시간수, 6) MWh, 마지막 시간이 잔차 흡수 (합 = 월발전량)
+   * days[].gen 을 균등값으로 바꾼다 (kWh). 실측 발전량은 days[].actGen 에 남는다.
+   */
+  E.equalizeGen = function (days) {
+    const hours = days.length * 24;
+    if (!hours) return days;
+    const plants = Object.keys(days[0].gen);
+    plants.forEach(p => {
+      const totalMwh = E.round(days.reduce((t, d) => t + (d.gen[p] || []).reduce((a, b) => a + (b || 0), 0), 0) / 1000, 6);
+      const base = E.round(totalMwh / hours, 6);
+      const last = E.round(totalMwh - base * (hours - 1), 6);
+      days.forEach((d, i) => { d.gen[p] = new Array(24).fill(base * 1000); if (i === days.length - 1) d.gen[p][23] = last * 1000; });
+    });
+    return days;
   };
 
   /* ---------- 1-b) KPX 재생E공급량 기준 매칭 (가정산·오차정산 공통, 화면에서 사용) ----------

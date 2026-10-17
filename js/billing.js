@@ -76,6 +76,7 @@ async function onAmiFile(file) {
     st.textContent = `${file.name} — ${ami.dates.length}일 (${ami.dates[0]} ~ ${ami.dates[ami.dates.length - 1]})`; st.className = "status ok";
   } catch (e) { billState.ami = null; st.textContent = "오류: " + e.message; st.className = "status bad"; }
   renderBillingBody();
+  if (typeof onAmiForGen === "function" && getSettleMode() !== "trueup") onAmiForGen(); // 발전사업자 집계도 사용량 기준으로 다시
 }
 
 /* ---------- 전기사용자 정산 화면 #tab5 (구분에 따라 가정산서 / 오차정산서) ---------- */
@@ -97,7 +98,7 @@ function provisionalFormHtml() {
 }
 
 function trueUpFormHtml() {
-  return `<div class="card"><h2>가정산 (비교 기준)</h2>
+  return `<div class="card"><h2>비교 기준 가정산서</h2><div id="pvSource" class="hint" style="margin:0 0 8px"></div>
       <div class="adj-grid">${numField("공급량 (kWh)", "pv_supply")}${numField("전력량요금 (원)", "pv_energy")}${numField("송배전용 전기설비 이용요금 (원)", "pv_net")}${numField("거래수수료 (원)", "pv_fee")}</div></div>
     <div class="card"><h2>확정 부가정산금 · 전월 차액</h2>
       ${surchargeRowHtml()}
@@ -121,11 +122,12 @@ function renderBillingBody() {
       <label>그룹(신청번호)</label><select id="groupSel" style="min-width:380px">${apps.map(a => {
         const g = billState.kpx.groups[a], c = custByApp(a);
         return `<option value="${esc(a)}">${esc(a)} — ${esc(c ? c.name : "미등록")} (${Object.keys(g.plants).length}개 발전소, ${monthLabel(g.month)})</option>`; }).join("")}</select>
-      <span id="billMonthBadge" class="badge"></span></div></div>
+      <span id="billMonthBadge" class="badge"></span></div>
+      <div id="billFlow" class="bill-flow"></div></div>
     ${trueUp ? trueUpFormHtml() : provisionalFormHtml()}
     <div id="billResult"></div>
     <div class="row no-print" id="billActions" style="display:none; margin-top:10px"><button class="btn secondary" id="billXlsx">Excel 다운</button><button class="btn secondary" id="billPrint">인쇄 / PDF 저장</button>
-      <button class="btn accent" id="billSave">${trueUp ? "오차정산 저장 (다음 달 가정산으로 이월)" : "가정산 기록 저장"}</button><span id="billSaveStatus" class="status warn" style="background:none"></span></div>`;
+      <button class="btn accent" id="billSave">${trueUp ? "오차정산서 발행 (다음 달 가정산서로 이월)" : "가정산서 발행 (저장)"}</button><span id="billSaveStatus" class="status warn" style="background:none"></span></div>`;
   $("groupSel").onchange = onGroupChange;
   $("cs_split").onclick = splitConfirmed;
   $("cs_total").oninput = $("cs_ratio").oninput = splitConfirmed;
@@ -141,10 +143,41 @@ function onGroupChange() {
   const g = billState.kpx.groups[app];
   billState.result = null; $("billResult").innerHTML = ""; $("billActions").style.display = "none"; $("billSaveStatus").textContent = "";
   $("billMonthBadge").textContent = `정산월 ${monthLabel(g.month)}`;
+  renderFlow(app, g.month);
   if (getSettleMode() === "trueup") fillTrueUpForm(app, g.month); else fillProvisionalForm(app, g.month);
 }
 
 const setVal = (id, v) => { $(id).value = v == null ? "" : v; };
+
+/* ---------- 정산 진행 단계 ----------
+ * 실무 순서: ① 가정산서 발행(bill:) → ② 전력대금 수령(bill.paidAt) → ③ 오차정산서 발행(carry:<다음달>) → ④ 다음 달 가정산서에 차액 반영(bill:<다음달>)
+ */
+const fmtDate = iso => iso ? String(iso).slice(0, 10) : "";
+function flowSteps(app, month) {
+  const bill = Store.get(`bill:${month}:${app}`, null), carry = Store.get(`carry:${nextYm(month)}:${app}`, null), next = Store.get(`bill:${nextYm(month)}:${app}`, null);
+  return [
+    { label: "가정산서 발행", done: !!bill, note: bill ? fmtDate(bill.savedAt) + (bill.grandTotal != null ? " · " + won(bill.grandTotal) : "") : "" },
+    { label: "전력대금 수령", done: !!(bill && bill.paidAt), note: bill && bill.paidAt ? bill.paidAt + (bill.paidAmount != null ? " · " + won(bill.paidAmount) : "") : "" },
+    { label: "오차정산서 발행", done: !!carry, note: carry ? fmtDate(carry.savedAt) + " · 차액 " + won((carry.prevDiff.taxable || 0) + (carry.prevDiff.exempt || 0)) : "" },
+    { label: `${Number(nextYm(month).slice(4))}월 가정산서 반영`, done: !!next, note: next ? fmtDate(next.savedAt) : "" }
+  ];
+}
+function renderFlow(app, month) {
+  const host = $("billFlow"); if (!host) return;
+  const steps = flowSteps(app, month), bill = Store.get(`bill:${month}:${app}`, null);
+  host.innerHTML = `<span class="hint">${monthLabel(month)} 진행</span>` + steps.map((x, i) => `<span class="flow-step${x.done ? " done" : ""}"><b>${i + 1}</b> ${x.label}${x.note ? ` <small>${esc(x.note)}</small>` : ""}</span>`).join('<span class="flow-arrow">›</span>')
+    + (bill && !bill.paidAt ? ` <input type="date" id="paidDate" value="${todayYmd()}"><input type="number" id="paidAmt" placeholder="수령액(원)" value="${bill.grandTotal == null ? "" : Math.round(bill.grandTotal)}" style="width:130px"><button class="btn secondary" id="paidBtn">대금 수령 확인</button>`
+       : bill && bill.paidAt ? ` <button class="btn secondary" id="paidUndo">수령 취소</button>` : "");
+  if ($("paidBtn")) $("paidBtn").onclick = async () => {
+    await Store.set(`bill:${month}:${app}`, Object.assign({}, bill, { paidAt: $("paidDate").value || todayYmd(), paidAmount: $("paidAmt").value === "" ? null : Number($("paidAmt").value) }));
+    renderFlow(app, month);
+  };
+  if ($("paidUndo")) $("paidUndo").onclick = async () => {
+    if (!confirm("전력대금 수령 기록을 지울까요?")) return;
+    const b = Object.assign({}, bill); delete b.paidAt; delete b.paidAmount;
+    await Store.set(`bill:${month}:${app}`, b); renderFlow(app, month);
+  };
+}
 
 // 가정산: 전월 오차정산(carry:<이번달>:<신청번호>)이 있으면 그대로 채운다
 function fillProvisionalForm(app, month) {
@@ -183,44 +216,43 @@ function prepareGroup(err, warn) {
     const i = Registry.plantInfo(p);
     plants[p] = i && i.region ? i : Object.assign({ distConnected: false, distLow: false }, i || {}, { region: "비수도권" }); // 미리보기용 임시값
   });
-  const days = Parsers.buildDays(g, billState.ami);
-  days.forEach(d => { d.amiUsage = d.usage; }); // 고객 사용량(15분) 원본 — 재생E공급량이 빈 가정산 파일일 때 공급량 계산에 사용
-  // 사용량은 부하구분별 사용량·부족전력량 표시에만 쓴다 (공급량은 KPX 재생E공급량). 파일이 없거나 빈 시간은 KPX 전기사용량으로.
-  if (billState.ami) {
-    const miss = Parsers.missingDates(g.month, billState.ami.dates);
-    if (miss.length) warn.push(`사용량 파일에 없는 날짜 ${miss.length}일 — 해당일은 KPX 전기사용량으로 표시합니다. (공급량·금액에는 영향 없음)`);
-    billState.ami.warnings.filter(w => /합계 불일치|96칸/.test(w)).forEach(w => warn.push(w));
-    days.forEach(d => {
-      if (!d.usage) { d.usage = d.kpxUsage; return; }
-      if (d.kpxUsage) d.usage = d.usage.map((v, h) => v == null ? d.kpxUsage[h] : v);
-    });
-  } else {
-    days.forEach(d => { d.usage = d.kpxUsage; });
-    warn.push("고객 사용량 파일이 없어 KPX 파일의 전기사용량으로 표시했습니다. (공급량·금액에는 영향 없음)");
+  const S = settleGroup(g, billState.ami, rates);
+  const days = S.days;
+  if (S.usage.source === "ami") {
+    if (S.usage.amiMissing.length) warn.push(`사용량 파일에 없는 날짜 ${S.usage.amiMissing.length}일 — 해당일은 KPX 전기사용량(없으면 발전량)으로 계산했습니다.`);
+    billState.ami.warnings.filter(w => /합계 불일치|96칸|미수신/.test(w)).forEach(w => warn.push(w));
+  } else if (S.usage.source === "none") {
+    warn.push("사용량 정보가 없어(가정산 KPX 파일, 사용량 파일 없음) 사용량 = 발전량으로 보고 계산했습니다 (공급량 = 발전량, 초과발전량 0). 고객 사용량 파일을 올리면 시간별로 계산합니다.");
   }
+  if (S.monthly && !g.hasPpa) warn.push("월간균등 정산: 발전기별 발전량을 월 균등값(ROUND(월합/시간수, 6) MWh)으로 바꿔 계산했습니다.");
+  if (S.kpxSupply > 0 && Math.abs(S.kpxSupply - S.match.totals.supplyHourly) > 1)
+    warn.push(`KPX 재생E공급량 합계(${kwhStr(S.kpxSupply)})와 계산 공급량(${kwhStr(S.match.totals.supplyHourly)})이 다릅니다. 사용량·손실률을 확인하세요.`);
   // 정보가 부족하면 미리보기: 임시값(전기사용자 = 신청번호, 지역 비수도권, 단가 0원)으로 계산하고 저장은 막는다
   const preview = err.length > 0;
   const cust = customer ? Object.assign({}, customer) : { name: `(미등록) ${app}`, bizNo: "", address: "", manager: "", contact: "", demandRegion: "비수도권", unitPrice: 0, appNo: app, contractId: app };
   if (!cust.demandRegion) cust.demandRegion = "비수도권";
   if (!(cust.unitPrice >= 0)) cust.unitPrice = 0;
-  return { app, g, customer: cust, rates, plants, days, priceSplits, preview };
+  return { app, g, customer: cust, rates, plants, days, match: S.match, priceSplits, preview };
 }
 const previewNotice = err => `<div class="notice bad"><b>미리보기 — 등록 정보가 부족해 임시값으로 계산했습니다 (저장 불가)</b><br>${err.map(esc).join("<br>")}<br>임시값: 미등록 전기사용자는 신청번호로 표시, 지역 없음 = 비수도권, 단가 없음 = 0원</div>`;
 // 단가가 비어 있는 계약은 0원으로 계산 (미리보기)
 const safeSplits = sp => sp ? sp.map(x => Object.assign({}, x, { unitPrice: x.unitPrice > 0 ? x.unitPrice : 0 })) : sp;
-// 공급량 = KPX 재생E공급량 (가정산·오차정산 공통), 초과발전량 = 발전량 − 공급량
-// 가정산 KPX 파일은 재생E공급량·전기사용량이 비어(0) 있다 → 엑셀 가정산 방식: 시간별 min(사용량, 발전량), 사용량 파일이 없으면 발전량 전량 공급
-function matchKpx(P, warn) {
-  const sum = key => P.days.reduce((t, d) => t + Object.values(d[key] || {}).reduce((a, arr) => a + arr.reduce((x, y) => x + (y || 0), 0), 0), 0);
-  if (sum("supply") <= 0 && sum("gen") > 0) {
-    warn.push(billState.ami ? "KPX 재생E공급량이 비어 있어(가정산 파일) 공급량 = 시간별 min(고객 사용량, 발전량)으로 계산했습니다."
-                            : "KPX 재생E공급량이 비어 있어(가정산 파일) 공급량 = 발전량(전량 공급)으로 계산했습니다. 고객 사용량 파일을 올리면 시간별 min(사용량, 발전량)으로 계산합니다.");
-    const i = warn.findIndex(w => w.indexOf("KPX 파일의 전기사용량으로 표시") >= 0); if (i >= 0) warn.splice(i, 1); // 이 경우엔 해당 없음
-    return Engine.matchMonth(P.days.map(d => Object.assign({}, d, { usage: d.amiUsage || null })), P.rates);
-  }
-  const m = Engine.matchMonthKpx(P.days, P.rates);
-  if (!m.totals.supply) warn.push("KPX 재생E공급량 합계가 0입니다. 파일이 맞는지 확인하세요.");
-  return m;
+/* ---------- 시간별 공통 산정 (발전사업자 정산·전기사용자 정산 공통, 가정산·오차정산 공통) ----------
+ * K = KPX PPA발전량 (없으면 발전량, 정산 제외 시간은 0, 정산방식이 월간균등이면 월 균등값)
+ * U = 고객 사용량 파일 → KPX 전기사용량(확정 파일) → 없으면 U = K (가정산 간주)
+ * L = KPX 손실률(%) 컬럼 → 없으면 요율의 송전손실률
+ * S = U > K×(1−L) ? K : U/(1−L), E = K − S (Engine.matchHour)
+ */
+function settleGroup(g, ami, rates, onHour) {
+  const cust = Registry.customerByApp(g.app, g.month);
+  const days = Parsers.buildDays(g, null);
+  const monthly = /월간균등/.test(g.settleMethod || (cust && cust.settleMethod) || ""); // KPX 정산방식 컬럼 → 계약 정산방식
+  if (monthly && !g.hasPpa) Engine.equalizeGen(days);
+  const usage = Parsers.resolveUsage(days, ami);
+  const loss = g.lossRate != null ? g.lossRate : rates.transLossRate;
+  const match = Engine.matchMonth(days, Object.assign({}, rates, { transLossRate: loss }), onHour);
+  const kpxSupply = days.reduce((t, x) => t + Object.values(x.supply || {}).reduce((a, arr) => a + arr.reduce((p, q) => p + (q || 0), 0), 0), 0);
+  return { days, match, usage, loss, monthly, kpxSupply };
 }
 const noticeHtml = (list, cls) => list.length ? `<div class="notice ${cls}">${list.map(esc).join("<br>")}</div>` : "";
 
@@ -229,7 +261,7 @@ function runCalc() {
   const out = $("billResult"); const warn = [], err = [];
   try {
     const P = prepareGroup(err, warn);
-    const match = matchKpx(P, warn);
+    const match = P.match;
     const ctx = {
       unitPrice: P.customer.unitPrice, priceSplits: safeSplits(Registry.priceSplits(P.app, P.g.month, match.supplyByPlant)), demandRegion: P.customer.demandRegion, plants: P.plants,
       confirmedSurcharge: { taxable: Number($("cs_taxable").value) || 0, exempt: Number($("cs_exempt").value) || 0 },
@@ -330,15 +362,20 @@ function invoiceHtml(R) {
 async function saveBill() {
   const R = billState.result; if (!R || R.mode !== "provisional" || R.preview) return; // 미리보기는 저장하지 않음
   const key = `bill:${R.month}:${R.app}`;
-  if (Store.get(key, null) && !confirm(`${monthLabel(R.month)} ${R.customer.name} 가정산 기록이 이미 있습니다. 덮어쓸까요?\n(오차정산은 이 기록과 비교합니다)`)) return;
-  const inv = R.inv, netByPlant = {};
-  Object.keys(inv.netByPlant).forEach(p => netByPlant[p] = inv.netByPlant[p].fee);
-  const where = await Store.set(key, {
-    supplyTotal: inv.supplyTotal, supply: inv.supplyTotal, energy: inv.energy, netTotal: inv.netTotal, netByPlant, fee: inv.fee,
-    expectedSurcharge: inv.expectedSurcharge, fund: inv.fund, grandTotal: inv.grandTotal,
-    unitPrice: R.ctx.unitPrice, customerName: R.customer.name, savedAt: new Date().toISOString()
-  });
-  $("billSaveStatus").textContent = where === "remote" ? "저장 완료 (구글시트)" : "이 브라우저에만 저장됨";
+  const old = Store.get(key, null);
+  if (old && !confirm(`${monthLabel(R.month)} ${R.customer.name} 가정산서가 이미 발행되어 있습니다${old.paidAt ? " (대금 수령 " + old.paidAt + ")" : ""}. 덮어쓸까요?\n(오차정산은 이 가정산서와 비교합니다)`)) return;
+  const inv = R.inv, netByPlant = {}, supplyByPlant = {};
+  Object.keys(inv.netByPlant).forEach(p => { netByPlant[p] = inv.netByPlant[p].fee; supplyByPlant[p] = inv.netByPlant[p].supplyRounded; });
+  const T = R.match.totals;
+  const where = await Store.set(key, Object.assign({
+    supplyTotal: inv.supplyTotal, supply: inv.supplyTotal, energy: inv.energy, netTotal: inv.netTotal, netByPlant, supplyByPlant, fee: inv.fee,
+    usage: T.usage, gen: T.gen, excess: T.excess, deficit: T.deficitSimple + T.deficitLoss,
+    confirmedSurcharge: inv.confirmedSurcharge, prevDiff: inv.prevDiff,
+    expectedSurcharge: inv.expectedSurcharge, fund: inv.fund, taxInvoice: inv.taxInvoice, grandTotal: inv.grandTotal,
+    unitPrice: R.ctx.unitPrice, customerName: R.customer.name, dueDate: R.dueDate || "", savedAt: new Date().toISOString()
+  }, old && old.paidAt ? { paidAt: old.paidAt, paidAmount: old.paidAmount } : {}));
+  $("billSaveStatus").textContent = (where === "remote" ? "발행 완료 (구글시트)" : "이 브라우저에만 저장됨") + " → 대금 수령 후 오차정산서에서 이 가정산서와 비교";
+  renderFlow(R.app, R.month);
 }
 
 function exportBillExcel() {
@@ -369,6 +406,9 @@ function fillTrueUpForm(app, month) {
   const prov = hasBill ? bill : (saved && saved.provisional) || {};
   setVal("pv_supply", prov.supplyTotal); setVal("pv_energy", prov.energy); setVal("pv_net", prov.netTotal); setVal("pv_fee", prov.fee);
   ["pv_supply", "pv_energy", "pv_net", "pv_fee"].forEach(id => { $(id).readOnly = hasBill; });
+  $("pvSource").innerHTML = hasBill
+    ? `${monthLabel(month)} 발행 가정산서 (${fmtDate(bill.savedAt)}${bill.grandTotal != null ? ", 당월 청구 계 " + won(bill.grandTotal) : ""}${bill.paidAt ? ", 대금 수령 " + esc(bill.paidAt) : ", <b>대금 수령 전</b>"}) 값을 그대로 비교합니다.`
+    : `<span style="color:#c0392b">${monthLabel(month)} 발행된 가정산서가 없습니다.</span> 가정산 모드에서 가정산서를 먼저 발행하거나, 시스템 밖에서 만든 가정산서 값을 직접 입력하세요.`;
   if (saved) {
     setVal("cs_total", saved.confirmedTotal); setVal("cs_ratio", saved.taxableRatio);
     setVal("cs_taxable", saved.confirmed.taxable); setVal("cs_exempt", saved.confirmed.exempt);
@@ -387,6 +427,8 @@ function readProvisional(month, app) {
   const bill = Store.get(`bill:${month}:${app}`, null);
   if (bill && bill.netByPlant) p.netByPlant = bill.netByPlant;
   if (bill && bill.expectedSurcharge != null) p.expectedSurcharge = bill.expectedSurcharge;
+  if (bill && bill.supplyByPlant) p.supplyByPlant = bill.supplyByPlant;
+  if (bill) { p.fromBill = true; p.savedAt = bill.savedAt; p.paidAt = bill.paidAt || ""; p.grandTotal = bill.grandTotal; }
   return p;
 }
 
@@ -408,7 +450,7 @@ function runTrueUp() {
     const P = prepareGroup(err, warn);
     const prov = readProvisional(P.g.month, P.app);
     if (!prov) { out.innerHTML = noticeHtml(["가정산 값(공급량·전력량요금·망이용요금·거래수수료)을 모두 입력하세요."], "bad"); return; }
-    const match = matchKpx(P, warn);
+    const match = P.match;
     const conf = Engine.invoice(match, { unitPrice: P.customer.unitPrice, priceSplits: safeSplits(Registry.priceSplits(P.app, P.g.month, match.supplyByPlant)), demandRegion: P.customer.demandRegion, plants: P.plants }, P.rates);
     const diff = Engine.trueUpDiff(prov, conf);
     setVal("pd_taxable", diff.taxable); // 비교 결과로 채움 (직접 고친 값은 다시 계산하면 덮어씀)
@@ -456,21 +498,22 @@ function trueUpHtml(R) {
     ${customerInfoTable(c, R)}
     ${usageTable(match, "거래<br>내역<br>(확정)")}
     <table class="doc-table">${DOC_COLS}
-      <tr><th class="section" rowspan="6">가정산<br>대비<br>차액</th><td class="label">항목</td><td class="label">가정산</td><td class="label">확정</td><td class="label">차액<br>(확정 − 가정산)</td><td class="label" colspan="2">비고</td></tr>
+      <tr><th class="section" rowspan="${prov.fromBill ? 7 : 6}">가정산<br>대비<br>차액</th><td class="label">항목</td><td class="label">가정산</td><td class="label">확정</td><td class="label">차액<br>(확정 − 가정산)</td><td class="label" colspan="2">비고</td></tr>
       ${cmp("공급량", prov.supplyTotal, conf.supplyTotal, diff.supply, " kWh")}
       ${cmp("전력량요금", prov.energy, conf.energy, diff.energy, " 원", `${price} 원/kWh`)}
       ${cmp("송배전용 전기설비<br>이용요금", prov.netTotal, conf.netTotal, diff.net, " 원")}
       ${cmp("거래수수료", prov.fee, conf.fee, diff.fee, " 원", `${rates.tradeFee} 원/kWh`)}
-      <tr class="total"><td class="label">계 (과세)</td><td class="num">${won(provSum)}</td><td class="num">${won(confSum)}</td><td class="num">${sign(diff.taxable)} 원</td><td colspan="2"></td></tr></table>
+      <tr class="total"><td class="label">계 (과세)</td><td class="num">${won(provSum)}</td><td class="num">${won(confSum)}</td><td class="num">${sign(diff.taxable)} 원</td><td colspan="2"></td></tr>
+      ${prov.fromBill ? `<tr><td class="label">기준</td><td class="basis" colspan="5">${monthKo(R.month)} 가정산서 (발행 ${fmtDate(prov.savedAt)}${prov.grandTotal != null ? ", 당월 청구 계 " + won(prov.grandTotal) : ""}${prov.paidAt ? ", 대금 수령 " + esc(prov.paidAt) : ""})</td></tr>` : ""}</table>
     <table class="doc-table">${DOC_COLS}
       <tr><th class="section" rowspan="${surRows.length}">${m}월<br>부가정산금</th>${first(surRows)}
       ${surRows.slice(1).join("")}
       <tr><th class="section" rowspan="${carryRows.length}">${Number(nm.slice(4))}월<br>가정산서<br>반영</th>${first(carryRows)}
       ${carryRows.slice(1).join("")}</table>
     <table class="doc-table">${DOC_COLS}
-      <tr><th class="section" rowspan="${plantsN.length + 1}">발전소별<br>망이용요금</th><td class="label" colspan="2">발전소</td><td class="label">확정 공급량</td><td class="label">가정산</td><td class="label">확정</td><td class="label">차액</td></tr>
-      ${plantsN.map(p => { const d = diff.netByPlant[p];
-        return `<tr><td colspan="2">${esc(p)}</td><td class="num">${conf.netByPlant[p].supplyRounded.toLocaleString()} kWh</td><td class="num">${d.prov == null ? "-" : won(d.prov)}</td><td class="num">${won(d.conf)}</td><td class="num">${d.diff == null ? "-" : sign(d.diff) + " 원"}</td></tr>`; }).join("")}</table>
+      <tr><th class="section" rowspan="${plantsN.length + 1}">발전소별<br>망이용요금</th><td class="label">발전소</td><td class="label">가정산 공급량</td><td class="label">확정 공급량</td><td class="label">가정산 요금</td><td class="label">확정 요금</td><td class="label">요금 차액</td></tr>
+      ${plantsN.map(p => { const d = diff.netByPlant[p], ps = prov.supplyByPlant ? prov.supplyByPlant[p] : null;
+        return `<tr><td>${esc(p)}</td><td class="num">${ps == null ? "-" : ps.toLocaleString() + " kWh"}</td><td class="num">${conf.netByPlant[p].supplyRounded.toLocaleString()} kWh</td><td class="num">${d.prov == null ? "-" : won(d.prov)}</td><td class="num">${won(d.conf)}</td><td class="num">${d.diff == null ? "-" : sign(d.diff) + " 원"}</td></tr>`; }).join("")}</table>
     ${t.note ? `<p class="hint">메모: ${esc(t.note)}</p>` : ""}
     ${buyerTable(R, `${INVOICE_PREFIX}-${R.month}-T001`)}
     ${docSignature(R, "오차정산", c)}
@@ -480,6 +523,7 @@ function trueUpHtml(R) {
 async function saveTrueUp() {
   const R = billState.result; if (!R || R.mode !== "trueup" || R.preview) return;
   if (!renderTrueUpResult()) return; // 입력값을 다시 읽어 문서를 갱신하고 검증
+  if (R.prov.fromBill && !R.prov.paidAt && !confirm(`${monthLabel(R.month)} 가정산서의 전력대금 수령이 확인되지 않았습니다. 그래도 오차정산서를 발행할까요?`)) return;
   const key = `carry:${nextYm(R.month)}:${R.app}`;
   const pick = o => ({ supplyTotal: o.supplyTotal, energy: o.energy, netTotal: o.netTotal, fee: o.fee });
   const rec = Object.assign({
@@ -489,7 +533,8 @@ async function saveTrueUp() {
     expectedSurcharge: R.prov.expectedSurcharge == null ? null : R.prov.expectedSurcharge
   }, R.fields, { savedAt: new Date().toISOString() });
   const where = await Store.set(key, rec);
-  $("billSaveStatus").textContent = (where === "remote" ? "저장 완료 (구글시트)" : "이 브라우저에만 저장됨") + ` → ${monthLabel(nextYm(R.month))} 가정산서에 자동 반영`;
+  $("billSaveStatus").textContent = (where === "remote" ? "발행 완료 (구글시트)" : "이 브라우저에만 저장됨") + ` → ${monthLabel(nextYm(R.month))} 가정산서에 자동 반영`;
+  renderFlow(R.app, R.month);
 }
 
 function exportTrueUpExcel() {

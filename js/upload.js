@@ -1,5 +1,6 @@
 /* ============ Upload (drag & drop + file picker) ============ */
-let supplyFromGen = false; // 마지막 업로드 파일의 재생E공급량을 발전량으로 대체했는지
+let kpxRowsOrig = [];  // 업로드한 KPX 원본 행 (재계산할 때마다 여기서 다시 시작)
+let genSettleNotes = []; // 발전사업자 집계 산정 근거 (사용량 출처 등)
 
 function initUploadZone(){
   bindDropZone("dropZone", "dataFile", routeKpxFile);
@@ -73,17 +74,13 @@ function handleFile(file){
     try{
       const wb = XLSX.read(e.target.result, {type:"array"});
       const sheetName = wb.SheetNames[0];
-      rawRows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], {defval:null});
+      kpxRowsOrig = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], {defval:null});
+      rawRows = kpxRowsOrig.map(r => Object.assign({}, r));
       const headerRow = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], {header:1, defval:null})[0] || [];
       rawHeaders = headerRow.map(h=> h===null||h===undefined ? "" : String(h)).filter(h=>h!=="");
       buildColMap(rawRows);
-      // 가정산 KPX 파일은 재생E공급량이 비어(0) 있다 → 엑셀 가정산 방식대로 발전량을 공급량으로 (초과발전량 0)
-      const colSum = c => c ? rawRows.reduce((t, r) => t + num(r[c]), 0) : 0;
-      supplyFromGen = !!(colMap.supply && colMap.gen && colSum(colMap.supply) <= 0 && colSum(colMap.gen) > 0);
-      if(supplyFromGen) rawRows.forEach(r => { r[colMap.supply] = r[colMap.gen]; });
       aggregate(rawRows);
-      statusEl.textContent = `발전소 수 ${plants.length} 처리 완료` + (supplyFromGen ? " · 재생E공급량이 비어 있어 발전량을 공급량으로 계산(가정산)" : "");
-      statusEl.className = "status ok";
+      showGenStatus();
       document.getElementById("exportBtn").disabled = false;
       document.getElementById("pdfBtn").disabled = false;
       document.getElementById("exportAllBtn").disabled = false;
@@ -94,6 +91,22 @@ function handleFile(file){
     }
   };
   reader.readAsArrayBuffer(file);
+}
+
+function showGenStatus(){
+  const statusEl = document.getElementById("dataStatus");
+  statusEl.style.display = "inline-flex";
+  statusEl.textContent = `발전소 수 ${plants.length} 처리 완료` + (genSettleNotes.length ? " · " + genSettleNotes.join(" · ") : "");
+  statusEl.className = "status ok";
+}
+
+// 사용량 파일을 KPX 파일보다 나중에 올려도 발전사업자 집계를 다시 계산한다 (billing.js onAmiFile 에서 호출)
+function onAmiForGen(){
+  if(!kpxRowsOrig.length) return;
+  rawRows = kpxRowsOrig.map(r => Object.assign({}, r));
+  aggregate(rawRows);
+  showGenStatus();
+  syncPerformanceToGas();
 }
 
 function pickHeaderIndex(headers, candidates){
@@ -150,39 +163,72 @@ function buildColMap(rows){
   };
 }
 
+/* 발전사업자 집계: 발전량 = KPX 실측 발전량 합, 공급량·초과발전량·부족전력량은 전기사용자 정산과 같은 시간별 산정(settleGroup, billing.js)
+ * 계산한 시간별 값을 원본 행(재생E공급량·초과전력량·전기사용량·부족전력량)에도 써 넣어 엑셀/PDF 내보내기와 맞춘다.
+ * 신청번호가 없는 행만 KPX 파일 값을 그대로 쓴다.
+ */
+const dateKeyOf = v => { const d = String(v == null ? "" : v).replace(/[^0-9]/g, ""); return `${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}`; };
 function aggregate(rows){
   aggByPlant = {}; plants = [];
-  const seenTs = new Set();
   siteTotals = {usage:0, generation:0, supply:0, excess:0, deficit:0, lossRatePct:null};
-  settleMonth = "";
-
+  settleMonth = ""; genSettleNotes = [];
+  const raw = {}; // 신청번호 없는 행용 KPX 값
+  const rowIdx = {};
   rows.forEach(r=>{
     const rawPlant = colMap.plant ? r[colMap.plant] : null;
     const plant = rawPlant!=null ? String(rawPlant).trim() : null;
     if(!plant) return;
-    if(!aggByPlant[plant]){ aggByPlant[plant] = {generation:0, supply:0, excess:0}; plants.push(plant); }
-    const gen = num(r[colMap.gen])*1000, sup = num(r[colMap.supply])*1000, exc = num(r[colMap.excess])*1000;
-    aggByPlant[plant].generation += gen;
-    aggByPlant[plant].supply += sup;
-    aggByPlant[plant].excess += exc;
-    siteTotals.generation += gen; siteTotals.supply += sup; siteTotals.excess += exc;
-
-    const tsKey = [r[colMap.date], r[colMap.hour], colMap.consumeAppNo ? r[colMap.consumeAppNo] : ""].join("|");
-    if(!seenTs.has(tsKey)){
-      seenTs.add(tsKey);
-      siteTotals.usage += num(r[colMap.usage])*1000;
-      siteTotals.deficit += num(r[colMap.deficit])*1000;
-    }
+    if(!aggByPlant[plant]){ aggByPlant[plant] = {generation:0, supply:0, excess:0}; plants.push(plant); raw[plant] = {supply:0, excess:0}; }
+    const gen = num(r[colMap.gen])*1000;
+    aggByPlant[plant].generation += gen; siteTotals.generation += gen;
+    raw[plant].supply += num(r[colMap.supply])*1000; raw[plant].excess += num(r[colMap.excess])*1000;
+    const app = colMap.appNo ? String(r[colMap.appNo] || "").trim() : "";
+    const k = [app, plant, dateKeyOf(r[colMap.date]), Math.round(num(r[colMap.hour]))].join("|");
+    (rowIdx[k] || (rowIdx[k] = [])).push(r);
     if(!settleMonth && r[colMap.date]){
       const d = String(r[colMap.date]).replace(/[^0-9]/g,"");
       if(d.length>=6) settleMonth = d.slice(0,6);
     }
-    // 전력손실률은 계산하지 않고 원본 데이터의 "종합손실률(%)" 컬럼값을 그대로 쓴다(사이트 전체 대비
-    // 계산식은 발전소별 공급량이 작아 항상 90%대로 나와 실제 의미와 달랐다).
+    // 전력손실률은 원본 데이터의 "종합손실률(%)" 컬럼값을 그대로 쓴다
     if(siteTotals.lossRatePct===null && colMap.totalLossRate && r[colMap.totalLossRate]!=null && r[colMap.totalLossRate]!==""){
       siteTotals.lossRatePct = num(r[colMap.totalLossRate]) / 100;
     }
   });
+
+  const parsed = Parsers.parseKpxRows(rows);
+  const apps = Object.keys(parsed.groups);
+  // 사용량 파일(한 수요가 것)은 그룹이 하나일 때만 적용, 여럿이면 KPX 전기사용량 사용
+  const ami = (typeof billState !== "undefined" && billState.ami && apps.length === 1) ? billState.ami : null;
+  if(typeof billState !== "undefined" && billState.ami && apps.length > 1) genSettleNotes.push("그룹이 여러 개라 사용량 파일 대신 KPX 전기사용량 사용");
+  const put = (r, col, info, kwh) => { if(col) r[col] = Engine.round(kwh / mult(info), 6); };
+  const covered = new Set(), sources = new Set();
+  apps.forEach(app=>{
+    const g = parsed.groups[app];
+    const R = settleGroup(g, ami, ratesFor(g.month).rates, (d, h, m)=>{
+      const deficit = Math.max(0, m.deficitSimple + m.deficitLoss); // = U − S×(1−L)
+      Object.keys(m.supply).forEach(p=>{
+        (rowIdx[[app, p, d.date, h].join("|")] || []).forEach(r=>{
+          put(r, colMap.supply, colIdx.supply, m.supply[p]);
+          put(r, colMap.excess, colIdx.excess, m.excess[p]);
+          put(r, colMap.usage, colIdx.usage, m.usage);
+          put(r, colMap.deficit, colIdx.deficit, deficit);
+        });
+      });
+    });
+    const M = R.match;
+    Object.keys(M.supplyByPlant).forEach(p=>{
+      if(!aggByPlant[p]) return;
+      aggByPlant[p].supply += M.supplyByPlant[p]; aggByPlant[p].excess += M.excessByPlant[p]; covered.add(p);
+    });
+    siteTotals.usage += M.totals.usage;
+    siteTotals.deficit += Math.max(0, M.totals.deficitSimple + M.totals.deficitLoss);
+    sources.add(R.usage.source);
+    if(R.monthly && !g.hasPpa) genSettleNotes.push(`${app} 월간균등 정산 (발전량 월 균등 환산)`);
+  });
+  plants.filter(p => !covered.has(p)).forEach(p=>{ aggByPlant[p].supply = raw[p].supply; aggByPlant[p].excess = raw[p].excess; });
+  plants.forEach(p=>{ siteTotals.supply += aggByPlant[p].supply; siteTotals.excess += aggByPlant[p].excess; });
+  if(sources.has("none")) genSettleNotes.push("사용량 정보가 없어 사용량 = 발전량으로 계산(가정산, 초과 0)");
+  if(sources.has("ami")) genSettleNotes.push("사용량 파일 기준 공급량 계산");
 
   if(settleMonth && typeof setHeaderMonth === "function") setHeaderMonth(settleMonth); // 헤더 정산월을 업로드한 달로
   renderSiteKpis();

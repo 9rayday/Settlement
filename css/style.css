@@ -384,3 +384,13 @@ table.perf-years td:nth-child(-n+2), table.perf-years .perf-sub{ white-space:now
 .bell-row.expire .bell-item a{ color:var(--ink); text-decoration:none; font-weight:600; }
 .bell-act{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:8px; font-size:12px; color:var(--sub); }
 .bell-act input{ width:52px; padding:4px 6px; border:1px solid var(--line); border-radius:5px; font:inherit; }
+
+/* 전기사용자 정산 진행 단계 (가정산서 발행 → 대금 수령 → 오차정산서 발행 → 다음 달 반영) */
+.bill-flow{ display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:10px; font-size:12.5px; }
+.bill-flow .flow-step{ display:inline-flex; align-items:center; gap:5px; padding:4px 10px; border-radius:999px; background:#F1F2F4; color:#8A8F98; }
+.bill-flow .flow-step b{ display:inline-flex; width:18px; height:18px; border-radius:50%; align-items:center; justify-content:center; background:#D9DCE1; color:#fff; font-size:11px; }
+.bill-flow .flow-step.done{ background:#E6F5F1; color:var(--accent-2); }
+.bill-flow .flow-step.done b{ background:var(--accent-2); }
+.bill-flow .flow-step small{ font-size:11px; opacity:.85; }
+.bill-flow .flow-arrow{ color:#B5BAC2; }
+.bill-flow input{ height:28px; font-size:12.5px; }

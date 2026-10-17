@@ -90,6 +90,11 @@
   const toNum = v => { const n = parseFloat(String(v == null ? "" : v).replace(/,/g, "")); return isNaN(n) ? 0 : n; };
   const dateKey = v => { const d = String(v).replace(/[^0-9]/g, ""); return `${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}`; };
 
+  // 정산 제외 행 (정산여부 컬럼): 그 시간 그 발전기는 매칭 발전량 K 에서 뺀다.
+  // 가정산 파일은 모든 행이 "비대상"이므로, 같은 그룹에 "대상" 행이 있을 때만 제외로 본다.
+  const isExcluded = v => /^(N|NO|X|미정산|제외|미대상|아니오|비대상)$/i.test(String(v == null ? "" : v).trim());
+  const isIncluded = v => /^(Y|YES|O|정산|대상)$/i.test(String(v == null ? "" : v).trim());
+  const pickKey = (r, names) => names.find(n => r[n] !== undefined && r[n] !== null && r[n] !== "");
   P.parseKpxRows = function (rows) {
     const groups = {}; const warnings = [];
     rows.forEach(r => {
@@ -98,15 +103,27 @@
       if (!app || !plant) return;
       const date = dateKey(r["거래일자"]); const h = Math.round(toNum(r["시간"]));
       if (h < 0 || h > 23) { warnings.push(`시간 값 이상: ${date} ${r["시간"]}`); return; }
-      const g = groups[app] || (groups[app] = { app, month: date.slice(0,4) + date.slice(5,7), plants: {}, kpxUsage: {}, kpxSupply: {}, consumeAppNos: new Set(), supplyAppNos: new Set() });
-      const pl = g.plants[plant] || (g.plants[plant] = { id: r["발전기ID"], supplyAppNo: r["공급계약신청번호"], gen: {}, kpxSupply: {} });
+      const g = groups[app] || (groups[app] = { app, month: date.slice(0,4) + date.slice(5,7), plants: {}, kpxUsage: {}, kpxSupply: {}, consumeAppNos: new Set(), supplyAppNos: new Set(), lossRate: null, hasPpa: false });
+      const pl = g.plants[plant] || (g.plants[plant] = { id: r["발전기ID"], supplyAppNo: r["공급계약신청번호"], gen: {}, kpxSupply: {}, ppaGen: {}, excluded: {} });
       (pl.gen[date] || (pl.gen[date] = new Array(24).fill(0)))[h] += toNum(r["발전량(MWh)"]) * 1000;
+      // PPA발전량 = 정산에 쓰는 발전량 K (시간대별 정산은 발전량과 같고, 월간균등은 균등값)
+      const ppaKey = pickKey(r, ["PPA발전량(MWh)", "균등발전량(MWh)"]);
+      if (ppaKey) { g.ppaSum = (g.ppaSum || 0) + toNum(r[ppaKey]); (pl.ppaGen[date] || (pl.ppaGen[date] = new Array(24).fill(0)))[h] += toNum(r[ppaKey]) * 1000; }
+      if (isIncluded(r["정산여부"])) g.anyIncluded = true;
+      if (!g.settleMethod && r["정산방식"]) g.settleMethod = String(r["정산방식"]).trim();
+      if (isExcluded(r["정산여부"])) (pl.excluded[date] || (pl.excluded[date] = new Array(24).fill(false)))[h] = true;
+      if (g.lossRate === null && toNum(r["손실률(%)"]) > 0) g.lossRate = toNum(r["손실률(%)"]) / 100;
       (pl.kpxSupply[date] || (pl.kpxSupply[date] = new Array(24).fill(0)))[h] += toNum(r["재생E공급량(MWh)"]) * 1000;
       if (r["소비계약신청번호"]) g.consumeAppNos.add(String(r["소비계약신청번호"]));
       if (r["공급계약신청번호"]) g.supplyAppNos.add(String(r["공급계약신청번호"]));
       // 전기사용량은 발전소마다 같은 값이 반복되므로 (날짜,시간) 당 한 번만 기록
       const u = g.kpxUsage[date] || (g.kpxUsage[date] = new Array(24).fill(null));
       if (u[h] === null) u[h] = toNum(r["전기사용량(MWh)"]) * 1000;
+    });
+    // PPA발전량 컬럼이 있어도 비어(0) 있으면 발전량을 쓴다
+    Object.values(groups).forEach(g => {
+      g.hasPpa = (g.ppaSum || 0) > 0;
+      if (!g.anyIncluded) Object.values(g.plants).forEach(pl => { pl.excluded = {}; });
     });
     return { groups, warnings };
   };
@@ -118,15 +135,36 @@
     const dates = new Set();
     Object.values(group.plants).forEach(p => Object.keys(p.gen).forEach(d => dates.add(d)));
     return Array.from(dates).sort().map(date => {
-      const gen = {}, supply = {};
+      const gen = {}, supply = {}, actGen = {};
       Object.keys(group.plants).forEach(p => {
-        gen[p] = group.plants[p].gen[date] || new Array(24).fill(0);
-        supply[p] = group.plants[p].kpxSupply[date] || new Array(24).fill(0); // KPX 재생E공급량 (오차정산용)
+        const pl = group.plants[p], zero = new Array(24).fill(0), ex = (pl.excluded || {})[date];
+        actGen[p] = pl.gen[date] || zero; // 실측 발전량 J
+        const k = group.hasPpa ? ((pl.ppaGen || {})[date] || zero) : actGen[p]; // 매칭 발전량 K
+        gen[p] = ex ? k.map((v, h) => ex[h] ? 0 : v) : k;
+        supply[p] = pl.kpxSupply[date] || zero; // KPX 재생E공급량 (검증용)
       });
       const u = ami && ami.usage[date] ? ami.usage[date] : null;
       const gaps = u ? u.map((v, h) => v === null ? h : -1).filter(h => h >= 0) : (ami ? "all" : []);
-      return { date, load: P.loadClasses(date, holidays), usage: u, gaps, gen, supply, kpxUsage: group.kpxUsage[date] || null };
+      return { date, load: P.loadClasses(date, holidays), usage: u, gaps, gen, actGen, supply, kpxUsage: group.kpxUsage[date] || null };
     });
+  };
+
+  /* 사용량 U 정하기 (발전사업자·전기사용자 공통): 고객 AMI → KPX 전기사용량(확정 파일) → 없음(U = K, 가정산 간주)
+   * AMI 빈 시간은 KPX 값으로 채운다. 가정산 KPX 파일은 전기사용량이 0이라 쓰지 않는다.
+   * days 의 usage 를 바꾸고 { source: "ami"|"kpx"|"none", amiMissing: [날짜] } 반환
+   */
+  P.resolveUsage = function (days, ami) {
+    const kpxOk = days.some(d => (d.kpxUsage || []).some(v => v > 0));
+    const amiMissing = [];
+    days.forEach(d => {
+      const k = kpxOk ? d.kpxUsage : null;
+      const a = ami ? ami.usage[d.date] : null;
+      if (ami && !a) amiMissing.push(d.date);
+      if (a) d.usage = a.map((v, h) => v == null ? (k ? k[h] : null) : v);
+      else d.usage = k ? k.slice() : null;
+      if (d.usage && d.usage.some(v => v == null)) d.usage = d.usage.map((v, h) => v == null ? Object.values(d.gen).reduce((t, arr) => t + (arr[h] || 0), 0) : v);
+    });
+    return { source: ami ? "ami" : kpxOk ? "kpx" : "none", amiMissing };
   };
 
   if (typeof module !== "undefined" && module.exports) module.exports = P; else root.Parsers = P;
