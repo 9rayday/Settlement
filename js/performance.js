@@ -34,7 +34,9 @@ function contractOf(kind, key) {
   if (!raw) return null;
   const num = v => Number(v), cap = num(raw["계약용량"]) || 0;
   let g1 = num(raw["연간보장공급량"]);
-  if (!(g1 > 0)) { const hrs = (kind === "gen" ? num(raw["발전보장시간"]) : hoursPerDay(raw["연간보장시간"])) * 365; g1 = cap > 0 && hrs > 0 ? cap * hrs : 0; } // 보장시간(h/일) × 365
+  // 발전소는 시트 대시보드·발전사업자 정산서와 같게 보장시간이 비면 3.4h/일
+  const plantHours = num(raw["발전보장시간"]) || (typeof DEFAULT_GUARANTEE_HOURS !== "undefined" ? DEFAULT_GUARANTEE_HOURS : 3.4);
+  if (!(g1 > 0)) { const hrs = (kind === "gen" ? plantHours : hoursPerDay(raw["연간보장시간"])) * 365; g1 = cap > 0 && hrs > 0 ? cap * hrs : 0; } // 보장시간(h/일) × 365
   const start = rStr(raw["계약일자"]), end = rStr(raw["계약해지일"]);
   let years = Math.round(num(raw["계약기간"]) || 0);
   if (!years && YMD.test(start) && YMD.test(end)) years = Math.max(1, Math.round(ymdDays(start, end) / 365.25));
@@ -52,7 +54,7 @@ function contractOf(kind, key) {
     };
   }
   return {
-    kind, key, app, name: kind === "gen" ? key : rStr(raw["수요기업명"]), cap, g1, decline: num(raw["연간효율감소"]) || 0, start, end, years,
+    kind, key, app, name: kind === "gen" ? key : rStr(raw["수요기업명"]), cap, g1, decline: raw["연간효율감소"] === "" || raw["연간효율감소"] == null ? (kind === "gen" ? 0.5 : 0) : num(raw["연간효율감소"]) || 0, /* 발전소 빈칸 = 0.5% (시트 대시보드와 같게) */ start, end, years,
     penMethod: rStr(raw["위약금처리방식"]), shareOf,
     plants: kind === "gen" ? [key] : Registry.plantsOfGroup(app)
   };
