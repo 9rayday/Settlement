@@ -35,6 +35,7 @@ const PLANT_FORM = [
   { k: "계약기간", label: "계약기간 (년)", type: "number" },
   { k: "계약일자", label: "계약시작일", type: "date" },
   { k: "계약해지일", label: "계약해지일 (자동 계산)", type: "date", calc: true },
+  { k: "계약상태", label: "계약상태", type: "select", options: [["", "진행"], ["해지", "해지"]] },
   { k: "연장가능여부", label: "연장가능여부", type: "select", options: ["", "가능", "불가"] },
   { k: "연장통보기한", label: "연장통보기한 (개월 전)", type: "number" },
   { k: "연장통보마감일", label: "연장통보 마감일 (자동 계산)", type: "date", calc: true },
@@ -64,6 +65,7 @@ const CUSTOMER_FORM = [
   { k: "계약기간", label: "계약기간 (년)", type: "number" },
   { k: "계약일자", label: "계약시작일", type: "date" },
   { k: "계약해지일", label: "계약해지일 (자동 계산)", type: "date", calc: true },
+  { k: "계약상태", label: "계약상태", type: "select", options: [["", "진행"], ["해지", "해지"]] },
   { k: "연장가능여부", label: "연장가능여부", type: "select", options: ["", "가능", "불가"] },
   { k: "연장통보기한", label: "연장통보기한 (개월 전)", type: "number" },
   { k: "연장통보마감일", label: "연장통보 마감일 (자동 계산)", type: "date", calc: true },
@@ -541,6 +543,41 @@ function afterRegistryChange() {
   if (typeof renderAlerts === "function") renderAlerts();
   if (typeof renderBillingBody === "function") renderBillingBody();
   if (typeof refreshPlantSelect === "function" && typeof plants !== "undefined" && plants.length) refreshPlantSelect(); // 발전사업자 정산서 미리보기 갱신
+}
+
+
+/* ----- 계약 연장 / 해지 (헤더 알림의 "계약 만료"에서 선택) -----
+ * 연장: 계약기간 + n년 → 계약해지일·연장통보 마감일 다시 계산, 비고에 이력. 계약이행현황은 늘어난 연차(6년차…)까지 계산된다.
+ * 해지: 계약상태 = 해지 (알림 종료), 비고에 이력
+ */
+function contractRaw(kind, key) { return kind === "plant" ? Registry.plants()[key] : Registry.customerByKey(key); }
+function appendNote(raw, text) { const old = rStr(raw["비고"]); return (old ? old + "\n" : "") + text; }
+async function extendContract(kind, key, years) {
+  const raw = contractRaw(kind, key);
+  if (!raw) return { ok: false, error: "계약을 찾지 못했습니다." };
+  years = Math.round(Number(years));
+  if (!(years > 0)) return { ok: false, error: "연장 기간(년)을 1 이상으로 입력하세요." };
+  const start = rStr(raw["계약일자"]);
+  if (!YMD.test(start)) return { ok: false, error: "계약시작일이 없어 연장 기간을 계산할 수 없습니다." };
+  const oldEnd = rStr(raw["계약해지일"]);
+  let cur = Math.round(Number(raw["계약기간"]) || 0);
+  if (!cur && YMD.test(oldEnd)) cur = Math.max(1, Math.round((new Date(oldEnd) - new Date(start)) / (365.25 * 86400000)));
+  const rec = calcContractDates({ "계약일자": start, "계약기간": cur + years, "연장통보기한": raw["연장통보기한"], "계약해지일": oldEnd });
+  const keyField = kind === "plant" ? "발전소명" : "계약ID";
+  const out = { [keyField]: key, "계약기간": cur + years, "계약해지일": rec["계약해지일"], "연장통보마감일": rec["연장통보마감일"], "계약상태": "",
+    "비고": appendNote(raw, `${todayYmd()} 계약 ${years}년 연장 (${oldEnd || "-"} → ${rec["계약해지일"]}, 계약기간 ${cur}년 → ${cur + years}년)`) };
+  const r = await Registry.save(kind === "plant" ? "plant" : "customer", out, key);
+  if (r.ok) afterRegistryChange();
+  return r;
+}
+async function terminateContract(kind, key) {
+  const raw = contractRaw(kind, key);
+  if (!raw) return { ok: false, error: "계약을 찾지 못했습니다." };
+  const keyField = kind === "plant" ? "발전소명" : "계약ID";
+  const r = await Registry.save(kind === "plant" ? "plant" : "customer",
+    { [keyField]: key, "계약상태": "해지", "비고": appendNote(raw, `${todayYmd()} 계약 해지 확정 (계약해지일 ${rStr(raw["계약해지일"]) || "-"})`) }, key);
+  if (r.ok) afterRegistryChange();
+  return r;
 }
 
 function renderRegistry() { renderCustomerPage(); renderPlantPage(); renderGroupPage(); }

@@ -50,7 +50,9 @@ function applyNetVersion(rates, v) {
     netVersion: v.effective
   });
 }
-const todayYmd = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+// 오늘 날짜. 주소에 ?today=YYYY-MM-DD 를 붙이면 그 날짜로 동작 (알림·계약 만료·연차 테스트용, 저장은 실제 시트에 반영됨)
+const TEST_TODAY = (() => { try { const v = new URLSearchParams(location.search).get("today") || ""; return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : ""; } catch (e) { return ""; } })();
+const todayYmd = () => { if (TEST_TODAY) return TEST_TODAY; const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 const verLabel = v => `${new Date(v.savedAt).toLocaleString()} (적용일: ${v.effective})`;
 
 function renderKpxPage() {
