@@ -27,7 +27,7 @@ const PLANT_FORM = [
   { k: "접속점", label: "접속점" },
   { k: "한전고객번호", label: "한전고객번호" },
   { k: "지역(요금구분)", label: "지역 (송전요금 구분)", type: "select", options: GEN_REGIONS, req: true },
-  { k: "KPX신청번호", label: "그룹 (전기사용자 계약)", type: "group" },
+  { k: "계약ID", label: "PPA 계약 (계약ID)", type: "contract" }, // 저장 시 KPX신청번호는 계약에서 자동으로
   { section: "계약정보" },
   { k: "정산방식", label: "정산방식", type: "select", options: ["", "실시간 정산", "월간균등 정산"] },
   { k: "계약단가", label: "계약단가 (원/kWh)", type: "number" },
@@ -121,12 +121,20 @@ const Registry = (function () {
   const customerByKey = key => customers.find(x => custKey(x) === str(key)) || null;
   function groups() { const out = []; customers.forEach(c => { const a = str(c["KPX신청번호"]); if (a && !out.includes(a)) out.push(a); }); return out; }
   // 그 달(YYYYMM)에 유효한 계약과 계약용량 비율 → 정산서 전력량요금을 계약별 단가로 나눌 때 사용
-  function priceSplits(app, month) {
+  // supplyByPlant 가 있으면 각 계약에 매핑된 발전소 공급량 비율, 매핑 안 된 발전소 공급량은 계약용량 비율로 나눈다
+  function priceSplits(app, month, supplyByPlant) {
     const ms = `${month.slice(0, 4)}-${month.slice(4)}-01`, me = `${month.slice(0, 4)}-${month.slice(4)}-31`;
     const act = contractsOfApp(app).filter(c => (!str(c["계약일자"]) || str(c["계약일자"]) <= me) && (!str(c["계약해지일"]) || str(c["계약해지일"]) >= ms));
     if (act.length <= 1) return null;
     const tot = act.reduce((t, c) => t + (Number(c["계약용량"]) || 0), 0);
-    return act.map(c => ({ id: custKey(c), unitPrice: Number(c["계약단가"]), share: tot > 0 ? (Number(c["계약용량"]) || 0) / tot : 1 / act.length }));
+    const capShare = c => tot > 0 ? (Number(c["계약용량"]) || 0) / tot : 1 / act.length;
+    const total = supplyByPlant ? Object.values(supplyByPlant).reduce((t, v) => t + (v || 0), 0) : 0;
+    if (total > 0) {
+      const byC = {}; act.forEach(c => { byC[custKey(c)] = 0; }); let unmapped = 0;
+      Object.entries(supplyByPlant).forEach(([p, v]) => { const k = plantContract(p); if (k in byC) byC[k] += v || 0; else unmapped += v || 0; });
+      return act.map(c => ({ id: custKey(c), unitPrice: Number(c["계약단가"]), share: (byC[custKey(c)] + unmapped * capShare(c)) / total }));
+    }
+    return act.map(c => ({ id: custKey(c), unitPrice: Number(c["계약단가"]), share: capShare(c) }));
   }
   // 정산서용: 그 달에 유효한 계약 우선 (없으면 첫 계약)
   function customerByApp(app, month) {
@@ -139,6 +147,13 @@ const Registry = (function () {
     return toCustomer(pick);
   }
   function plantsOfGroup(app) { return Object.keys(plants()).filter(p => str(plants()[p]["KPX신청번호"]) === str(app)); }
+  // 발전소가 매핑된 계약: 계약ID 칸, 없으면 신청번호 그룹에 계약이 1건일 때 그 계약
+  function plantContract(name) {
+    const m = plants()[name]; if (!m) return "";
+    const k = str(m["계약ID"]); if (k && customerByKey(k)) return k;
+    const list = contractsOfApp(str(m["KPX신청번호"])); return list.length === 1 ? custKey(list[0]) : "";
+  }
+  const plantsOfContract = key => Object.keys(plants()).filter(p => plantContract(p) === str(key));
 
   async function save(kind, record, originalKey) {
     const r = await gasCall(kind === "plant" ? "savePlant" : "saveCustomer", { record, originalKey });
@@ -150,7 +165,7 @@ const Registry = (function () {
     if (r.ok) await load();
     return r;
   }
-  return { load, plants, rawCustomers, plantInfo, customerByApp, customerByKey, contractsOfApp, custKey, groups, priceSplits, plantsOfGroup, save, remove, isLoaded: () => loaded };
+  return { load, plants, rawCustomers, plantInfo, customerByApp, customerByKey, contractsOfApp, custKey, groups, priceSplits, plantsOfGroup, plantContract, plantsOfContract, save, remove, isLoaded: () => loaded };
 })();
 
 /* ---------- 화면: 정산관리 > 계약관리 (전기사용자 / 발전사업자 / 그룹화) ---------- */
@@ -194,6 +209,9 @@ function regFormHtml(form, rec, prefix) {
     let input;
     if (f.type === "select") input = `<select ${attrs}>${f.options.map(o => { const [val, lab] = Array.isArray(o) ? o : [o, o];
         return `<option value="${rEsc(val)}"${val === v ? " selected" : ""}>${rEsc(lab || "선택")}</option>`; }).join("")}</select>`;
+    else if (f.type === "contract") input = `<select ${attrs}><option value="">미연결</option>${Registry.rawCustomers().map(c => { const k = Registry.custKey(c);
+        return `<option value="${rEsc(k)}"${k === v ? " selected" : ""}>${rEsc(k)} · ${rEsc(c["수요기업명"])} · ${rEsc(c["KPX신청번호"])}</option>`; }).join("")}
+        ${v && !Registry.customerByKey(v) ? `<option value="${rEsc(v)}" selected>${rEsc(v)} (계약 미등록)</option>` : ""}</select>`;
     else if (f.type === "group") input = `<select ${attrs}><option value="">미연결</option>${Registry.groups().map(app =>
         `<option value="${rEsc(app)}"${app === v ? " selected" : ""}>${rEsc(app)} · ${rEsc(groupLabel(app))}</option>`).join("")}
         ${v && !Registry.customerByApp(v) ? `<option value="${rEsc(v)}" selected>${rEsc(v)} (계약 미등록)</option>` : ""}</select>`;
@@ -227,19 +245,19 @@ const groupCapacity = app => Registry.plantsOfGroup(app).reduce((s, p) => s + (N
 const guaranteeOf = (cap, hours) => { cap = Number(cap); hours = Number(hours); return cap > 0 && hours > 0 ? Number((cap * hours).toFixed(3)) : ""; };
 const groupLabel = app => Array.from(new Set(Registry.contractsOfApp(app).map(c => rStr(c["수요기업명"])))).join(", ");
 const singleContract = app => Registry.contractsOfApp(app).length === 1;
-// 그룹 구성이나 발전소 용량이 바뀌면 해당 전기사용자 계약의 계약용량·연간보장공급량을 다시 저장한다 (계약 1건인 그룹만)
-async function syncGroupTotals(apps) {
-  for (const app of new Set(apps.map(rStr).filter(Boolean))) {
-    if (!singleContract(app)) continue;
-    const raw = Registry.contractsOfApp(app)[0];
-    const cap = groupCapacity(app); if (!(cap > 0)) continue; // 그룹 발전소가 없으면 직접 입력값 유지
+const contractCapacity = key => Registry.plantsOfContract(key).reduce((s, p) => s + (Number(Registry.plants()[p]["계약용량"]) || 0), 0);
+// 매핑이 바뀌거나 발전소 용량이 바뀌면 해당 계약의 계약용량·연간보장공급량을 다시 저장한다
+async function syncContractTotals(keys) {
+  for (const k of new Set(keys.map(rStr).filter(Boolean))) {
+    const raw = Registry.customerByKey(k); if (!raw) continue;
+    const cap = contractCapacity(k); if (!(cap > 0)) continue; // 매핑된 발전소가 없으면 직접 입력값 유지
     const g = guaranteeOf(cap, hoursPerDay(raw["연간보장시간"]) * 365);
     if (Number(raw["계약용량"]) === cap && String(raw["연간보장공급량"]) === String(g)) continue;
     const key = Registry.custKey(raw);
     await Registry.save("customer", { "계약ID": key, "계약용량": cap, "연간보장공급량": g }, key);
   }
 }
-const plantGroupOf = name => name && Registry.plants()[name] ? rStr(Registry.plants()[name]["KPX신청번호"]) : "";
+const plantContractOf = name => name ? Registry.plantContract(name) : "";
 
 // 발전소·전기사용자 폼 공통. 발전소 폼에만 있는 설비용량/보장시간이 있으면 연간보장공급량 참고값도 보여준다
 function bindContractCalc(hostId) {
@@ -311,7 +329,7 @@ function openCustomer(key, keepScroll) {
   const raw = Object.assign({}, found || { "수요지지역": "비수도권" });
   const isNew = !found, app = rStr(raw["KPX신청번호"]);
   if (!isNew && !rStr(raw["계약ID"])) raw["계약ID"] = key; // 예전 행: 신청번호를 계약ID 로
-  const gcap = !isNew && singleContract(app) ? groupCapacity(app) : 0; // 그룹에 계약이 1건이면 발전소 합계
+  const gcap = !isNew ? contractCapacity(key) : 0; // 이 계약에 매핑된 발전소 설비용량 합
   if (gcap > 0) raw["계약용량"] = gcap;
   if (Number(raw["연간보장시간"]) > 24) raw["연간보장시간"] = Number((raw["연간보장시간"] / 365).toFixed(4)); // 예전 h/년 값 → h/일
   r$("regCustDetail").innerHTML = `<div class="reg-detail">
@@ -339,7 +357,7 @@ function renderPlantPage() {
         ${pg.items.map(p => { const m = plants[p], app = rStr(m["KPX신청번호"]);
           return `<tr class="reg-row${regState.openPlant === p ? " active" : ""}" data-plant="${rEsc(p)}"><td><b>${rEsc(p)}</b></td><td>${rEsc(m["사업자명(대표자명)"])}</td>
             <td>${m["지역(요금구분)"] ? rEsc(m["지역(요금구분)"]) : '<span class="tag bad">미지정</span>'}</td><td>${GRID_LABEL[gridOf(m["배전연결"])]}</td>
-            <td>${app ? `${rEsc(groupLabel(app) || "계약 미등록")} <span class="hint" style="margin:0">${rEsc(app)}</span>` : '<span class="hint" style="margin:0">미연결</span>'}</td>
+            <td>${app ? `${rEsc(Registry.plantContract(p) || groupLabel(app) || "계약 미등록")} <span class="hint" style="margin:0">${rEsc(app)}</span>` : '<span class="hint" style="margin:0">미연결</span>'}</td>
             <td class="num">${rEsc(fmtKw(m["계약용량"]))}</td><td class="num">${rEsc(m["계약단가"])}</td><td>${rEsc(m["계약일자"])}</td></tr>`; }).join("")}</table></div>${pagerHtml("plant", pg.page, pg.pages)}
       <div id="regPlantDetail"></div></div>`;
   bindPager(host, renderPlantPage);
@@ -353,6 +371,7 @@ function openPlant(name, keepScroll) {
   const isNew = !name;
   const raw = isNew ? { "지역(요금구분)": "비수도권", "배전연결": "N" } : splitOwnerName(Object.assign({}, Registry.plants()[name]));
   raw["배전연결"] = gridOf(raw["배전연결"]);
+  if (!isNew) raw["계약ID"] = Registry.plantContract(name); // 예전 데이터: 신청번호 그룹의 계약이 1건이면 그 계약
   if (!rStr(raw["접속점"]) && rStr(raw["변전소"])) raw["접속점"] = raw["변전소"]; // 예전 변전소 칸 값 이어받기
   r$("regPlantDetail").innerHTML = `<div class="reg-detail">
     <div class="reg-head"><h3 class="sub" style="margin:0">${isNew ? "새 발전소" : rEsc(name)}</h3><button class="btn secondary" id="regPlantClose">닫기</button></div>
@@ -397,37 +416,44 @@ function renderGroupMain() {
       ${contracts.map(x => `<tr><td><b>${rEsc(Registry.custKey(x))}</b></td><td>${rEsc(x["수요기업명"])}</td><td class="num">${x["계약용량"] === "" || x["계약용량"] == null ? "-" : fmtKw(x["계약용량"])}</td>
         <td class="num">${rEsc(x["계약단가"])}</td><td>${rEsc(x["계약일자"] || "-")} ~ ${rEsc(x["계약해지일"] || "")}</td></tr>`).join("")}</table></div>
     <h3 class="sub">소속 발전소 (${members.length})</h3>
-    <div class="grid-wrap"><table class="grid"><tr><th>발전소</th><th>사업자명</th><th>지역</th><th>배전</th><th>계약용량(kW)</th><th></th></tr>
-      ${members.length ? members.map(p => { const m = all[p]; return `<tr><td><b>${rEsc(p)}</b></td><td>${rEsc(m["사업자명(대표자명)"])}</td>
+    <div class="grid-wrap"><table class="grid"><tr><th>발전소</th><th>계약</th><th>사업자명</th><th>지역</th><th>배전</th><th>계약용량(kW)</th><th></th></tr>
+      ${members.length ? members.map(p => { const m = all[p], pk = Registry.plantContract(p); return `<tr><td><b>${rEsc(p)}</b></td>
+        <td><select class="grp-contract" data-plant="${rEsc(p)}"><option value="">미지정</option>${contracts.map(x => { const k = Registry.custKey(x); return `<option value="${rEsc(k)}"${k === pk ? " selected" : ""}>${rEsc(k)}</option>`; }).join("")}</select></td>
+        <td>${rEsc(m["사업자명(대표자명)"])}</td>
         <td>${m["지역(요금구분)"] ? rEsc(m["지역(요금구분)"]) : '<span class="tag bad">미지정</span>'}</td><td>${GRID_LABEL[gridOf(m["배전연결"])]}</td>
         <td class="num">${rEsc(fmtKw(m["계약용량"]))}</td><td style="text-align:center"><button class="btn secondary small grp-remove" data-plant="${rEsc(p)}">제외</button></td></tr>`; }).join("")
-        : `<tr><td colspan="6" class="hint">아직 묶인 발전소가 없습니다.</td></tr>`}</table></div>
+        : `<tr><td colspan="7" class="hint">아직 묶인 발전소가 없습니다.</td></tr>`}</table></div>
     <div class="row" style="margin-top:10px"><select id="grpAddSel" style="min-width:300px">${others.map(p => { const a = rStr(all[p]["KPX신청번호"]);
         return `<option value="${rEsc(p)}">${rEsc(p)}${a ? ` (현재: ${rEsc(groupLabel(a) || a)})` : " (미연결)"}</option>`; }).join("")}</select>
-      <button class="btn accent" id="grpAddBtn"${others.length ? "" : " disabled"}>그룹에 추가</button><span id="grpStatus" class="status warn" style="background:none"></span></div>
+      <select id="grpAddContract" style="min-width:180px">${contracts.map(x => `<option value="${rEsc(Registry.custKey(x))}">${rEsc(Registry.custKey(x))}</option>`).join("")}</select>
+      <button class="btn accent" id="grpAddBtn"${others.length ? "" : " disabled"}>계약에 추가</button><span id="grpStatus" class="status warn" style="background:none"></span></div>
     <div class="reg-group">
       <div class="reg-head"><h3 class="sub" style="margin:0">월별 발전소 집계</h3>
         <div class="row"><label class="adj-label">정산월</label><input type="month" id="regMonth" value="${regState.month.slice(0, 4)}-${regState.month.slice(4)}"></div></div>
       <div id="regAgg"><div class="hint">불러오는 중...</div></div></div>`;
-  host.querySelectorAll(".grp-remove").forEach(b => b.onclick = () => setPlantGroup(b.dataset.plant, ""));
+  host.querySelectorAll(".grp-remove").forEach(b => b.onclick = () => setPlantContract(b.dataset.plant, ""));
+  host.querySelectorAll(".grp-contract").forEach(sel => sel.onchange = () => setPlantContract(sel.dataset.plant, sel.value, app));
   r$("grpAddBtn").onclick = () => {
-    const p = r$("grpAddSel").value, cur = rStr(all[p]["KPX신청번호"]);
-    if (cur && cur !== app && !confirm(`${p} 은(는) 지금 ${groupLabel(cur) || cur} 그룹입니다. ${groupLabel(app)} 그룹으로 옮길까요?`)) return;
-    setPlantGroup(p, app);
+    const p = r$("grpAddSel").value, k = r$("grpAddContract").value, cur = rStr(all[p]["KPX신청번호"]);
+    if (cur && cur !== app && !confirm(`${p} 은(는) 지금 ${groupLabel(cur) || cur} 그룹입니다. ${k} 계약으로 옮길까요?`)) return;
+    setPlantContract(p, k);
   };
   r$("regMonth").onchange = e => { regState.month = e.target.value.replace("-", ""); renderGroupAgg(app); };
   renderGroupAgg(app);
 }
 
-// 발전소의 KPX 신청번호(그룹)만 바꿔 저장 (시트의 다른 칸은 그대로)
-async function setPlantGroup(plant, app) {
+// 발전소의 계약ID(와 그 계약의 KPX 신청번호)만 바꿔 저장 (시트의 다른 칸은 그대로)
+// keepApp: 계약 "미지정"으로 바꿔도 그룹(신청번호)에는 남겨 둘 때
+async function setPlantContract(plant, key, keepApp) {
   const st = r$("grpStatus"); st.textContent = "저장 중..."; st.className = "status warn";
-  const oldGroup = plantGroupOf(plant);
-  const r = await Registry.save("plant", { "발전소명": plant, "KPX신청번호": app }, plant);
+  const oldContract = plantContractOf(plant);
+  const cc = key ? Registry.customerByKey(key) : null;
+  const app = cc ? rStr(cc["KPX신청번호"]) : (keepApp || "");
+  const r = await Registry.save("plant", { "발전소명": plant, "계약ID": key, "KPX신청번호": app }, plant);
   if (!r.ok) { st.textContent = "저장 실패: " + r.error; st.className = "status bad"; return; }
-  await syncGroupTotals([oldGroup, app]); // 계약용량·연간보장공급량 자동 갱신
+  await syncContractTotals([oldContract, key]); // 계약용량·연간보장공급량 자동 갱신
   afterRegistryChange();
-  const st2 = r$("grpStatus"); if (st2) { st2.textContent = `${plant} → ${app ? "그룹에 추가" : "그룹에서 제외"} (구글시트 저장)`; st2.className = "status ok"; }
+  const st2 = r$("grpStatus"); if (st2) { st2.textContent = `${plant} → ${key ? key + " 계약" : (app ? "계약 미지정" : "그룹에서 제외")} (구글시트 저장)`; st2.className = "status ok"; }
 }
 
 function defaultMonth(app) {
@@ -485,13 +511,13 @@ async function saveRegistry(kind, formId, form, originalKey, statusId) {
     rec["사업자명(대표자명)"] = joinOwnerName(rec);
     rec["연간보장공급량"] = guaranteeOf(rec["계약용량"], Number(rec["발전보장시간"]) * 365);
   }
-  else { const app = rec["KPX신청번호"], others = Registry.contractsOfApp(app).filter(c => Registry.custKey(c) !== originalKey).length;
-    const gc = others ? 0 : groupCapacity(app); if (gc > 0) rec["계약용량"] = gc; rec["연간보장공급량"] = guaranteeOf(rec["계약용량"], hoursPerDay(rec["연간보장시간"]) * 365); }
-  const oldGroup = kind === "plant" ? plantGroupOf(originalKey) : "";
+  else { const gc = originalKey ? contractCapacity(originalKey) : 0; if (gc > 0) rec["계약용량"] = gc; rec["연간보장공급량"] = guaranteeOf(rec["계약용량"], hoursPerDay(rec["연간보장시간"]) * 365); }
+  const oldContract = kind === "plant" ? plantContractOf(originalKey) : "";
+  if (kind === "plant") { const cc = rec["계약ID"] ? Registry.customerByKey(rec["계약ID"]) : null; rec["KPX신청번호"] = cc ? rStr(cc["KPX신청번호"]) : ""; }
   st.textContent = "저장 중..."; st.className = "status warn";
   const r = await Registry.save(kind, rec, originalKey);
   if (!r.ok) { st.textContent = "저장 실패: " + r.error; st.className = "status bad"; return; }
-  if (kind === "plant") await syncGroupTotals([oldGroup, rec["KPX신청번호"]]);
+  if (kind === "plant") await syncContractTotals([oldContract, rec["계약ID"]]);
   if (kind === "plant") regState.openPlant = rec["발전소명"]; else regState.openCust = rec["계약ID"];
   afterRegistryChange();
   const st2 = r$(statusId); if (st2) { st2.textContent = "저장 완료 (구글시트)"; st2.className = "status ok"; }
@@ -500,10 +526,10 @@ async function saveRegistry(kind, formId, form, originalKey, statusId) {
 async function deleteRegistry(kind, key, label, statusId) {
   if (!confirm(`${label} 을(를) 삭제할까요? 구글시트에서도 행이 지워집니다.`)) return;
   const st = r$(statusId); st.textContent = "삭제 중..."; st.className = "status warn";
-  const oldGroup = kind === "plant" ? plantGroupOf(key) : "";
+  const oldContract = kind === "plant" ? plantContractOf(key) : "";
   const r = await Registry.remove(kind, key);
   if (!r.ok) { st.textContent = "삭제 실패: " + r.error; st.className = "status bad"; return; }
-  if (oldGroup) await syncGroupTotals([oldGroup]);
+  if (oldContract) await syncContractTotals([oldContract]);
   if (kind === "plant") regState.openPlant = null; else regState.openCust = null;
   afterRegistryChange();
 }

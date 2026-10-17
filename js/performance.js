@@ -56,7 +56,8 @@ function contractOf(kind, key) {
   return {
     kind, key, app, name: kind === "gen" ? key : rStr(raw["수요기업명"]), cap, g1, decline: raw["연간효율감소"] === "" || raw["연간효율감소"] == null ? (kind === "gen" ? 0.5 : 0) : num(raw["연간효율감소"]) || 0, /* 발전소 빈칸 = 0.5% (시트 대시보드와 같게) */ start, end, years,
     penMethod: rStr(raw["위약금처리방식"]), shareOf,
-    plants: kind === "gen" ? [key] : Registry.plantsOfGroup(app)
+    plants: kind === "gen" ? [key] : Registry.plantsOfGroup(app).filter(p => !Registry.plantContract(p) || Registry.plantContract(p) === key),
+    direct: kind === "gen" ? [key] : Registry.plantsOfContract(key)
   };
 }
 
@@ -73,7 +74,7 @@ function yearSchedule(c, byPlant) {
     let supply = 0, gen = 0; const weights = {}; // weights: 월 실적 (가중평균 REC 용)
     c.plants.forEach(p => Object.entries(byPlant[p] || {}).forEach(([ym, v]) => {
       if (ym < lo || ym > hi) return;
-      const sh = c.shareOf(ym); weights[ym] = (weights[ym] || 0) + v.gen * sh;
+      const sh = c.direct.includes(p) ? 1 : c.shareOf(ym); weights[ym] = (weights[ym] || 0) + v.gen * sh; // 매핑 발전소 전량 / 미매핑은 비율
       supply += v.supply * sh; gen += v.gen * sh;
     }));
     const excess = gen - supply, actual = supply + excess;

@@ -212,7 +212,7 @@ function runCalc() {
     if (err.length) { out.innerHTML = noticeHtml(err, "bad"); return; }
     const match = matchKpx(P, warn);
     const ctx = {
-      unitPrice: P.customer.unitPrice, priceSplits: P.priceSplits, demandRegion: P.customer.demandRegion, plants: P.plants,
+      unitPrice: P.customer.unitPrice, priceSplits: Registry.priceSplits(P.app, P.g.month, match.supplyByPlant), demandRegion: P.customer.demandRegion, plants: P.plants,
       confirmedSurcharge: { taxable: Number($("cs_taxable").value) || 0, exempt: Number($("cs_exempt").value) || 0 },
       prevDiff: { taxable: Number($("pd_taxable").value) || 0, exempt: Number($("pd_exempt").value) || 0 },
       penalty: typeof penaltyDueGroup === "function" ? penaltyDueGroup(P.app, P.g.month) : null
@@ -353,7 +353,7 @@ function runTrueUp() {
     if (!prov) err.push("가정산 값(공급량·전력량요금·망이용요금·거래수수료)을 모두 입력하세요.");
     if (err.length) { out.innerHTML = noticeHtml(err, "bad"); return; }
     const match = matchKpx(P, warn);
-    const conf = Engine.invoice(match, { unitPrice: P.customer.unitPrice, priceSplits: P.priceSplits, demandRegion: P.customer.demandRegion, plants: P.plants }, P.rates);
+    const conf = Engine.invoice(match, { unitPrice: P.customer.unitPrice, priceSplits: Registry.priceSplits(P.app, P.g.month, match.supplyByPlant), demandRegion: P.customer.demandRegion, plants: P.plants }, P.rates);
     const diff = Engine.trueUpDiff(prov, conf);
     setVal("pd_taxable", diff.taxable); // 비교 결과로 채움 (직접 고친 값은 다시 계산하면 덮어씀)
     billState.result = { mode: "trueup", app: P.app, month: P.g.month, customer: P.customer, rates: P.rates, match, conf, prov, diff, warn };
