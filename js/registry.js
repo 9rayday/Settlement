@@ -2,8 +2,10 @@
  * 구글시트 "발전소 사업자 정보"(= 발전사업자 정산서 마스터, masterData)와 "전기사용자 정보" 탭을 읽고 행 단위로 저장/삭제한다.
  * 같은 KPX 신청번호를 가진 발전소들이 한 전기사용자 계약(그룹)이다. 계약을 누르면 그룹의 월별 발전소 집계를 보여준다.
  */
-const GEN_REGIONS = ["비수도권", "수도권북", "수도권남", "제주"];
-const DEMAND_REGIONS = ["수도권", "비수도권", "제주"];
+const GEN_REGIONS = ["비수도권", "수도권북", "수도권남"];  // 등록 화면 지역 선택 (제주 제외)
+const DEMAND_REGIONS = ["수도권", "비수도권"];
+const GRID_LABEL = { N: "송전", L: "배전저압", Y: "배전고압" };
+const gridOf = v => { v = String(v == null ? "" : v).trim().toUpperCase(); return v === "Y" || v === "L" ? v : "N"; };
 
 // 화면 입력 항목 = 시트 컬럼명(k). req: 필수, type: text|number|date|select|textarea|group, calc: 자동 계산(읽기 전용)
 // { section } 은 폼 안의 구분 제목. 기존 시트 컬럼(연락처·계약용량·계약일자·발전보장시간·배전연결)은 이름을 바꾸지 않고 라벨만 바꿔 쓴다.
@@ -12,17 +14,17 @@ const PLANT_FORM = [
   { k: "사업자명", label: "사업자명" },
   { k: "사업자등록번호", label: "사업자등록번호" },
   { k: "대표자명", label: "대표자명" },
+  { k: "담당자", label: "담당자" },
   { k: "이메일", label: "이메일" },
   { k: "연락처", label: "전화번호" },
-  { k: "담당자", label: "담당자" },
   { k: "사업자주소", label: "사업자 주소", wide: true },
   { k: "계좌번호", label: "계좌번호" },
   { section: "발전기정보" },
   { k: "발전소명", label: "발전기명 (KPX 발전기명과 동일)", req: true },
   { k: "발전기ID", label: "발전기ID" },
   { k: "계약용량", label: "설비용량 (kW)", type: "kw" },
-  { k: "배전연결", label: "발전망", type: "select", options: [["N", "송전망"], ["Y", "배전망"]] },
-  { k: "변전소", label: "변전소" },
+  { k: "배전연결", label: "발전망", type: "select", options: [["N", "송전망"], ["L", "배전저압망"], ["Y", "배전고압망"]] },
+  { k: "접속점", label: "접속점" },
   { k: "한전고객번호", label: "한전고객번호" },
   { k: "지역(요금구분)", label: "지역 (송전요금 구분)", type: "select", options: GEN_REGIONS, req: true },
   { k: "KPX신청번호", label: "그룹 (전기사용자 계약)", type: "group" },
@@ -51,9 +53,9 @@ const CUSTOMER_FORM = [
   { k: "수요기업명", label: "사업자명", req: true },
   { k: "사업자등록번호", label: "사업자등록번호" },
   { k: "대표자명", label: "대표자명" },
+  { k: "담당자", label: "담당자" },
   { k: "이메일", label: "이메일" },
   { k: "연락처", label: "전화번호" },
-  { k: "담당자", label: "담당자" },
   { section: "계약정보" },
   { k: "KPX신청번호", label: "KPX 신청번호 (그룹 키)", req: true, placeholder: "26-PR00000" },
   { k: "정산방식", label: "정산방식", type: "select", options: ["", "실시간 정산", "월간균등 정산"] },
@@ -102,7 +104,8 @@ const Registry = (function () {
   function plantInfo(name) {
     const m = plants()[name];
     if (!m) return null;
-    return { region: str(m["지역(요금구분)"]), distConnected: str(m["배전연결"]).toUpperCase() === "Y", appNo: str(m["KPX신청번호"]) };
+    const grid = gridOf(m["배전연결"]); // 배전망이면 배전이용요금 추가 (저압/고압 요금 구분)
+    return { region: str(m["지역(요금구분)"]), distConnected: grid !== "N", distLow: grid === "L", appNo: str(m["KPX신청번호"]) };
   }
   // 청구서/엔진용 전기사용자 정보
   function toCustomer(c) {
@@ -300,7 +303,7 @@ function renderPlantPage() {
       <div class="grid-wrap"><table class="grid reg-table"><tr><th>발전소명</th><th>사업자명</th><th>지역</th><th>배전</th><th>그룹 (전기사용자)</th><th>계약용량(kW)</th><th>매입단가</th><th>계약일자</th></tr>
         ${pg.items.map(p => { const m = plants[p], app = rStr(m["KPX신청번호"]);
           return `<tr class="reg-row${regState.openPlant === p ? " active" : ""}" data-plant="${rEsc(p)}"><td><b>${rEsc(p)}</b></td><td>${rEsc(m["사업자명(대표자명)"])}</td>
-            <td>${m["지역(요금구분)"] ? rEsc(m["지역(요금구분)"]) : '<span class="tag bad">미지정</span>'}</td><td>${rStr(m["배전연결"]).toUpperCase() === "Y" ? "Y" : "-"}</td>
+            <td>${m["지역(요금구분)"] ? rEsc(m["지역(요금구분)"]) : '<span class="tag bad">미지정</span>'}</td><td>${GRID_LABEL[gridOf(m["배전연결"])]}</td>
             <td>${app ? `${rEsc(custName(app) || "계약 미등록")} <span class="hint" style="margin:0">${rEsc(app)}</span>` : '<span class="hint" style="margin:0">미연결</span>'}</td>
             <td class="num">${rEsc(fmtKw(m["계약용량"]))}</td><td class="num">${rEsc(m["계약단가"])}</td><td>${rEsc(m["계약일자"])}</td></tr>`; }).join("")}</table></div>${pagerHtml("plant", pg.page, pg.pages)}
       <div id="regPlantDetail"></div></div>`;
@@ -314,7 +317,8 @@ function openPlant(name, keepScroll) {
   regState.openPlant = name; markActive(".reg-row", "plant", name);
   const isNew = !name;
   const raw = isNew ? { "지역(요금구분)": "비수도권", "배전연결": "N" } : splitOwnerName(Object.assign({}, Registry.plants()[name]));
-  raw["배전연결"] = rStr(raw["배전연결"]).toUpperCase() === "Y" ? "Y" : "N";
+  raw["배전연결"] = gridOf(raw["배전연결"]);
+  if (!rStr(raw["접속점"]) && rStr(raw["변전소"])) raw["접속점"] = raw["변전소"]; // 예전 변전소 칸 값 이어받기
   r$("regPlantDetail").innerHTML = `<div class="reg-detail">
     <div class="reg-head"><h3 class="sub" style="margin:0">${isNew ? "새 발전소" : rEsc(name)}</h3><button class="btn secondary" id="regPlantClose">닫기</button></div>
     <div id="regPlantForm">${regFormHtml(PLANT_FORM, raw, "pf")}</div>
@@ -355,7 +359,7 @@ function renderGroupMain() {
     <h3 class="sub">소속 발전소 (${members.length})</h3>
     <div class="grid-wrap"><table class="grid"><tr><th>발전소</th><th>사업자명</th><th>지역</th><th>배전</th><th>계약용량(kW)</th><th></th></tr>
       ${members.length ? members.map(p => { const m = all[p]; return `<tr><td><b>${rEsc(p)}</b></td><td>${rEsc(m["사업자명(대표자명)"])}</td>
-        <td>${m["지역(요금구분)"] ? rEsc(m["지역(요금구분)"]) : '<span class="tag bad">미지정</span>'}</td><td>${rStr(m["배전연결"]).toUpperCase() === "Y" ? "Y" : "-"}</td>
+        <td>${m["지역(요금구분)"] ? rEsc(m["지역(요금구분)"]) : '<span class="tag bad">미지정</span>'}</td><td>${GRID_LABEL[gridOf(m["배전연결"])]}</td>
         <td class="num">${rEsc(fmtKw(m["계약용량"]))}</td><td style="text-align:center"><button class="btn secondary small grp-remove" data-plant="${rEsc(p)}">제외</button></td></tr>`; }).join("")
         : `<tr><td colspan="6" class="hint">아직 묶인 발전소가 없습니다.</td></tr>`}</table></div>
     <div class="row" style="margin-top:10px"><select id="grpAddSel" style="min-width:300px">${others.map(p => { const a = rStr(all[p]["KPX신청번호"]);

@@ -131,7 +131,7 @@
     const dm = rates.demandSide[demandRegion];
     if (dm == null) throw new Error("수요지 지역이 올바르지 않습니다: " + demandRegion);
     let fee = E.trunc(s * g) + E.trunc(s * (1 - rates.transLossRate) * dm);
-    if (plantInfo.distConnected) fee += E.trunc(s * (1 - rates.totalLossRate) * rates.distribution);
+    if (plantInfo.distConnected) fee += E.trunc(s * (1 - rates.totalLossRate) * (plantInfo.distLow && rates.distributionLow != null ? rates.distributionLow : rates.distribution));
     return { supplyRounded: s, fee };
   };
 
