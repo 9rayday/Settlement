@@ -478,9 +478,14 @@ function onSheetEdit(e) {
   if (!lock.tryLock(20000)) return;
   try { rebuildDashboard_(); } finally { lock.releaseLock(); }
 }
+// appsscript.json 에 script.scriptapp 권한이 없으면 트리거 설치만 건너뛴다 (대시보드는 업로드 때 갱신)
 function installEditTrigger_() {
-  const exists = ScriptApp.getProjectTriggers().some(t => t.getHandlerFunction() === "onSheetEdit");
-  if (!exists) ScriptApp.newTrigger("onSheetEdit").forSpreadsheet(SHEET_ID).onEdit().create();
+  try {
+    const exists = ScriptApp.getProjectTriggers().some(t => t.getHandlerFunction() === "onSheetEdit");
+    if (!exists) ScriptApp.newTrigger("onSheetEdit").forSpreadsheet(SHEET_ID).onEdit().create();
+  } catch (err) {
+    console.warn("편집 트리거 설치 건너뜀 (appsscript.json oauthScopes 에 https://www.googleapis.com/auth/script.scriptapp 추가 필요): " + err);
+  }
 }
 
 // 편집기에서 수동 실행: 실적그리드를 월별실적로그의 실적(재생E공급량+초과발전량)으로 다시 채운다. (그리드 수동 수정값은 덮어씀)
