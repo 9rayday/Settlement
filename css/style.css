@@ -159,7 +159,7 @@ h3.sub{ font-size:13px; color:var(--navy); margin:16px 0 6px; }
 #tab5 input[readonly]{ background:#F3F4F6; color:var(--sub); }
 #tab4 table.grid input{ width:100%; box-sizing:border-box; }
 #tab4 table.grid select{ min-width:0; }
-#tab5 #billResult .doc{ background:#fff; border:1px solid var(--line); border-radius:10px; padding:20px 22px; margin-bottom:12px; }
+#tab5 #billResult .doc{ margin:0 auto 12px; } /* 발전사업자 정산서와 같은 A4 양식(.doc) */
 /* 탭0 등록 */
 .reg-head{ display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
 .reg-head h2{ margin:0; }

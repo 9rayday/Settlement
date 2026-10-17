@@ -488,6 +488,19 @@ function installEditTrigger_() {
   }
 }
 
+// 편집기에서 수동 실행: 테스트 데이터를 모두 지운다 (헤더 행은 남김). 관리자(로그인) 탭은 건드리지 않는다.
+// 대상: 발전소 사업자 정보, 전기사용자 정보, 월별실적로그, 월별정산조정, 앱데이터, 실적그리드, 대시보드
+function resetAllData() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  [SHEET_MASTER, SHEET_CUSTOMERS, SHEET_PERFORMANCE, SHEET_ADJUSTMENTS, SHEET_STORE].forEach(name => {
+    const sh = getSheet_(name), last = sh.getLastRow();
+    if (last > 1) sh.deleteRows(2, last - 1);
+  });
+  const grid = ss.getSheetByName(SHEET_YEARLY_GRID);
+  if (grid) grid.clear();
+  rebuildDashboard_();
+}
+
 // 편집기에서 수동 실행: 실적그리드를 월별실적로그의 실적(재생E공급량+초과발전량)으로 다시 채운다. (그리드 수동 수정값은 덮어씀)
 function refillYearlyGrid() {
   const sheet = getYearlyGridSheet_(), master = getMaster_();

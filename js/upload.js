@@ -1,4 +1,6 @@
 /* ============ Upload (drag & drop + file picker) ============ */
+let supplyFromGen = false; // 마지막 업로드 파일의 재생E공급량을 발전량으로 대체했는지
+
 function initUploadZone(){
   bindDropZone("dropZone", "dataFile", routeKpxFile);
   bindDropZone("amiDropZone", "amiFile", file=>{ if(typeof onAmiFile === "function") onAmiFile(file); });
@@ -75,8 +77,12 @@ function handleFile(file){
       const headerRow = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], {header:1, defval:null})[0] || [];
       rawHeaders = headerRow.map(h=> h===null||h===undefined ? "" : String(h)).filter(h=>h!=="");
       buildColMap(rawRows);
+      // 가정산 KPX 파일은 재생E공급량이 비어(0) 있다 → 엑셀 가정산 방식대로 발전량을 공급량으로 (초과발전량 0)
+      const colSum = c => c ? rawRows.reduce((t, r) => t + num(r[c]), 0) : 0;
+      supplyFromGen = !!(colMap.supply && colMap.gen && colSum(colMap.supply) <= 0 && colSum(colMap.gen) > 0);
+      if(supplyFromGen) rawRows.forEach(r => { r[colMap.supply] = r[colMap.gen]; });
       aggregate(rawRows);
-      statusEl.textContent = `발전소 수 ${plants.length} 처리 완료`;
+      statusEl.textContent = `발전소 수 ${plants.length} 처리 완료` + (supplyFromGen ? " · 재생E공급량이 비어 있어 발전량을 공급량으로 계산(가정산)" : "");
       statusEl.className = "status ok";
       document.getElementById("exportBtn").disabled = false;
       document.getElementById("pdfBtn").disabled = false;
