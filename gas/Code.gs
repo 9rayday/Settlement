@@ -135,8 +135,8 @@ function doPost(e) {
     if (action === "saveStore") return jsonOut_({ ok: true, data: saveStore_(body) });
     if (action === "savePlant") return jsonOut_({ ok: true, data: upsertRegistryRow_(getSheet_(SHEET_MASTER), MASTER_FIELDS, "발전소명", body.record, body.originalKey) });
     if (action === "deletePlant") return jsonOut_({ ok: true, data: deleteRegistryRow_(getSheet_(SHEET_MASTER), "발전소명", body.key) });
-    if (action === "saveCustomer") return jsonOut_({ ok: true, data: upsertRegistryRow_(getSheet_(SHEET_CUSTOMERS), CUSTOMER_FIELDS, "KPX신청번호", body.record, body.originalKey) });
-    if (action === "deleteCustomer") return jsonOut_({ ok: true, data: deleteRegistryRow_(getSheet_(SHEET_CUSTOMERS), "KPX신청번호", body.key) });
+    if (action === "saveCustomer") return jsonOut_({ ok: true, data: upsertRegistryRow_(getSheet_(SHEET_CUSTOMERS), CUSTOMER_FIELDS, "계약ID", body.record, body.originalKey, "KPX신청번호") });
+    if (action === "deleteCustomer") return jsonOut_({ ok: true, data: deleteRegistryRow_(getSheet_(SHEET_CUSTOMERS), "계약ID", body.key, "KPX신청번호") });
     if (action === "login") return jsonOut_({ ok: true, data: login_(body) });
     return jsonOut_({ ok: false, error: "unknown action: " + action });
   } catch (err) {
@@ -161,11 +161,11 @@ const MASTER_FIELDS = ["발전소명","사업자명(대표자명)","사업자등
   "사업자명","대표자명","이메일","발전기ID","접속점","한전고객번호",
   "정산방식","계약기간","연장가능여부","연장통보기한","연장통보마감일","비고",
   "연간보장공급량","연간효율감소","위약금유형","위약금단가","위약금처리방식","해지위약금"];
-const CUSTOMER_FIELDS = ["수요기업명","대표자명","사업자등록번호","전기사용장소","담당자","연락처","이메일","수요지지역","계약단가","KPX신청번호","소비계약신청번호","계약일자","계약해지일",
+const CUSTOMER_FIELDS = ["계약ID","수요기업명","대표자명","사업자등록번호","전기사용장소","담당자","연락처","이메일","수요지지역","계약단가","KPX신청번호","소비계약신청번호","계약일자","계약해지일",
   "정산방식","계약기간","연장가능여부","연장통보기한","연장통보마감일","비고",
   "사용장소명","수요망","한전계약전력","한전고객번호","계약용량","연간보장시간","연간보장공급량","연간효율감소","위약금유형","위약금단가","위약금처리방식","해지위약금"];
 // 앞자리 0·하이픈이 숫자/날짜로 바뀌지 않도록 텍스트 서식으로 저장할 컬럼
-const TEXT_FIELDS = ["사업자등록번호","계좌번호","연락처","담당자","KPX신청번호","소비계약신청번호","발전기ID","한전고객번호"];
+const TEXT_FIELDS = ["계약ID","사업자등록번호","계좌번호","연락처","담당자","KPX신청번호","소비계약신청번호","발전기ID","한전고객번호"];
 
 // Date 셀은 JSON.stringify가 UTC로 변환하면서 자정 근처 날짜가 하루 밀릴 수 있어
 // 스프레드시트 타임존 기준 "yyyy-MM-dd" 문자열로 먼저 고정한다.
@@ -192,12 +192,13 @@ function getCustomers_() {
     const out = {};
     CUSTOMER_FIELDS.forEach(f => out[f] = formatDateField_(pickField_(r, f)));
     return out;
-  }).filter(c => String(c["KPX신청번호"] || "").trim() || String(c["수요기업명"] || "").trim());
+  }).filter(c => String(c["계약ID"] || "").trim() || String(c["KPX신청번호"] || "").trim() || String(c["수요기업명"] || "").trim());
 }
 
 // 한 행 저장(upsert). 헤더는 공백/괄호를 무시하고 매칭하고, 없는 컬럼은 맨 끝에 추가한다.
 // 시트에 수기로 만든 다른 컬럼 값은 건드리지 않는다. originalKey 가 있으면 그 행을 수정(키 변경 포함), 없으면 새로 추가.
-function upsertRegistryRow_(sheet, fields, keyField, record, originalKey) {
+// legacyKeyField: 키 칸이 비어 있는 예전 행은 이 칸 값으로 찾는다 (전기사용자: 계약ID 도입 전 KPX신청번호로 저장된 행)
+function upsertRegistryRow_(sheet, fields, keyField, record, originalKey, legacyKeyField) {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
@@ -218,6 +219,11 @@ function upsertRegistryRow_(sheet, fields, keyField, record, originalKey) {
     const orig = String(originalKey || "").trim();
     if (rowOf(key) > 0 && key !== orig) throw new Error("이미 등록된 " + keyField + "입니다: " + key);
     let row = orig ? rowOf(orig) : -1;
+    if (row < 0 && orig && legacyKeyField && colOf(legacyKeyField) >= 0 && lastRow > 1) {
+      const legacy = sheet.getRange(2, colOf(legacyKeyField) + 1, lastRow - 1, 1).getValues().map(r => String(r[0]).trim());
+      const i = legacy.findIndex((v, j) => v === orig && !keys[j]);
+      if (i >= 0) row = i + 2;
+    }
     if (row < 0) row = lastRow + 1;
     const values = row <= lastRow ? sheet.getRange(row, 1, 1, header.length).getValues()[0] : new Array(header.length).fill("");
     fields.forEach(f => { if (record[f] !== undefined) values[colOf(f)] = record[f]; });
@@ -229,11 +235,13 @@ function upsertRegistryRow_(sheet, fields, keyField, record, originalKey) {
   }
 }
 
-function deleteRegistryRow_(sheet, keyField, key) {
+function deleteRegistryRow_(sheet, keyField, key, legacyKeyField) {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
-    const found = sheetToObjects_(sheet).find(r => String(pickField_(r, keyField)).trim() === String(key || "").trim());
+    const k = String(key || "").trim(), rows = sheetToObjects_(sheet);
+    const found = rows.find(r => String(pickField_(r, keyField) || "").trim() === k)
+      || (legacyKeyField ? rows.find(r => !String(pickField_(r, keyField) || "").trim() && String(pickField_(r, legacyKeyField) || "").trim() === k) : null);
     if (!found) throw new Error("삭제할 항목을 찾지 못했습니다: " + key);
     sheet.deleteRow(found._row);
     return { deleted: true };

@@ -57,7 +57,8 @@ const CUSTOMER_FORM = [
   { k: "이메일", label: "이메일" },
   { k: "연락처", label: "전화번호" },
   { section: "계약정보" },
-  { k: "KPX신청번호", label: "KPX 신청번호 (그룹 키)", req: true, placeholder: "26-PR00000" },
+  { k: "계약ID", label: "계약ID", req: true, placeholder: "예: 삼성D_5년" },
+  { k: "KPX신청번호", label: "KPX 신청번호 (그룹)", req: true, placeholder: "26-PR00000" },
   { k: "정산방식", label: "정산방식", type: "select", options: ["", "실시간 정산", "월간균등 정산"] },
   { k: "계약단가", label: "계약단가 (원/kWh)", type: "number", req: true },
   { k: "계약기간", label: "계약기간 (년)", type: "number" },
@@ -112,9 +113,23 @@ const Registry = (function () {
     return { name: str(c["수요기업명"]), ceo: str(c["대표자명"]), bizNo: str(c["사업자등록번호"]), address: str(c["전기사용장소"]),
       manager: str(c["담당자"]), contact: str(c["연락처"]), email: str(c["이메일"]), demandRegion: str(c["수요지지역"]),
       unitPrice: Number(c["계약단가"]), appNo: str(c["KPX신청번호"]), consumeAppNo: str(c["소비계약신청번호"]),
-      start: str(c["계약일자"]), end: str(c["계약해지일"]) };
+      start: str(c["계약일자"]), end: str(c["계약해지일"]), contractId: custKey(c) };
   }
-  function customerByApp(app) { const c = customers.find(x => str(x["KPX신청번호"]) === str(app)); return c ? toCustomer(c) : null; }
+  // 계약 키 = 계약ID (예전 행은 KPX신청번호). 같은 신청번호에 계약이 여러 건일 수 있다.
+  const custKey = c => str(c["계약ID"]) || str(c["KPX신청번호"]);
+  const contractsOfApp = app => customers.filter(x => str(x["KPX신청번호"]) === str(app));
+  const customerByKey = key => customers.find(x => custKey(x) === str(key)) || null;
+  function groups() { const out = []; customers.forEach(c => { const a = str(c["KPX신청번호"]); if (a && !out.includes(a)) out.push(a); }); return out; }
+  // 정산서용: 그 달에 유효한 계약 우선 (없으면 첫 계약)
+  function customerByApp(app, month) {
+    const list = contractsOfApp(app); if (!list.length) return null;
+    let pick = list[0];
+    if (/^\d{6}$/.test(month || "")) {
+      const ms = `${month.slice(0, 4)}-${month.slice(4)}-01`, me = `${month.slice(0, 4)}-${month.slice(4)}-31`;
+      pick = list.find(c => (!str(c["계약일자"]) || str(c["계약일자"]) <= me) && (!str(c["계약해지일"]) || str(c["계약해지일"]) >= ms)) || pick;
+    }
+    return toCustomer(pick);
+  }
   function plantsOfGroup(app) { return Object.keys(plants()).filter(p => str(plants()[p]["KPX신청번호"]) === str(app)); }
 
   async function save(kind, record, originalKey) {
@@ -127,7 +142,7 @@ const Registry = (function () {
     if (r.ok) await load();
     return r;
   }
-  return { load, plants, rawCustomers, plantInfo, customerByApp, plantsOfGroup, save, remove, isLoaded: () => loaded };
+  return { load, plants, rawCustomers, plantInfo, customerByApp, customerByKey, contractsOfApp, custKey, groups, plantsOfGroup, save, remove, isLoaded: () => loaded };
 })();
 
 /* ---------- 화면: 정산관리 > 계약관리 (전기사용자 / 발전사업자 / 그룹화) ---------- */
@@ -171,8 +186,8 @@ function regFormHtml(form, rec, prefix) {
     let input;
     if (f.type === "select") input = `<select ${attrs}>${f.options.map(o => { const [val, lab] = Array.isArray(o) ? o : [o, o];
         return `<option value="${rEsc(val)}"${val === v ? " selected" : ""}>${rEsc(lab || "선택")}</option>`; }).join("")}</select>`;
-    else if (f.type === "group") input = `<select ${attrs}><option value="">미연결</option>${Registry.rawCustomers().map(c => {
-        const app = rStr(c["KPX신청번호"]); return `<option value="${rEsc(app)}"${app === v ? " selected" : ""}>${rEsc(app)} · ${rEsc(c["수요기업명"])}</option>`; }).join("")}
+    else if (f.type === "group") input = `<select ${attrs}><option value="">미연결</option>${Registry.groups().map(app =>
+        `<option value="${rEsc(app)}"${app === v ? " selected" : ""}>${rEsc(app)} · ${rEsc(groupLabel(app))}</option>`).join("")}
         ${v && !Registry.customerByApp(v) ? `<option value="${rEsc(v)}" selected>${rEsc(v)} (계약 미등록)</option>` : ""}</select>`;
     else if (f.type === "textarea") input = `<textarea ${attrs} rows="3">${rEsc(v)}</textarea>`;
     else if (f.type === "kw") input = `<input ${attrs} type="text" inputmode="decimal" class="kw-in"${f.calc ? " readonly" : ""} value="${rEsc(fmtKw(v))}" placeholder="0.00">`;
@@ -202,15 +217,18 @@ function calcContractDates(rec) {
 const hoursPerDay = v => { v = Number(v); return v > 24 ? v / 365 : v; }; // 예전에 h/년으로 저장된 값도 h/일로 해석
 const groupCapacity = app => Registry.plantsOfGroup(app).reduce((s, p) => s + (Number(Registry.plants()[p]["계약용량"]) || 0), 0);
 const guaranteeOf = (cap, hours) => { cap = Number(cap); hours = Number(hours); return cap > 0 && hours > 0 ? Number((cap * hours).toFixed(3)) : ""; };
-// 그룹 구성이나 발전소 용량이 바뀌면 해당 전기사용자 행의 계약용량·연간보장공급량을 다시 저장한다
+const groupLabel = app => Array.from(new Set(Registry.contractsOfApp(app).map(c => rStr(c["수요기업명"])))).join(", ");
+const singleContract = app => Registry.contractsOfApp(app).length === 1;
+// 그룹 구성이나 발전소 용량이 바뀌면 해당 전기사용자 계약의 계약용량·연간보장공급량을 다시 저장한다 (계약 1건인 그룹만)
 async function syncGroupTotals(apps) {
   for (const app of new Set(apps.map(rStr).filter(Boolean))) {
-    const raw = Registry.rawCustomers().find(c => rStr(c["KPX신청번호"]) === app);
-    if (!raw) continue;
+    if (!singleContract(app)) continue;
+    const raw = Registry.contractsOfApp(app)[0];
     const cap = groupCapacity(app); if (!(cap > 0)) continue; // 그룹 발전소가 없으면 직접 입력값 유지
     const g = guaranteeOf(cap, hoursPerDay(raw["연간보장시간"]) * 365);
     if (Number(raw["계약용량"]) === cap && String(raw["연간보장공급량"]) === String(g)) continue;
-    await Registry.save("customer", { "KPX신청번호": app, "계약용량": cap, "연간보장공급량": g }, app);
+    const key = Registry.custKey(raw);
+    await Registry.save("customer", { "계약ID": key, "계약용량": cap, "연간보장공급량": g }, key);
   }
 }
 const plantGroupOf = name => name && Registry.plants()[name] ? rStr(Registry.plants()[name]["KPX신청번호"]) : "";
@@ -248,14 +266,21 @@ const loadFailNotice = () => Registry.isLoaded() ? "" : `<div class="notice warn
 function markActive(selector, attr, value) {
   document.querySelectorAll(selector).forEach(el => el.classList.toggle("active", el.dataset[attr] === value));
 }
-function custCardsHtml(activeApp, cls, custs) {
+function custCardsHtml(activeKey, cls, custs) {
   if (!custs.length) return `<div class="hint">등록된 계약이 없습니다.</div>`;
   return custs.map(c => {
-    const app = rStr(c["KPX신청번호"]), n = Registry.plantsOfGroup(app).length;
-    return `<button class="reg-card ${cls}${activeApp === app ? " active" : ""}" data-app="${rEsc(app)}">
-      <div class="reg-card-title">${rEsc(c["수요기업명"])}</div><div class="reg-card-sub">${rEsc(app)}</div>
-      <div class="reg-card-meta"><span>${rEsc(c["수요지지역"] || "-")}</span><span>${rEsc(c["계약단가"] === "" ? "-" : c["계약단가"])} 원/kWh</span><span>발전소 ${n}개</span></div></button>`;
+    const key = Registry.custKey(c), app = rStr(c["KPX신청번호"]);
+    return `<button class="reg-card ${cls}${activeKey === key ? " active" : ""}" data-key="${rEsc(key)}">
+      <div class="reg-card-title">${rEsc(c["수요기업명"])}</div><div class="reg-card-sub">${rEsc(key)}${key !== app ? ` · ${rEsc(app)}` : ""}</div>
+      <div class="reg-card-meta"><span>${rEsc(c["수요지지역"] || "-")}</span><span>${rEsc(c["계약단가"] === "" ? "-" : c["계약단가"])} 원/kWh</span><span>${c["계약용량"] === "" || c["계약용량"] == null ? "-" : fmtKw(c["계약용량"]) + " kW"}</span></div></button>`;
   }).join("");
+}
+// 그룹 카드: 신청번호 단위 (계약 n건 · 발전소 m개)
+function groupCardsHtml(activeApp, apps) {
+  if (!apps.length) return `<div class="hint">등록된 계약이 없습니다.</div>`;
+  return apps.map(app => `<button class="reg-card group-card${activeApp === app ? " active" : ""}" data-app="${rEsc(app)}">
+      <div class="reg-card-title">${rEsc(groupLabel(app))}</div><div class="reg-card-sub">${rEsc(app)}</div>
+      <div class="reg-card-meta"><span>계약 ${Registry.contractsOfApp(app).length}건</span><span>발전소 ${Registry.plantsOfGroup(app).length}개</span></div></button>`).join("");
 }
 
 /* ----- 전기사용자 ----- */
@@ -267,16 +292,18 @@ function renderCustomerPage() {
       <div class="reg-cards">${custCardsHtml(regState.openCust, "cust-card", pg.items)}</div>${pagerHtml("cust", pg.page, pg.pages)}
       <div id="regCustDetail"></div></div>`;
   bindPager(host, renderCustomerPage);
-  host.querySelectorAll(".cust-card").forEach(b => b.onclick = () => openCustomer(b.dataset.app));
+  host.querySelectorAll(".cust-card").forEach(b => b.onclick = () => openCustomer(b.dataset.key));
   r$("regAddCust").onclick = () => openCustomer("");
   if (regState.openCust !== null) openCustomer(regState.openCust, true);
 }
 
-function openCustomer(app, keepScroll) {
-  regState.openCust = app; markActive(".cust-card", "app", app);
-  const raw = Object.assign({}, Registry.rawCustomers().find(c => rStr(c["KPX신청번호"]) === app) || { "수요지지역": "비수도권" });
-  const isNew = !app, plants = isNew ? [] : Registry.plantsOfGroup(app);
-  const gcap = isNew ? 0 : groupCapacity(app);
+function openCustomer(key, keepScroll) {
+  regState.openCust = key; markActive(".cust-card", "key", key);
+  const found = key ? Registry.customerByKey(key) : null;
+  const raw = Object.assign({}, found || { "수요지지역": "비수도권" });
+  const isNew = !found, app = rStr(raw["KPX신청번호"]);
+  if (!isNew && !rStr(raw["계약ID"])) raw["계약ID"] = key; // 예전 행: 신청번호를 계약ID 로
+  const gcap = !isNew && singleContract(app) ? groupCapacity(app) : 0; // 그룹에 계약이 1건이면 발전소 합계
   if (gcap > 0) raw["계약용량"] = gcap;
   if (Number(raw["연간보장시간"]) > 24) raw["연간보장시간"] = Number((raw["연간보장시간"] / 365).toFixed(4)); // 예전 h/년 값 → h/일
   r$("regCustDetail").innerHTML = `<div class="reg-detail">
@@ -286,10 +313,10 @@ function openCustomer(app, keepScroll) {
   </div>`;
   if (gcap > 0) r$("regCustForm").querySelector('[data-k="계약용량"]').readOnly = true;
   bindContractCalc("regCustForm");
-  r$("regCustClose").onclick = () => { regState.openCust = null; markActive(".cust-card", "app", null); r$("regCustDetail").innerHTML = ""; };
-  r$("regCustSave").onclick = () => saveRegistry("customer", "regCustForm", CUSTOMER_FORM, isNew ? "" : app, "regCustStatus");
+  r$("regCustClose").onclick = () => { regState.openCust = null; markActive(".cust-card", "key", null); r$("regCustDetail").innerHTML = ""; };
+  r$("regCustSave").onclick = () => saveRegistry("customer", "regCustForm", CUSTOMER_FORM, isNew ? "" : key, "regCustStatus");
   if (!isNew) {
-    r$("regCustDel").onclick = () => deleteRegistry("customer", app, raw["수요기업명"], "regCustStatus");
+    r$("regCustDel").onclick = () => deleteRegistry("customer", key, `${raw["수요기업명"]} (${key})`, "regCustStatus");
   }
   if (!keepScroll) r$("regCustDetail").scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
@@ -304,7 +331,7 @@ function renderPlantPage() {
         ${pg.items.map(p => { const m = plants[p], app = rStr(m["KPX신청번호"]);
           return `<tr class="reg-row${regState.openPlant === p ? " active" : ""}" data-plant="${rEsc(p)}"><td><b>${rEsc(p)}</b></td><td>${rEsc(m["사업자명(대표자명)"])}</td>
             <td>${m["지역(요금구분)"] ? rEsc(m["지역(요금구분)"]) : '<span class="tag bad">미지정</span>'}</td><td>${GRID_LABEL[gridOf(m["배전연결"])]}</td>
-            <td>${app ? `${rEsc(custName(app) || "계약 미등록")} <span class="hint" style="margin:0">${rEsc(app)}</span>` : '<span class="hint" style="margin:0">미연결</span>'}</td>
+            <td>${app ? `${rEsc(groupLabel(app) || "계약 미등록")} <span class="hint" style="margin:0">${rEsc(app)}</span>` : '<span class="hint" style="margin:0">미연결</span>'}</td>
             <td class="num">${rEsc(fmtKw(m["계약용량"]))}</td><td class="num">${rEsc(m["계약단가"])}</td><td>${rEsc(m["계약일자"])}</td></tr>`; }).join("")}</table></div>${pagerHtml("plant", pg.page, pg.pages)}
       <div id="regPlantDetail"></div></div>`;
   bindPager(host, renderPlantPage);
@@ -334,13 +361,13 @@ function openPlant(name, keepScroll) {
 /* ----- 그룹화: 전기사용자 계약 하나 = 같은 KPX 신청번호의 발전소 묶음 ----- */
 function renderGroupPage() {
   const host = r$("regGroupPage"); if (!host) return;
-  const custs = Registry.rawCustomers(), all = Registry.plants();
-  const unlinked = Object.keys(all).filter(p => { const a = rStr(all[p]["KPX신청번호"]); return !a || !Registry.customerByApp(a); });
-  if (regState.openGroup === null && custs.length) regState.openGroup = rStr(custs[0]["KPX신청번호"]);
-  const pg = pageSlice("group", custs);
+  const apps = Registry.groups(), all = Registry.plants();
+  const unlinked = Object.keys(all).filter(p => { const a = rStr(all[p]["KPX신청번호"]); return !a || !apps.includes(a); });
+  if ((regState.openGroup === null || !apps.includes(regState.openGroup)) && apps.length) regState.openGroup = apps[0];
+  const pg = pageSlice("group", apps);
   host.innerHTML = `${loadFailNotice()}<div class="group-layout">
     <div class="card group-list"><h2>PPA 계약</h2>
-      <div class="reg-cards single">${custCardsHtml(regState.openGroup, "group-card", pg.items)}</div>${pagerHtml("group", pg.page, pg.pages)}
+      <div class="reg-cards single">${groupCardsHtml(regState.openGroup, pg.items)}</div>${pagerHtml("group", pg.page, pg.pages)}
       <p class="hint" style="margin-top:10px">그룹 미연결 발전소: <b>${unlinked.length}</b>개</p></div>
     <div class="card group-main" id="regGroupMain"></div></div>`;
   bindPager(host, renderGroupPage);
@@ -355,7 +382,12 @@ function renderGroupMain() {
   const members = Registry.plantsOfGroup(app), all = Registry.plants();
   const others = Object.keys(all).filter(p => !members.includes(p));
   if (!regState.month) regState.month = defaultMonth(app);
-  host.innerHTML = `<div><h2>${rEsc(c.name)}</h2><div class="hint" style="margin:2px 0 0">${rEsc(app)} · ${rEsc(c.demandRegion || "-")} · ${rEsc(isNaN(c.unitPrice) ? "-" : c.unitPrice)} 원/kWh</div></div>
+  const contracts = Registry.contractsOfApp(app);
+  host.innerHTML = `<div><h2>${rEsc(groupLabel(app))}</h2><div class="hint" style="margin:2px 0 0">${rEsc(app)} · ${rEsc(c.demandRegion || "-")}</div></div>
+    <h3 class="sub">계약 (${contracts.length})</h3>
+    <div class="grid-wrap" style="max-height:none"><table class="grid"><tr><th>계약ID</th><th>사업자명</th><th>계약용량(kW)</th><th>계약단가</th><th>계약기간</th></tr>
+      ${contracts.map(x => `<tr><td><b>${rEsc(Registry.custKey(x))}</b></td><td>${rEsc(x["수요기업명"])}</td><td class="num">${x["계약용량"] === "" || x["계약용량"] == null ? "-" : fmtKw(x["계약용량"])}</td>
+        <td class="num">${rEsc(x["계약단가"])}</td><td>${rEsc(x["계약일자"] || "-")} ~ ${rEsc(x["계약해지일"] || "")}</td></tr>`).join("")}</table></div>
     <h3 class="sub">소속 발전소 (${members.length})</h3>
     <div class="grid-wrap"><table class="grid"><tr><th>발전소</th><th>사업자명</th><th>지역</th><th>배전</th><th>계약용량(kW)</th><th></th></tr>
       ${members.length ? members.map(p => { const m = all[p]; return `<tr><td><b>${rEsc(p)}</b></td><td>${rEsc(m["사업자명(대표자명)"])}</td>
@@ -363,7 +395,7 @@ function renderGroupMain() {
         <td class="num">${rEsc(fmtKw(m["계약용량"]))}</td><td style="text-align:center"><button class="btn secondary small grp-remove" data-plant="${rEsc(p)}">제외</button></td></tr>`; }).join("")
         : `<tr><td colspan="6" class="hint">아직 묶인 발전소가 없습니다.</td></tr>`}</table></div>
     <div class="row" style="margin-top:10px"><select id="grpAddSel" style="min-width:300px">${others.map(p => { const a = rStr(all[p]["KPX신청번호"]);
-        return `<option value="${rEsc(p)}">${rEsc(p)}${a ? ` (현재: ${rEsc(custName(a) || a)})` : " (미연결)"}</option>`; }).join("")}</select>
+        return `<option value="${rEsc(p)}">${rEsc(p)}${a ? ` (현재: ${rEsc(groupLabel(a) || a)})` : " (미연결)"}</option>`; }).join("")}</select>
       <button class="btn accent" id="grpAddBtn"${others.length ? "" : " disabled"}>그룹에 추가</button><span id="grpStatus" class="status warn" style="background:none"></span></div>
     <div class="reg-group">
       <div class="reg-head"><h3 class="sub" style="margin:0">월별 발전소 집계</h3>
@@ -372,7 +404,7 @@ function renderGroupMain() {
   host.querySelectorAll(".grp-remove").forEach(b => b.onclick = () => setPlantGroup(b.dataset.plant, ""));
   r$("grpAddBtn").onclick = () => {
     const p = r$("grpAddSel").value, cur = rStr(all[p]["KPX신청번호"]);
-    if (cur && cur !== app && !confirm(`${p} 은(는) 지금 ${custName(cur) || cur} 그룹입니다. ${c.name} 그룹으로 옮길까요?`)) return;
+    if (cur && cur !== app && !confirm(`${p} 은(는) 지금 ${groupLabel(cur) || cur} 그룹입니다. ${groupLabel(app)} 그룹으로 옮길까요?`)) return;
     setPlantGroup(p, app);
   };
   r$("regMonth").onchange = e => { regState.month = e.target.value.replace("-", ""); renderGroupAgg(app); };
@@ -445,13 +477,14 @@ async function saveRegistry(kind, formId, form, originalKey, statusId) {
     rec["사업자명(대표자명)"] = joinOwnerName(rec);
     rec["연간보장공급량"] = guaranteeOf(rec["계약용량"], Number(rec["발전보장시간"]) * 365);
   }
-  else { const gc = groupCapacity(rec["KPX신청번호"]); if (gc > 0) rec["계약용량"] = gc; rec["연간보장공급량"] = guaranteeOf(rec["계약용량"], hoursPerDay(rec["연간보장시간"]) * 365); }
+  else { const app = rec["KPX신청번호"], others = Registry.contractsOfApp(app).filter(c => Registry.custKey(c) !== originalKey).length;
+    const gc = others ? 0 : groupCapacity(app); if (gc > 0) rec["계약용량"] = gc; rec["연간보장공급량"] = guaranteeOf(rec["계약용량"], hoursPerDay(rec["연간보장시간"]) * 365); }
   const oldGroup = kind === "plant" ? plantGroupOf(originalKey) : "";
   st.textContent = "저장 중..."; st.className = "status warn";
   const r = await Registry.save(kind, rec, originalKey);
   if (!r.ok) { st.textContent = "저장 실패: " + r.error; st.className = "status bad"; return; }
   if (kind === "plant") await syncGroupTotals([oldGroup, rec["KPX신청번호"]]);
-  if (kind === "plant") regState.openPlant = rec["발전소명"]; else regState.openCust = rec["KPX신청번호"];
+  if (kind === "plant") regState.openPlant = rec["발전소명"]; else regState.openCust = rec["계약ID"];
   afterRegistryChange();
   const st2 = r$(statusId); if (st2) { st2.textContent = "저장 완료 (구글시트)"; st2.className = "status ok"; }
 }

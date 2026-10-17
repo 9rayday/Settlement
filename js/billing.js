@@ -170,7 +170,9 @@ function splitConfirmed() {
 function prepareGroup(err, warn) {
   if (!billState.kpx) throw new Error("위 업로드 카드에서 KPX 직접전력거래량 파일을 먼저 올리세요.");
   const app = $("groupSel").value, g = billState.kpx.groups[app];
-  const customer = custByApp(app);
+  const customer = Registry.customerByApp(app, g.month);
+  const nContracts = Registry.contractsOfApp(app).length;
+  if (customer && nContracts > 1) warn.push(`신청번호 ${app} 에 계약이 ${nContracts}건 있어 ${customer.contractId} 계약의 단가·정보로 계산했습니다.`);
   if (!customer) err.push(`신청번호 ${app} 에 해당하는 전기사용자 계약이 없습니다. [정산관리 > 계약관리]에서 등록하세요.`);
   const unreg = Object.keys(g.plants).filter(p => { const i = Registry.plantInfo(p); return !i || !i.region; });
   if (unreg.length) err.push("등록되지 않았거나 지역이 비어 있는 발전소: " + unreg.join(", ") + " → [정산관리 > 계약관리]에서 등록하세요.");
@@ -212,7 +214,7 @@ function runCalc() {
       unitPrice: P.customer.unitPrice, demandRegion: P.customer.demandRegion, plants: P.plants,
       confirmedSurcharge: { taxable: Number($("cs_taxable").value) || 0, exempt: Number($("cs_exempt").value) || 0 },
       prevDiff: { taxable: Number($("pd_taxable").value) || 0, exempt: Number($("pd_exempt").value) || 0 },
-      penalty: typeof penaltyDue === "function" ? penaltyDue("cust", P.app, P.g.month) : null
+      penalty: typeof penaltyDueGroup === "function" ? penaltyDueGroup(P.app, P.g.month) : null
     };
     const carry = Store.get(`carry:${P.g.month}:${P.app}`, null);
     if (carry && (ctx.confirmedSurcharge.taxable !== carry.confirmed.taxable || ctx.confirmedSurcharge.exempt !== carry.confirmed.exempt

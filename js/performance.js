@@ -2,7 +2,8 @@
  * 연차별 연간보장공급량 = 1년차 보장량 × (1 − 연간효율감소)^(연차−1)
  *   1년차 보장량 = 등록된 연간보장공급량 (없으면 계약용량 × 보장시간으로 계산)
  * 연차 실적 = 실발전량(공급량) + 초과발전량(발전량 − 공급량)  ← 월별실적로그(가정산 업로드 때 기록)를 날짜 비율로 연차에 배분
- *   발전사업자 = 그 발전소, 전기사용자 = 그룹 발전소 합계
+ *   발전사업자 = 그 발전소, 전기사용자 = 그룹(KPX 신청번호) 발전소 합계
+ *   같은 신청번호에 계약이 여러 건이면 그 달에 유효한 계약끼리 계약용량 비율로 나눈다
  * 미달량 = 보장량 − 실적 (종료된 연차), 미달 위약금 = 미달량 × 연차 기간 가중평균 REC 단가 (js/market.js). 해지 위약금은 방식 정리 후 추가
  * 처리 방식이 "청구서 차감"이면 연차 종료월 정산서에서 차감한다 (전기사용자 가정산서 / 발전사업자 정산서).
  */
@@ -29,7 +30,7 @@ function overlapFrac(ym, s, e) { // 월(YYYYMM) 중 [s, e] 에 들어가는 날�
 }
 
 function contractOf(kind, key) {
-  const raw = kind === "gen" ? Registry.plants()[key] : Registry.rawCustomers().find(c => rStr(c["KPX신청번호"]) === key);
+  const raw = kind === "gen" ? Registry.plants()[key] : Registry.customerByKey(key);
   if (!raw) return null;
   const num = v => Number(v), cap = num(raw["계약용량"]) || 0;
   let g1 = num(raw["연간보장공급량"]);
@@ -37,10 +38,23 @@ function contractOf(kind, key) {
   const start = rStr(raw["계약일자"]), end = rStr(raw["계약해지일"]);
   let years = Math.round(num(raw["계약기간"]) || 0);
   if (!years && YMD.test(start) && YMD.test(end)) years = Math.max(1, Math.round(ymdDays(start, end) / 365.25));
+  const app = kind === "gen" ? "" : rStr(raw["KPX신청번호"]);
+  const endOf = r => rStr(r["계약해지일"]) || (YMD.test(rStr(r["계약일자"])) && Number(r["계약기간"]) > 0 ? addMonthsYmd(rStr(r["계약일자"]), 12 * Math.round(Number(r["계약기간"])), -1) : "");
+  // 같은 신청번호의 다른 계약과 그룹 실적을 나눌 비율 (그 달에 유효한 계약들의 계약용량 비율)
+  let shareOf = () => 1;
+  if (kind === "cust") {
+    const sibs = Registry.contractsOfApp(app).map(r => ({ key: Registry.custKey(r), cap: Number(r["계약용량"]) || 0, start: rStr(r["계약일자"]), end: endOf(r) }));
+    if (sibs.length > 1) shareOf = ym => {
+      const ms = `${ym.slice(0, 4)}-${ym.slice(4)}-01`, me = `${ym.slice(0, 4)}-${ym.slice(4)}-31`;
+      const act = sibs.filter(x => x.cap > 0 && (!x.start || x.start <= me) && (!x.end || x.end >= ms));
+      const tot = act.reduce((t, x) => t + x.cap, 0);
+      return tot > 0 && act.some(x => x.key === key) ? cap / tot : 0;
+    };
+  }
   return {
-    kind, key, name: kind === "gen" ? key : rStr(raw["수요기업명"]), cap, g1, decline: num(raw["연간효율감소"]) || 0, start, end, years,
-    penMethod: rStr(raw["위약금처리방식"]),
-    plants: kind === "gen" ? [key] : Registry.plantsOfGroup(key)
+    kind, key, app, name: kind === "gen" ? key : rStr(raw["수요기업명"]), cap, g1, decline: num(raw["연간효율감소"]) || 0, start, end, years,
+    penMethod: rStr(raw["위약금처리방식"]), shareOf,
+    plants: kind === "gen" ? [key] : Registry.plantsOfGroup(app)
   };
 }
 
@@ -51,7 +65,10 @@ function yearSchedule(c, byPlant) {
     const s = addMonthsYmd(c.start, 12 * (i - 1), 0), e = addMonthsYmd(c.start, 12 * i, -1);
     const guar = c.g1 * Math.pow(1 - c.decline / 100, i - 1);
     let supply = 0, gen = 0; const weights = {}; // weights: 월 발전량 (가중평균 REC 용)
-    c.plants.forEach(p => Object.entries(byPlant[p] || {}).forEach(([ym, v]) => { weights[ym] = (weights[ym] || 0) + v.gen; const f = overlapFrac(ym, s, e); if (f > 0) { supply += v.supply * f; gen += v.gen * f; } }));
+    c.plants.forEach(p => Object.entries(byPlant[p] || {}).forEach(([ym, v]) => {
+      const sh = c.shareOf(ym); weights[ym] = (weights[ym] || 0) + v.gen * sh;
+      const f = overlapFrac(ym, s, e) * sh; if (f > 0) { supply += v.supply * f; gen += v.gen * f; }
+    }));
     const excess = gen - supply, actual = supply + excess;
     const state = e < today ? "ended" : (s > today ? "future" : "current");
     const totalDays = ymdDays(s, e) + 1, remain = state === "current" ? ymdDays(today, e) : (state === "future" ? totalDays : 0);
@@ -68,7 +85,7 @@ function yearSchedule(c, byPlant) {
 }
 
 function perfContracts(kind) {
-  const keys = kind === "gen" ? Object.keys(Registry.plants()) : Registry.rawCustomers().map(c => rStr(c["KPX신청번호"])).filter(Boolean);
+  const keys = kind === "gen" ? Object.keys(Registry.plants()) : Registry.rawCustomers().map(c => Registry.custKey(c)).filter(Boolean);
   const byPlant = perfByPlant();
   return keys.map(k => { const c = contractOf(kind, k); const ys = yearSchedule(c, byPlant); return { c, ys, cur: ys && (ys.find(y => y.state === "current") || null) }; });
 }
@@ -79,6 +96,12 @@ function penaltyDue(kind, key, month) {
   if (!ys || c.penMethod !== "청구서 차감") return { amount: 0, label: "" };
   const hit = ys.filter(y => y.penalty > 0 && y.penaltyMonth === month);
   return { amount: hit.reduce((s, y) => s + y.penalty, 0), label: hit.map(y => `${y.n}년차 미달 ${Math.round(y.short).toLocaleString()} kWh`).join(", ") };
+}
+
+// 전기사용자 정산서(신청번호 단위): 그 신청번호의 모든 계약 위약금 합계
+function penaltyDueGroup(app, month) {
+  const hits = Registry.contractsOfApp(app).map(c => ({ key: Registry.custKey(c), p: penaltyDue("cust", Registry.custKey(c), month) })).filter(x => x.p.amount > 0);
+  return { amount: hits.reduce((s, x) => s + x.p.amount, 0), label: hits.map(x => (hits.length > 1 ? x.key + " " : "") + x.p.label).join(" / ") };
 }
 
 // 헤더 알림: 진행 연차가 종료 30일 이내인데 미달
@@ -121,7 +144,7 @@ function renderPerfPage(kind) {
         <th>해당 연차</th><th>연차 남은 기간</th><th class="num">보장량(MWh)</th><th class="num">실적(MWh)</th><th class="num">달성률</th><th>상태</th></tr>
         ${pg.items.length ? pg.items.map(item => {
           const { c, ys } = item;
-          const sub = kind === "cust" ? `${rEsc(c.key)} · 발전소 ${c.plants.length}개` : rEsc(rStr((Registry.plants()[c.key] || {})["사업자명(대표자명)"]));
+          const sub = kind === "cust" ? `${rEsc(c.key)}${c.key !== c.app ? " · " + rEsc(c.app) : ""} · 발전소 ${c.plants.length}개` : rEsc(rStr((Registry.plants()[c.key] || {})["사업자명(대표자명)"]));
           const head = `<td><b>${rEsc(c.name)}</b><div class="perf-sub">${sub}</div></td>`;
           if (!ys) return `<tr class="perf-row" data-key="${rEsc(c.key)}">${head}<td colspan="9"><span class="tag bad">계약정보 부족</span></td></tr>`;
           const y = pick(item);
