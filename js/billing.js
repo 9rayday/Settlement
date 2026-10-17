@@ -179,7 +179,10 @@ function prepareGroup(err, warn) {
   if (unreg.length) err.push("등록되지 않았거나 지역이 비어 있는 발전소: " + unreg.join(", ") + " → [정산관리 > 계약관리]에서 등록하세요.");
   const { rates, version } = ratesFor(g.month);
   if (!version) warn.push(`${g.month} 에 적용되는 KPX 요율 버전이 없어 기본값으로 계산했습니다.`);
-  const plants = {}; Object.keys(g.plants).forEach(p => plants[p] = Registry.plantInfo(p));
+  const plants = {}; Object.keys(g.plants).forEach(p => {
+    const i = Registry.plantInfo(p);
+    plants[p] = i && i.region ? i : Object.assign({ distConnected: false, distLow: false }, i || {}, { region: "비수도권" }); // 미리보기용 임시값
+  });
   const days = Parsers.buildDays(g, billState.ami);
   // 사용량은 부하구분별 사용량·부족전력량 표시에만 쓴다 (공급량은 KPX 재생E공급량). 파일이 없거나 빈 시간은 KPX 전기사용량으로.
   if (billState.ami) {
@@ -194,8 +197,16 @@ function prepareGroup(err, warn) {
     days.forEach(d => { d.usage = d.kpxUsage; });
     warn.push("고객 사용량 파일이 없어 KPX 파일의 전기사용량으로 표시했습니다. (공급량·금액에는 영향 없음)");
   }
-  return { app, g, customer, rates, plants, days, priceSplits };
+  // 정보가 부족하면 미리보기: 임시값(전기사용자 = 신청번호, 지역 비수도권, 단가 0원)으로 계산하고 저장은 막는다
+  const preview = err.length > 0;
+  const cust = customer ? Object.assign({}, customer) : { name: `(미등록) ${app}`, bizNo: "", address: "", manager: "", contact: "", demandRegion: "비수도권", unitPrice: 0, appNo: app, contractId: app };
+  if (!cust.demandRegion) cust.demandRegion = "비수도권";
+  if (!(cust.unitPrice >= 0)) cust.unitPrice = 0;
+  return { app, g, customer: cust, rates, plants, days, priceSplits, preview };
 }
+const previewNotice = err => `<div class="notice bad"><b>미리보기 — 등록 정보가 부족해 임시값으로 계산했습니다 (저장 불가)</b><br>${err.map(esc).join("<br>")}<br>임시값: 미등록 전기사용자는 신청번호로 표시, 지역 없음 = 비수도권, 단가 없음 = 0원</div>`;
+// 단가가 비어 있는 계약은 0원으로 계산 (미리보기)
+const safeSplits = sp => sp ? sp.map(x => Object.assign({}, x, { unitPrice: x.unitPrice > 0 ? x.unitPrice : 0 })) : sp;
 // 공급량 = KPX 재생E공급량 (가정산·오차정산 공통), 초과발전량 = 발전량 − 공급량
 function matchKpx(P, warn) {
   const m = Engine.matchMonthKpx(P.days, P.rates);
@@ -209,10 +220,9 @@ function runCalc() {
   const out = $("billResult"); const warn = [], err = [];
   try {
     const P = prepareGroup(err, warn);
-    if (err.length) { out.innerHTML = noticeHtml(err, "bad"); return; }
     const match = matchKpx(P, warn);
     const ctx = {
-      unitPrice: P.customer.unitPrice, priceSplits: Registry.priceSplits(P.app, P.g.month, match.supplyByPlant), demandRegion: P.customer.demandRegion, plants: P.plants,
+      unitPrice: P.customer.unitPrice, priceSplits: safeSplits(Registry.priceSplits(P.app, P.g.month, match.supplyByPlant)), demandRegion: P.customer.demandRegion, plants: P.plants,
       confirmedSurcharge: { taxable: Number($("cs_taxable").value) || 0, exempt: Number($("cs_exempt").value) || 0 },
       prevDiff: { taxable: Number($("pd_taxable").value) || 0, exempt: Number($("pd_exempt").value) || 0 },
       penalty: typeof penaltyDueGroup === "function" ? penaltyDueGroup(P.app, P.g.month) : null
@@ -222,9 +232,10 @@ function runCalc() {
       || ctx.prevDiff.taxable !== carry.prevDiff.taxable || ctx.prevDiff.exempt !== carry.prevDiff.exempt))
       warn.push("전월 오차정산 칸이 저장된 오차정산 값과 다릅니다. 직접 고친 값으로 계산했습니다.");
     const inv = Engine.invoice(match, ctx, P.rates);
-    billState.result = { mode: "provisional", app: P.app, month: P.g.month, customer: P.customer, rates: P.rates, match, inv, ctx, dueDate: $("dueDate").value };
-    out.innerHTML = noticeHtml(warn, "warn") + invoiceHtml(billState.result);
+    billState.result = { mode: "provisional", preview: P.preview, app: P.app, month: P.g.month, customer: P.customer, rates: P.rates, match, inv, ctx, dueDate: $("dueDate").value };
+    out.innerHTML = (P.preview ? previewNotice(err) : "") + noticeHtml(warn, "warn") + invoiceHtml(billState.result);
     $("billActions").style.display = "flex";
+    $("billSave").disabled = !!P.preview; // 미리보기는 저장 불가
   } catch (e) { out.innerHTML = `<div class="notice bad">계산 오류: ${esc(e.message)}</div>`; }
 }
 
@@ -271,7 +282,7 @@ function invoiceHtml(R) {
 
 // 가정산 스냅샷: 오차정산 때 비교 기준이 된다 (bill:YYYYMM:신청번호)
 async function saveBill() {
-  const R = billState.result; if (!R || R.mode !== "provisional") return;
+  const R = billState.result; if (!R || R.mode !== "provisional" || R.preview) return; // 미리보기는 저장하지 않음
   const key = `bill:${R.month}:${R.app}`;
   if (Store.get(key, null) && !confirm(`${monthLabel(R.month)} ${R.customer.name} 가정산 기록이 이미 있습니다. 덮어쓸까요?\n(오차정산은 이 기록과 비교합니다)`)) return;
   const inv = R.inv, netByPlant = {};
@@ -350,13 +361,12 @@ function runTrueUp() {
   try {
     const P = prepareGroup(err, warn);
     const prov = readProvisional(P.g.month, P.app);
-    if (!prov) err.push("가정산 값(공급량·전력량요금·망이용요금·거래수수료)을 모두 입력하세요.");
-    if (err.length) { out.innerHTML = noticeHtml(err, "bad"); return; }
+    if (!prov) { out.innerHTML = noticeHtml(["가정산 값(공급량·전력량요금·망이용요금·거래수수료)을 모두 입력하세요."], "bad"); return; }
     const match = matchKpx(P, warn);
-    const conf = Engine.invoice(match, { unitPrice: P.customer.unitPrice, priceSplits: Registry.priceSplits(P.app, P.g.month, match.supplyByPlant), demandRegion: P.customer.demandRegion, plants: P.plants }, P.rates);
+    const conf = Engine.invoice(match, { unitPrice: P.customer.unitPrice, priceSplits: safeSplits(Registry.priceSplits(P.app, P.g.month, match.supplyByPlant)), demandRegion: P.customer.demandRegion, plants: P.plants }, P.rates);
     const diff = Engine.trueUpDiff(prov, conf);
     setVal("pd_taxable", diff.taxable); // 비교 결과로 채움 (직접 고친 값은 다시 계산하면 덮어씀)
-    billState.result = { mode: "trueup", app: P.app, month: P.g.month, customer: P.customer, rates: P.rates, match, conf, prov, diff, warn };
+    billState.result = { mode: "trueup", preview: P.preview, err: err.slice(), app: P.app, month: P.g.month, customer: P.customer, rates: P.rates, match, conf, prov, diff, warn };
     renderTrueUpResult();
   } catch (e) { out.innerHTML = `<div class="notice bad">계산 오류: ${esc(e.message)}</div>`; }
 }
@@ -364,8 +374,9 @@ function runTrueUp() {
 function renderTrueUpResult() {
   const R = billState.result;
   try { R.fields = readTrueUpFields(); } catch (e) { $("billResult").innerHTML = `<div class="notice bad">${esc(e.message)}</div>`; $("billActions").style.display = "none"; return false; }
-  $("billResult").innerHTML = noticeHtml(R.warn, "warn") + trueUpHtml(R);
+  $("billResult").innerHTML = (R.preview ? previewNotice(R.err || []) : "") + noticeHtml(R.warn, "warn") + trueUpHtml(R);
   $("billActions").style.display = "flex";
+  $("billSave").disabled = !!R.preview; // 미리보기는 저장 불가
   return true;
 }
 
@@ -417,7 +428,7 @@ function trueUpHtml(R) {
 }
 
 async function saveTrueUp() {
-  const R = billState.result; if (!R || R.mode !== "trueup") return;
+  const R = billState.result; if (!R || R.mode !== "trueup" || R.preview) return;
   if (!renderTrueUpResult()) return; // 입력값을 다시 읽어 문서를 갱신하고 검증
   const key = `carry:${nextYm(R.month)}:${R.app}`;
   const pick = o => ({ supplyTotal: o.supplyTotal, energy: o.energy, netTotal: o.netTotal, fee: o.fee });
