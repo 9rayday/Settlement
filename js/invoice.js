@@ -222,7 +222,7 @@ async function buildInvoiceHtml(plant){
     <table class="doc-table guarantee-table">
       ${COLGROUP}
       <tr><th class="section" rowspan="${schedule.length+1}">연간<br>보장<br>공급량</th>
-        <td class="label">회차</td><td class="label">예상 공급량</td><td class="label">실제 공급량 누계</td><td class="label">미달 공급량</td><td class="label">미달 구매량</td><td class="label">비고</td></tr>
+        <td class="label">회차</td><td class="label">예상 공급량</td><td class="label">실적 누계 (공급+초과)</td><td class="label">미달 공급량</td><td class="label">미달 구매량</td><td class="label">비고</td></tr>
       ${schedule.map(row=>`
       <tr><td class="label">${row.k}회차<br>${row.label}</td>
         <td class="num">${row.expected==null?'-':fmt2(row.expected)+' kWh'}</td>

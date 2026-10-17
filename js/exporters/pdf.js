@@ -232,7 +232,7 @@ async function drawInvoicePdf(doc, ctx){
   // 연간보장공급량
   const lastYearRow = 33 + schedule.length;
   section(33, lastYearRow, "연간\n보장\n공급량");
-  label(33,3,"회차"); label(33,4,"예상 공급량"); label(33,5,"실제 공급량 누계"); label(33,6,"미달 공급량"); label(33,7,"미달 구매량"); label(33,8,"비고");
+  label(33,3,"회차"); label(33,4,"예상 공급량"); label(33,5,"실적 누계 (공급+초과)"); label(33,6,"미달 공급량"); label(33,7,"미달 구매량"); label(33,8,"비고");
   schedule.forEach((row, i)=>{
     const r = 34 + i;
     cell(r,3,3,null, `${row.k}회차 ${row.label}`);

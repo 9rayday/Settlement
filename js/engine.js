@@ -146,7 +146,10 @@
    */
   E.invoice = function (match, ctx, rates) {
     const supplyTotal = match.totals.supply;
-    const energy = E.round(supplyTotal * ctx.unitPrice);
+    // 계약이 여러 건이면 공급량을 계약 비율(share)로 나눠 계약별 단가 적용: priceSplits [{id, share, unitPrice}]
+    const splits = ctx.priceSplits && ctx.priceSplits.length ? ctx.priceSplits : [{ id: "", share: 1, unitPrice: ctx.unitPrice }];
+    const energyParts = splits.map(sp => ({ id: sp.id, share: sp.share, unitPrice: sp.unitPrice, kwh: supplyTotal * sp.share, amount: E.round(supplyTotal * sp.share * sp.unitPrice) }));
+    const energy = energyParts.reduce((sum, x) => sum + x.amount, 0);
     const net = {}; let netTotal = 0;
     Object.keys(match.supplyByPlant).forEach(p => {
       const info = ctx.plants[p];
@@ -171,7 +174,7 @@
     const penalty = (ctx.penalty && ctx.penalty.amount) || 0; // 계약 위약금 (청구서 차감 방식) — 비과세 차감
     const billTotal = cs.exempt + fund + pd.exempt - penalty;
     return {
-      supplyTotal, energy, netByPlant: net, netTotal, fee, expectedSurcharge, fund,
+      supplyTotal, energy, energyParts, netByPlant: net, netTotal, fee, expectedSurcharge, fund,
       confirmedSurcharge: cs, prevDiff: pd, supplyBefore, supplyAfter, vat, vatTotal, taxInvoice,
       penalty, penaltyLabel: (ctx.penalty && ctx.penalty.label) || "", exemptSubtotal: billTotal, grandTotal: taxInvoice + billTotal,
       loss: { deficitSimple: match.totals.deficitSimple, deficitLoss: match.totals.deficitLoss }

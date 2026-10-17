@@ -21,6 +21,16 @@ function weightedRec(s, e, weights) {
   return n > 0 ? plain / n : null;
 }
 
+// 월 범위 [lo, hi](YYYYMM) 의 가중평균 REC (원/REC). 가격 없는 달은 제외, 가중치 없으면 단순 평균
+function weightedRecMonths(lo, hi, weights) {
+  let sum = 0, w = 0, plain = 0, n = 0;
+  for (let ym = lo; ym <= hi; ym = nextYm(ym)) {
+    const p = recPrice(ym); if (p == null) continue;
+    const wt = weights[ym] || 0; sum += p * wt; w += wt; plain += p; n++;
+  }
+  return w > 0 ? sum / w : (n > 0 ? plain / n : null);
+}
+
 function renderMarketPage() {
   const host = document.getElementById("marketPage"); if (!host) return;
   const y = mktState.year, v = marketYear(y), now = new Date().getFullYear();

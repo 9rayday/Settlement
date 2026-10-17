@@ -49,6 +49,8 @@ function setupSheets() {
   ensureSheet_(ss, SHEET_STORE, STORE_HEADERS);
   ensureSheet_(ss, SHEET_CUSTOMERS, CUSTOMER_FIELDS);
   getYearlyGridSheet_();
+  installEditTrigger_(); // 시트 직접 수정 시 대시보드 자동 갱신
+  rebuildDashboard_();
 }
 
 function ensureSheet_(ss, name, headers) {
@@ -260,11 +262,47 @@ function getPerformanceMonth_(month) {
   return out;
 }
 
-// 전체 월별 실적 (계약이행현황: 연차별 실발전량·초과발전량 집계용)
+/* ============ 실적 (월별실적로그 + 실적그리드) ============
+ * 실적 = 실발전량(재생E공급량) + 초과발전량 (= 발전량). 실적그리드에 이 값을 기록한다.
+ * 실적그리드 칸을 시트에서 직접 고치면 그 값이 실적으로 우선 쓰인다 (웹 화면·대시보드 모두).
+ * 실발전량(공급량)은 월별실적로그 값, 초과발전량 = 실적 − 실발전량.
+ */
+// {발전소: {YYYYMM: {supply, total}}}
+function monthlyActuals_() {
+  const master = getMaster_();
+  const out = {};
+  sheetToObjects_(getSheet_(SHEET_PERFORMANCE)).forEach(r => {
+    const plant = String(r["발전소명"]).trim(), ym = String(r["정산월"]);
+    if (!plant || !/^\d{6}$/.test(ym)) return;
+    const gen = Number(r["발전량"]) || 0, supply = Number(r["공급량"]) || 0;
+    (out[plant] || (out[plant] = {}))[ym] = { supply: supply, total: Math.max(gen, supply) };
+  });
+  // 실적그리드 수동 값 우선
+  const sheet = getYearlyGridSheet_();
+  Object.keys(master).forEach(plant => {
+    const startYm = parseYearMonth_(master[plant]["계약일자"]);
+    const start = findPlantBlockRow_(sheet, plant);
+    if (!startYm || !start) return;
+    const values = sheet.getRange(start + 2, 2, 20, 12).getValues();
+    values.forEach((row, k) => row.forEach((v, pos) => {
+      if (v === "" || v === null || isNaN(Number(v))) return;
+      const ym = ymKey_(addMonths_(startYm, k * 12 + pos));
+      const cell = (out[plant] || (out[plant] = {}))[ym] || { supply: 0, total: 0 };
+      cell.total = Number(v);
+      if (cell.supply > cell.total) cell.supply = cell.total;
+      out[plant][ym] = cell;
+    }));
+  });
+  return out;
+}
+
+// 웹 화면용: 월별 실적 (generation = 실적 합계, supply = 실발전량)
 function getPerformanceAll_() {
-  return sheetToObjects_(getSheet_(SHEET_PERFORMANCE)).map(r => ({
-    month: String(r["정산월"]), plant: String(r["발전소명"]).trim(), generation: Number(r["발전량"]) || 0, supply: Number(r["공급량"]) || 0
+  const act = monthlyActuals_(), rows = [];
+  Object.keys(act).forEach(plant => Object.keys(act[plant]).forEach(ym => {
+    rows.push({ month: ym, plant: plant, supply: act[plant][ym].supply, generation: act[plant][ym].total });
   }));
+  return rows;
 }
 
 /* ============ Performance history (per plant, for 연간보장공급량 회차 계산) ============ */
@@ -313,7 +351,7 @@ function logPerformance_(body) {
       sheet.appendRow(values);
     }
     // 실적그리드는 이 월의 셀 하나만 갱신한다 — 수동으로 보정해둔 다른 셀은 건드리지 않는다.
-    upsertYearlyGridCell_(ss, r.plant, body.month, r.supply);
+    upsertYearlyGridCell_(ss, r.plant, body.month, Math.max(Number(r.generation) || 0, Number(r.supply) || 0)); // 실적 = 재생E공급량 + 초과발전량
   });
   const cumulative = rebuildDashboard_();
   return { logged: (body.rows || []).length, cumulative: cumulative };
@@ -359,84 +397,113 @@ function ymKey_(ym) { return String(ym.y) + String(ym.m).padStart(2, "0"); }
  * 연간보장공급량 = 계약용량 × 발전보장시간 × 365, 이후 매 연차 0.5%씩 감소(원본 엑셀 공식과 동일 가정).
  * 계약해지일이 있으면 그 이후 연차는 비워둔다.
  */
+// 대시보드: 발전소별 연차 표 — 연간보장공급량 / 실발전량(재생E공급량) / 초과발전량 / 합계 / 비교(합계−보장) / 이행여부
+// 연간보장공급량 = 등록값(없으면 용량 × 보장시간(h/일) × 365), n년차 = 1년차 × (1 − 연간효율감소)^(n−1)
 function rebuildDashboard_() {
   const master = getMaster_();
-  const perfRows = sheetToObjects_(getSheet_(SHEET_PERFORMANCE));
+  const act = monthlyActuals_();
   const dashSheet = getSheet_(SHEET_DASHBOARD);
+  const now = new Date(), curYm = ymKey_({ y: now.getFullYear(), m: now.getMonth() + 1 });
 
   dashSheet.getCharts().forEach(c => dashSheet.removeChart(c));
   dashSheet.clear();
-
-  const header = ["발전소명", "계약용량", "발전보장시간", "구분"].concat(
-    Array.from({ length: DASHBOARD_YEARS }, (_, i) => (i + 1) + "차년도")
-  );
+  const header = ["발전소명", "계약용량", "발전보장시간", "구분"].concat(Array.from({ length: DASHBOARD_YEARS }, (_, i) => (i + 1) + "차년도"));
   dashSheet.getRange(1, 1, 1, header.length).setValues([header]).setFontWeight("bold");
   dashSheet.setFrozenRows(1);
 
   const cumulativeByPlant = {};
+  const LABELS = ["연간보장공급량", "실발전량(재생E공급량)", "초과발전량", "합계", "비교(합계−보장)", "이행여부"];
   let row = 2;
   Object.keys(master).forEach(plant => {
     const m = master[plant];
     const capacity = Number(m["계약용량"]) || 0;
     const hours = Number(m["발전보장시간"]) || DEFAULT_GUARANTEE_HOURS;
+    const decline = (m["연간효율감소"] === "" || m["연간효율감소"] == null) ? 0.5 : Number(m["연간효율감소"]) || 0;
     const startYm = parseYearMonth_(m["계약일자"]);
+    let years = Math.round(Number(m["계약기간"]) || 0);
     const endYm = parseYearMonth_(m["계약해지일"]);
-    const perfForPlant = perfRows.filter(p => p["발전소명"] === plant);
-    cumulativeByPlant[plant] = perfForPlant.reduce((s, p) => s + (Number(p["공급량"]) || 0), 0);
+    if (!years && startYm && endYm) years = Math.max(1, Math.round(((endYm.y - startYm.y) * 12 + (endYm.m - startYm.m) + 1) / 12));
+    if (!years) years = DASHBOARD_YEARS;
+    const g1 = Number(m["연간보장공급량"]) > 0 ? Number(m["연간보장공급량"]) : capacity * hours * 365;
+    const monthly = act[plant] || {};
+    cumulativeByPlant[plant] = Object.keys(monthly).reduce((s, ym) => s + monthly[ym].total, 0);
 
-    const guaranteeRow = [], actualRow = [], diffRow = [];
-    let yearlyExpected = capacity * hours * 365;
+    const rowsOut = LABELS.map(() => []);
     for (let y = 1; y <= DASHBOARD_YEARS; y++) {
-      if (y > 1) yearlyExpected = yearlyExpected - yearlyExpected * 0.005;
-      if (!startYm || !capacity) { guaranteeRow.push(""); actualRow.push(""); diffRow.push(""); continue; }
-      const windowStart = addMonths_(startYm, (y - 1) * 12);
-      if (endYm && ymKey_(windowStart) > ymKey_(endYm)) { guaranteeRow.push(""); actualRow.push(""); diffRow.push(""); continue; }
-      const windowEnd = addMonths_(startYm, y * 12 - 1);
-      const inWindow = perfForPlant.filter(p => {
-        const ym = String(p["정산월"]);
-        return ym >= ymKey_(windowStart) && ym <= ymKey_(windowEnd);
-      });
-      const actualY = inWindow.length ? inWindow.reduce((s, p) => s + (Number(p["공급량"]) || 0), 0) : "";
-      guaranteeRow.push(Math.round(yearlyExpected));
-      actualRow.push(actualY === "" ? "" : Math.round(actualY));
-      diffRow.push(actualY === "" ? "" : Math.round(yearlyExpected - actualY));
+      if (!startYm || !g1 || y > years) { rowsOut.forEach(r => r.push("")); continue; }
+      const guar = g1 * Math.pow(1 - decline / 100, y - 1);
+      const ws = ymKey_(addMonths_(startYm, (y - 1) * 12)), we = ymKey_(addMonths_(startYm, y * 12 - 1));
+      let supply = 0, total = 0, has = false;
+      Object.keys(monthly).forEach(ym => { if (ym >= ws && ym <= we) { supply += monthly[ym].supply; total += monthly[ym].total; has = true; } });
+      const state = we < curYm ? "ended" : (ws > curYm ? "future" : "current");
+      let status = "예정";
+      if (state === "ended") status = total >= guar ? "달성" : "미달";
+      else if (state === "current") status = total >= guar ? "달성" : "진행중";
+      rowsOut[0].push(Math.round(guar));
+      rowsOut[1].push(has ? Math.round(supply) : "");
+      rowsOut[2].push(has ? Math.round(total - supply) : "");
+      rowsOut[3].push(has ? Math.round(total) : "");
+      rowsOut[4].push(has ? Math.round(total - guar) : "");
+      rowsOut[5].push(status);
     }
+    const n = LABELS.length;
+    dashSheet.getRange(row, 1, n, 4).setValues(LABELS.map((l, i) => i === 0 ? [plant, capacity, hours, l] : ["", "", "", l]));
+    dashSheet.getRange(row, 5, n, DASHBOARD_YEARS).setValues(rowsOut);
+    [1, 2, 3].forEach(c => dashSheet.getRange(row, c, n, 1).mergeVertically());
+    // 이행여부 색상: 달성 초록 / 미달 빨강
+    const statusRange = dashSheet.getRange(row + n - 1, 5, 1, DASHBOARD_YEARS);
+    statusRange.setBackgrounds([rowsOut[5].map(s => s === "달성" ? "#E3F3EA" : (s === "미달" ? "#FBE3E1" : null))]);
+    dashSheet.getRange(row + n - 1, 1, 1, 4 + DASHBOARD_YEARS).setBorder(null, null, true, null, null, null);
 
-    dashSheet.getRange(row, 1, 3, 4).setValues([
-      [plant, capacity, hours, "연간보장공급량"],
-      ["", "", "", "실제공급량"],
-      ["", "", "", "차이"]
-    ]);
-    dashSheet.getRange(row, 5, 1, DASHBOARD_YEARS).setValues([guaranteeRow]);
-    dashSheet.getRange(row + 1, 5, 1, DASHBOARD_YEARS).setValues([actualRow]);
-    dashSheet.getRange(row + 2, 5, 1, DASHBOARD_YEARS).setValues([diffRow]);
-    dashSheet.getRange(row, 1, 3, 1).mergeVertically();
-    dashSheet.getRange(row, 2, 3, 1).mergeVertically();
-    dashSheet.getRange(row, 3, 3, 1).mergeVertically();
-
-    const chart = dashSheet.newChart()
-      .asColumnChart()
+    const chart = dashSheet.newChart().asColumnChart()
       .addRange(dashSheet.getRange(1, 5, 1, DASHBOARD_YEARS))
       .addRange(dashSheet.getRange(row, 5, 1, DASHBOARD_YEARS))
-      .addRange(dashSheet.getRange(row + 1, 5, 1, DASHBOARD_YEARS))
+      .addRange(dashSheet.getRange(row + 3, 5, 1, DASHBOARD_YEARS))
       .setTransposeRowsAndColumns(true)
       .setPosition(row, header.length + 2, 0, 0)
-      .setOption("title", plant + " - 연간보장 vs 실제 공급량")
+      .setOption("title", plant + " - 연간보장공급량 vs 실적(재생E공급량+초과발전량)")
       .setOption("legend", { position: "top" })
       .build();
     dashSheet.insertChart(chart);
-
-    row += 3;
+    row += n;
   });
-
   return cumulativeByPlant;
+}
+
+// 시트를 직접 고치면 대시보드를 다시 만든다 (setupSheets 실행 시 설치되는 편집 트리거)
+function onSheetEdit(e) {
+  const name = e && e.range ? e.range.getSheet().getName() : "";
+  if ([SHEET_YEARLY_GRID, SHEET_PERFORMANCE, SHEET_MASTER].indexOf(name) < 0) return;
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(20000)) return;
+  try { rebuildDashboard_(); } finally { lock.releaseLock(); }
+}
+function installEditTrigger_() {
+  const exists = ScriptApp.getProjectTriggers().some(t => t.getHandlerFunction() === "onSheetEdit");
+  if (!exists) ScriptApp.newTrigger("onSheetEdit").forSpreadsheet(SHEET_ID).onEdit().create();
+}
+
+// 편집기에서 수동 실행: 실적그리드를 월별실적로그의 실적(재생E공급량+초과발전량)으로 다시 채운다. (그리드 수동 수정값은 덮어씀)
+function refillYearlyGrid() {
+  const sheet = getYearlyGridSheet_(), master = getMaster_();
+  const rows = sheetToObjects_(getSheet_(SHEET_PERFORMANCE));
+  Object.keys(master).forEach(plant => {
+    const startYm = parseYearMonth_(master[plant]["계약일자"]);
+    if (!startYm) return;
+    const start = ensurePlantBlock_(sheet, plant, master[plant]);
+    rows.filter(r => String(r["발전소명"]).trim() === plant).forEach(r => {
+      const pos = findYearPos_(startYm, r["정산월"]);
+      if (pos) sheet.getRange(start + 2 + (pos.k - 1), 2 + pos.pos).setValue(Math.max(Number(r["발전량"]) || 0, Number(r["공급량"]) || 0));
+    });
+  });
+  rebuildDashboard_();
 }
 
 /* ============ 실적그리드 (발전소별 연차 x 월 실적, 수동 보정 가능) ============
  * "실적그리드" 탭에 발전소마다 23행짜리 블록을 아래로 쌓는다:
  *   R      : 타이틀 ("{발전소명} (계약용량 {kW} kW)", A:M 병합)
  *   R+1    : 헤더 (A="연차", B~M="1월"~"12월")
- *   R+2~21 : 연차 1~20 데이터 행 (A=연차 번호, B~M=해당 연차 1~12번째 달 공급량)
+ *   R+2~21 : 연차 1~20 데이터 행 (A=연차 번호, B~M=해당 연차 1~12번째 달 실적 = 재생E공급량 + 초과발전량)
  *   R+22   : 빈 줄(다음 블록과 구분)
  * 업로드 시에는 해당 월 셀 하나만 덮어써서, 시트에서 수동으로 고친 다른 셀은 보존한다.
  * 정산서의 "실제 공급량 누계"는 이 그리드를 읽어서 계산한다(js/invoice.js의 buildGuaranteeSchedule).
@@ -495,7 +562,7 @@ function ensurePlantBlock_(sheet, plant, m) {
     const history = sheetToObjects_(getSheet_(SHEET_PERFORMANCE)).filter(r => r["발전소명"] === plant);
     history.forEach(r => {
       const pos = findYearPos_(startYm, r["정산월"]);
-      if (pos) sheet.getRange(start + 2 + (pos.k - 1), 2 + pos.pos).setValue(Number(r["공급량"]) || 0);
+      if (pos) sheet.getRange(start + 2 + (pos.k - 1), 2 + pos.pos).setValue(Math.max(Number(r["발전량"]) || 0, Number(r["공급량"]) || 0));
     });
   }
 

@@ -172,7 +172,8 @@ function prepareGroup(err, warn) {
   const app = $("groupSel").value, g = billState.kpx.groups[app];
   const customer = Registry.customerByApp(app, g.month);
   const nContracts = Registry.contractsOfApp(app).length;
-  if (customer && nContracts > 1) warn.push(`신청번호 ${app} 에 계약이 ${nContracts}건 있어 ${customer.contractId} 계약의 단가·정보로 계산했습니다.`);
+  const priceSplits = Registry.priceSplits(app, g.month); // 그 달 유효 계약이 여러 건이면 전력량요금을 계약별 단가로
+  if (priceSplits && priceSplits.some(x => !(x.unitPrice > 0))) err.push(`신청번호 ${app} 의 계약 중 계약단가가 비어 있는 계약이 있습니다: ${priceSplits.filter(x => !(x.unitPrice > 0)).map(x => x.id).join(", ")}`);
   if (!customer) err.push(`신청번호 ${app} 에 해당하는 전기사용자 계약이 없습니다. [정산관리 > 계약관리]에서 등록하세요.`);
   const unreg = Object.keys(g.plants).filter(p => { const i = Registry.plantInfo(p); return !i || !i.region; });
   if (unreg.length) err.push("등록되지 않았거나 지역이 비어 있는 발전소: " + unreg.join(", ") + " → [정산관리 > 계약관리]에서 등록하세요.");
@@ -193,7 +194,7 @@ function prepareGroup(err, warn) {
     days.forEach(d => { d.usage = d.kpxUsage; });
     warn.push("고객 사용량 파일이 없어 KPX 파일의 전기사용량으로 표시했습니다. (공급량·금액에는 영향 없음)");
   }
-  return { app, g, customer, rates, plants, days };
+  return { app, g, customer, rates, plants, days, priceSplits };
 }
 // 공급량 = KPX 재생E공급량 (가정산·오차정산 공통), 초과발전량 = 발전량 − 공급량
 function matchKpx(P, warn) {
@@ -211,7 +212,7 @@ function runCalc() {
     if (err.length) { out.innerHTML = noticeHtml(err, "bad"); return; }
     const match = matchKpx(P, warn);
     const ctx = {
-      unitPrice: P.customer.unitPrice, demandRegion: P.customer.demandRegion, plants: P.plants,
+      unitPrice: P.customer.unitPrice, priceSplits: P.priceSplits, demandRegion: P.customer.demandRegion, plants: P.plants,
       confirmedSurcharge: { taxable: Number($("cs_taxable").value) || 0, exempt: Number($("cs_exempt").value) || 0 },
       prevDiff: { taxable: Number($("pd_taxable").value) || 0, exempt: Number($("pd_exempt").value) || 0 },
       penalty: typeof penaltyDueGroup === "function" ? penaltyDueGroup(P.app, P.g.month) : null
@@ -242,7 +243,9 @@ function invoiceHtml(R) {
         return `<tr><td>${l}</td><td class="num">${kwhStr(b.usage)}</td><td class="num">${kwhStr(b.supply)}</td><td class="num">${kwhStr(b.deficitSimple)}</td><td class="num">${kwhStr(b.deficitLoss)}</td></tr>`; }).join("")}
       <tr class="total"><td>계</td><td class="num">${kwhStr(match.totals.usage)}</td><td class="num">${kwhStr(match.totals.supply)}</td><td class="num">${kwhStr(match.totals.deficitSimple)}</td><td class="num">${kwhStr(match.totals.deficitLoss)}</td></tr></table>
     <table class="doc-table"><tr><th>항목</th><th>금액</th><th>산출근거</th></tr>
-      ${row("전력량요금", won(inv.energy), `${kwhStr(inv.supplyTotal)} × ${ctx.unitPrice} 원/kWh`)}
+      ${row("전력량요금", won(inv.energy), inv.energyParts.length > 1
+        ? inv.energyParts.map(x => `${esc(x.id)} ${kwhStr(x.kwh)} × ${x.unitPrice} 원/kWh = ${x.amount.toLocaleString()}원`).join("<br>")
+        : `${kwhStr(inv.supplyTotal)} × ${ctx.unitPrice} 원/kWh`)}
       ${row("송배전용 전기설비 이용요금(망이용요금)", won(inv.netTotal), "발전소별 합계 (아래 상세)")}
       ${row("거래수수료", won(inv.fee), `${kwhStr(inv.supplyTotal)} × ${rates.tradeFee} 원/kWh`)}
       ${row(prevM + "월 확정 부가정산금 (과세)", won(inv.confirmedSurcharge.taxable), "전월 오차 정산서")}
@@ -287,7 +290,7 @@ function exportBillExcel() {
     ["직접PPA 전력거래대금 청구서", R.month], ["수요기업", R.customer.name], [],
     ["구분", "전기사용량", "공급량", "부족(단순)", "부족(손실률)"],
     ...["경부하", "중간부하", "최대부하"].map(l => { const b = match.byLoad[l] || {}; return [l, b.usage || 0, b.supply || 0, b.deficitSimple || 0, b.deficitLoss || 0]; }), [],
-    ["항목", "금액"], ["전력량요금", inv.energy], ["망이용요금", inv.netTotal], ["거래수수료", inv.fee],
+    ["항목", "금액"], ["전력량요금", inv.energy], ...(inv.energyParts.length > 1 ? inv.energyParts.map(x => ["  " + x.id + " (" + Math.round(x.kwh) + " kWh × " + x.unitPrice + ")", x.amount]) : []), ["망이용요금", inv.netTotal], ["거래수수료", inv.fee],
     ["전월 확정 부가정산금(과세)", inv.confirmedSurcharge.taxable], ["전월 차액(과세)", inv.prevDiff.taxable],
     ["공급가액", inv.supplyAfter], ["부가가치세", inv.vatTotal], ["세금계산서 계", inv.taxInvoice],
     ["전월 확정 부가정산금(비과세)", inv.confirmedSurcharge.exempt], ["예상 부가정산금(참고)", inv.expectedSurcharge],
@@ -350,7 +353,7 @@ function runTrueUp() {
     if (!prov) err.push("가정산 값(공급량·전력량요금·망이용요금·거래수수료)을 모두 입력하세요.");
     if (err.length) { out.innerHTML = noticeHtml(err, "bad"); return; }
     const match = matchKpx(P, warn);
-    const conf = Engine.invoice(match, { unitPrice: P.customer.unitPrice, demandRegion: P.customer.demandRegion, plants: P.plants }, P.rates);
+    const conf = Engine.invoice(match, { unitPrice: P.customer.unitPrice, priceSplits: P.priceSplits, demandRegion: P.customer.demandRegion, plants: P.plants }, P.rates);
     const diff = Engine.trueUpDiff(prov, conf);
     setVal("pd_taxable", diff.taxable); // 비교 결과로 채움 (직접 고친 값은 다시 계산하면 덮어씀)
     billState.result = { mode: "trueup", app: P.app, month: P.g.month, customer: P.customer, rates: P.rates, match, conf, prov, diff, warn };
@@ -387,7 +390,7 @@ function trueUpHtml(R) {
       <tr class="total"><td>계</td><td class="num">${kwhStr(match.totals.usage)}</td><td class="num">${kwhStr(match.totals.supply)}</td><td class="num">${kwhStr(match.totals.deficitSimple)}</td><td class="num">${kwhStr(match.totals.deficitLoss)}</td></tr></table>
     <table class="doc-table"><tr><th>항목</th><th>가정산</th><th>확정</th><th>차액 (확정 − 가정산)</th></tr>
       ${cmp("공급량", prov.supplyTotal, conf.supplyTotal, diff.supply, " kWh")}
-      ${cmp(`전력량요금 (${c.unitPrice} 원/kWh)`, prov.energy, conf.energy, diff.energy, " 원")}
+      ${cmp(`전력량요금 (${conf.energyParts.length > 1 ? conf.energyParts.map(x => `${esc(x.id)} ${x.unitPrice}`).join(" / ") : c.unitPrice} 원/kWh)`, prov.energy, conf.energy, diff.energy, " 원")}
       ${cmp("송배전용 전기설비 이용요금", prov.netTotal, conf.netTotal, diff.net, " 원")}
       ${cmp(`거래수수료 (${rates.tradeFee} 원/kWh)`, prov.fee, conf.fee, diff.fee, " 원")}
       <tr class="total"><td class="label">계 (과세)</td><td class="num">${won(provSum)}</td><td class="num">${won(confSum)}</td><td class="num">${sign(diff.taxable)} 원</td></tr></table>

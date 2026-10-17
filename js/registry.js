@@ -120,6 +120,14 @@ const Registry = (function () {
   const contractsOfApp = app => customers.filter(x => str(x["KPX신청번호"]) === str(app));
   const customerByKey = key => customers.find(x => custKey(x) === str(key)) || null;
   function groups() { const out = []; customers.forEach(c => { const a = str(c["KPX신청번호"]); if (a && !out.includes(a)) out.push(a); }); return out; }
+  // 그 달(YYYYMM)에 유효한 계약과 계약용량 비율 → 정산서 전력량요금을 계약별 단가로 나눌 때 사용
+  function priceSplits(app, month) {
+    const ms = `${month.slice(0, 4)}-${month.slice(4)}-01`, me = `${month.slice(0, 4)}-${month.slice(4)}-31`;
+    const act = contractsOfApp(app).filter(c => (!str(c["계약일자"]) || str(c["계약일자"]) <= me) && (!str(c["계약해지일"]) || str(c["계약해지일"]) >= ms));
+    if (act.length <= 1) return null;
+    const tot = act.reduce((t, c) => t + (Number(c["계약용량"]) || 0), 0);
+    return act.map(c => ({ id: custKey(c), unitPrice: Number(c["계약단가"]), share: tot > 0 ? (Number(c["계약용량"]) || 0) / tot : 1 / act.length }));
+  }
   // 정산서용: 그 달에 유효한 계약 우선 (없으면 첫 계약)
   function customerByApp(app, month) {
     const list = contractsOfApp(app); if (!list.length) return null;
@@ -142,7 +150,7 @@ const Registry = (function () {
     if (r.ok) await load();
     return r;
   }
-  return { load, plants, rawCustomers, plantInfo, customerByApp, customerByKey, contractsOfApp, custKey, groups, plantsOfGroup, save, remove, isLoaded: () => loaded };
+  return { load, plants, rawCustomers, plantInfo, customerByApp, customerByKey, contractsOfApp, custKey, groups, priceSplits, plantsOfGroup, save, remove, isLoaded: () => loaded };
 })();
 
 /* ---------- 화면: 정산관리 > 계약관리 (전기사용자 / 발전사업자 / 그룹화) ---------- */

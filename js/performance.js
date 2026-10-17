@@ -1,7 +1,7 @@
 /* ============ 계약관리 > 계약이행현황 (전기사용자 / 발전사업자) ============
  * 연차별 연간보장공급량 = 1년차 보장량 × (1 − 연간효율감소)^(연차−1)
  *   1년차 보장량 = 등록된 연간보장공급량 (없으면 계약용량 × 보장시간으로 계산)
- * 연차 실적 = 실발전량(공급량) + 초과발전량(발전량 − 공급량)  ← 월별실적로그(가정산 업로드 때 기록)를 날짜 비율로 연차에 배분
+ * 연차 실적 = 실발전량(재생E공급량) + 초과발전량  ← GAS getPerformanceAll (월별실적로그 + 실적그리드 수동값 우선), 연차 = 계약 시작월부터 12개월
  *   발전사업자 = 그 발전소, 전기사용자 = 그룹(KPX 신청번호) 발전소 합계
  *   같은 신청번호에 계약이 여러 건이면 그 달에 유효한 계약끼리 계약용량 비율로 나눈다
  * 미달량 = 보장량 − 실적 (종료된 연차), 미달 위약금 = 미달량 × 연차 기간 가중평균 REC 단가 (js/market.js). 해지 위약금은 방식 정리 후 추가
@@ -58,16 +58,21 @@ function contractOf(kind, key) {
   };
 }
 
+const monthOffset = (ym, n) => { const t = Number(ym.slice(0, 4)) * 12 + Number(ym.slice(4)) - 1 + n; return `${Math.floor(t / 12)}${String(t % 12 + 1).padStart(2, "0")}`; };
+
 function yearSchedule(c, byPlant) {
   if (!c || !YMD.test(c.start) || !(c.years > 0) || !(c.g1 > 0)) return null;
   const today = todayYmd(), out = [];
   for (let i = 1; i <= c.years; i++) {
     const s = addMonthsYmd(c.start, 12 * (i - 1), 0), e = addMonthsYmd(c.start, 12 * i, -1);
     const guar = c.g1 * Math.pow(1 - c.decline / 100, i - 1);
-    let supply = 0, gen = 0; const weights = {}; // weights: 월 발전량 (가중평균 REC 용)
+    // 연차의 달 = 계약 시작월부터 12개월 (시트 실적그리드와 같은 기준)
+    const sm = c.start.slice(0, 4) + c.start.slice(5, 7), lo = monthOffset(sm, 12 * (i - 1)), hi = monthOffset(sm, 12 * i - 1);
+    let supply = 0, gen = 0; const weights = {}; // weights: 월 실적 (가중평균 REC 용)
     c.plants.forEach(p => Object.entries(byPlant[p] || {}).forEach(([ym, v]) => {
+      if (ym < lo || ym > hi) return;
       const sh = c.shareOf(ym); weights[ym] = (weights[ym] || 0) + v.gen * sh;
-      const f = overlapFrac(ym, s, e) * sh; if (f > 0) { supply += v.supply * f; gen += v.gen * f; }
+      supply += v.supply * sh; gen += v.gen * sh;
     }));
     const excess = gen - supply, actual = supply + excess;
     const state = e < today ? "ended" : (s > today ? "future" : "current");
@@ -76,7 +81,7 @@ function yearSchedule(c, byPlant) {
     let status = "예정";
     if (state === "ended") status = met ? "달성" : "미달";
     else if (state === "current") status = met ? "달성" : (remain <= PERF_ALERT_DAYS ? "미달 위험" : "진행중");
-    const rec = state === "ended" && !met && typeof weightedRec === "function" ? weightedRec(s, e, weights) : null; // 원/REC
+    const rec = state === "ended" && !met && typeof weightedRecMonths === "function" ? weightedRecMonths(lo, hi, weights) : null; // 원/REC
     const penalty = rec != null ? Math.round(short * rec / 1000) : 0; // 1 REC = 1MWh
     out.push({ n: i, s, e, guar, rec, recMissing: state === "ended" && !met && rec == null, supply, excess, actual, ratio: guar ? actual / guar - 1 : 0, short: state === "ended" ? short : 0,
       state, status, totalDays, remain, penalty, penaltyMonth: e.slice(0, 4) + e.slice(5, 7) });

@@ -326,7 +326,7 @@ async function buildInvoiceSheet(workbook, ws, plant, meta, grid){
   ws.getCell(31,11).value = Number(m["계약용량"]) || 0;
 
   xSection(ws,33,33+schedule.length,"연간\n보장\n공급량");
-  xLabel(ws,33,3,"회차"); xLabel(ws,33,4,"예상 공급량"); xLabel(ws,33,5,"실제 공급량 누계"); xLabel(ws,33,6,"미달 공급량"); xLabel(ws,33,7,"미달 구매량"); xLabel(ws,33,8,"비고");
+  xLabel(ws,33,3,"회차"); xLabel(ws,33,4,"예상 공급량"); xLabel(ws,33,5,"실적 누계 (공급+초과)"); xLabel(ws,33,6,"미달 공급량"); xLabel(ws,33,7,"미달 구매량"); xLabel(ws,33,8,"비고");
   ["1월","2월","3월","4월","5월","6월","7월","8월","9월","10월","11월","12월"].forEach((mn,i)=> xLabel(ws,33,11+i,mn));
 
   const guaranteeHours = Number(m["발전보장시간"]) || DEFAULT_GUARANTEE_HOURS;
