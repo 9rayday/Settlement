@@ -125,7 +125,7 @@ function renderPerfPage(kind) {
           const head = `<td><b>${rEsc(c.name)}</b><div class="perf-sub">${sub}</div></td>`;
           if (!ys) return `<tr class="perf-row" data-key="${rEsc(c.key)}">${head}<td colspan="9"><span class="tag bad">계약정보 부족</span></td></tr>`;
           const y = pick(item);
-          const period = `<td class="num">${c.cap ? c.cap.toLocaleString() : "-"}</td><td class="num">${c.decline}%</td><td>${c.years}년<div class="perf-sub"><span class="nw">${c.start}</span> ~ <span class="nw">${ys[ys.length - 1].e}</span></div></td>`;
+          const period = `<td class="num">${c.cap ? fmtKw(c.cap) : "-"}</td><td class="num">${c.decline}%</td><td>${c.years}년<div class="perf-sub"><span class="nw">${c.start}</span> ~ <span class="nw">${ys[ys.length - 1].e}</span></div></td>`;
           if (!y) return `<tr class="perf-row" data-key="${rEsc(c.key)}">${head}${period}<td colspan="6" class="hint">${sel ? "계약기간 밖" : (ys[0].state === "future" ? "시작 전" : "계약 종료")}</td></tr>`;
           const left = y.state === "current" ? y.remain / y.totalDays : (y.state === "future" ? 1 : 0);
           const bar = y.state === "current" ? `<div class="perf-bar"><span style="width:${(left * 100).toFixed(1)}%"></span></div><div class="perf-sub">D-${y.remain} · <span class="nw">${y.s}</span> ~ <span class="nw">${y.e}</span></div>`
