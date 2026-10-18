@@ -274,39 +274,8 @@ function getPerformanceMonth_(month) {
 }
 
 /* ============ 실적 (월별실적로그 + 실적그리드) ============
- * 실적 = 실발전량(재생E공급량) + 초과발전량 (= 발전량). 실적그리드에 이 값을 기록한다.
- * 실적그리드 칸을 시트에서 직접 고치면 그 값이 실적으로 우선 쓰인다 (웹 화면·대시보드 모두).
- * 실발전량(공급량)은 월별실적로그 값, 초과발전량 = 실적 − 실발전량.
+ * 실적 = 발전량 = 공급량(재생E공급량) + 초과발전량. 실적그리드(시트에서 고친 값 우선)와 월별실적로그를 합쳐 쓴다 — monthlyActuals_ 는 실적그리드 부분에 있다.
  */
-// {발전소: {YYYYMM: {supply, total}}}
-function monthlyActuals_() {
-  const master = getMaster_();
-  const out = {};
-  sheetToObjects_(getSheet_(SHEET_PERFORMANCE)).forEach(r => {
-    const plant = String(r["발전소명"]).trim(), ym = String(r["정산월"]);
-    if (!plant || !/^\d{6}$/.test(ym)) return;
-    const gen = Number(r["발전량"]) || 0, supply = Number(r["공급량"]) || 0;
-    (out[plant] || (out[plant] = {}))[ym] = { supply: supply, total: Math.max(gen, supply) };
-  });
-  // 실적그리드 수동 값 우선
-  const sheet = getYearlyGridSheet_();
-  Object.keys(master).forEach(plant => {
-    const startYm = parseYearMonth_(master[plant]["계약일자"]);
-    const start = findPlantBlockRow_(sheet, plant);
-    if (!startYm || !start) return;
-    const values = sheet.getRange(start + 2, 2, 20, 12).getValues();
-    values.forEach((row, k) => row.forEach((v, pos) => {
-      if (v === "" || v === null || isNaN(Number(v))) return;
-      const ym = ymKey_(addMonths_(startYm, k * 12 + pos));
-      const cell = (out[plant] || (out[plant] = {}))[ym] || { supply: 0, total: 0 };
-      cell.total = Number(v);
-      if (cell.supply > cell.total) cell.supply = cell.total;
-      out[plant][ym] = cell;
-    }));
-  });
-  return out;
-}
-
 // 웹 화면용: 월별 실적 (generation = 실적 합계, supply = 실발전량)
 function getPerformanceAll_() {
   const act = monthlyActuals_(), rows = [];
@@ -351,21 +320,20 @@ function saveAdjustments_(body) {
 function logPerformance_(body) {
   const sheet = getSheet_(SHEET_PERFORMANCE);
   const rows = sheetToObjects_(sheet);
-  const now = new Date();
-  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const now = new Date(), month = String(body.month), updates = {};
   (body.rows || []).forEach(r => {
-    const found = rows.find(x => String(x["정산월"]) === String(body.month) && x["발전소명"] === r.plant);
-    const values = [body.month, r.plant, Number(r.generation) || 0, Number(r.supply) || 0, Number(r.excess) || 0, now];
-    if (found) {
-      sheet.getRange(found._row, 1, 1, values.length).setValues([values]);
-    } else {
-      sheet.appendRow(values);
-    }
-    // 실적그리드는 이 월의 셀 하나만 갱신한다 — 수동으로 보정해둔 다른 셀은 건드리지 않는다.
-    upsertYearlyGridCell_(ss, r.plant, body.month, Math.max(Number(r.generation) || 0, Number(r.supply) || 0)); // 실적 = 재생E공급량 + 초과발전량
+    const plant = trimName_(r.plant); if (!plant) return;
+    const gen = Number(r.generation) || 0, supply = Number(r.supply) || 0;
+    const excess = r.excess != null ? Number(r.excess) || 0 : gen - supply;
+    const found = rows.find(x => String(x["정산월"]) === month && trimName_(x["발전소명"]) === plant);
+    const values = [month, plant, gen, supply, excess, now];
+    if (found) sheet.getRange(found._row, 1, 1, values.length).setValues([values]);
+    else { sheet.appendRow(values); rows.push({ "정산월": month, "발전소명": plant, _row: sheet.getLastRow() }); }
+    updates[plant] = { gen: Math.max(gen, supply), supply: supply };
   });
+  refreshGrid_(month, updates); // 실적그리드: 이 달만 새 값, 시트에서 고친 다른 달은 유지
   const cumulative = rebuildDashboard_();
-  return { logged: (body.rows || []).length, cumulative: cumulative };
+  return { logged: Object.keys(updates).length, cumulative: cumulative };
 }
 
 /* ============ 앱데이터 (수요기업 청구 모듈: 월별 요율/발전소/계약/이월값을 JSON 으로 저장) ============
@@ -512,122 +480,188 @@ function resetAllData() {
   rebuildDashboard_();
 }
 
-// 편집기에서 수동 실행: 실적그리드를 월별실적로그의 실적(재생E공급량+초과발전량)으로 다시 채운다. (그리드 수동 수정값은 덮어씀)
-function refillYearlyGrid() {
-  const sheet = getYearlyGridSheet_(), master = getMaster_();
-  const rows = sheetToObjects_(getSheet_(SHEET_PERFORMANCE));
-  Object.keys(master).forEach(plant => {
-    const startYm = parseYearMonth_(master[plant]["계약일자"]);
-    if (!startYm) return;
-    const start = ensurePlantBlock_(sheet, plant, master[plant]);
-    rows.filter(r => String(r["발전소명"]).trim() === plant).forEach(r => {
-      const pos = findYearPos_(startYm, r["정산월"]);
-      if (pos) sheet.getRange(start + 2 + (pos.k - 1), 2 + pos.pos).setValue(Math.max(Number(r["발전량"]) || 0, Number(r["공급량"]) || 0));
-    });
-  });
-  rebuildDashboard_();
-}
-
-/* ============ 실적그리드 (발전소별 연차 x 월 실적, 수동 보정 가능) ============
- * "실적그리드" 탭에 발전소마다 23행짜리 블록을 아래로 쌓는다:
- *   R      : 타이틀 ("{발전소명} (계약용량 {kW} kW)", A:M 병합)
- *   R+1    : 헤더 (A="연차", B~M="1월"~"12월")
- *   R+2~21 : 연차 1~20 데이터 행 (A=연차 번호, B~M=해당 연차 1~12번째 달 실적 = 재생E공급량 + 초과발전량)
- *   R+22   : 빈 줄(다음 블록과 구분)
- * 업로드 시에는 해당 월 셀 하나만 덮어써서, 시트에서 수동으로 고친 다른 셀은 보존한다.
- * 정산서의 "실제 공급량 누계"는 이 그리드를 읽어서 계산한다(js/invoice.js의 buildGuaranteeSchedule).
+/* ============ 실적그리드 (발전소별 연차 × 월: 발전량 · 공급량 · 초과발전량) ============
+ * 발전소마다 블록을 아래로 쌓는다 (A~N, 14열):
+ *   제목  : "{발전소} | 시작 YYYY-MM | N년차 | 계약용량 X kW"   (A:N 병합)
+ *   헤더  : 연차 | 구분 | 1 … 12  (계약 시작월부터 n번째 달)
+ *   연차마다 3행: 발전량 / 공급량(재생E공급량) / 초과발전량(= 발전량 − 공급량, 수식)
+ *   빈 줄
+ * 시작월 = 계약일자. 계약일자가 없으면 첫 실적 연도 1월부터 기록해 두고, 나중에 계약일자를 넣으면 다음 갱신 때 자동 재배치된다.
+ * 업로드한 달만 새 값으로 덮어쓰고, 시트에서 직접 고친 다른 달 값은 그대로 둔다 (그리드 값이 월별실적로그보다 우선).
  */
+const GRID_YEARS_MAX = 20;
+const GRID_TITLE_RE = /^(.+) \| 시작 (\d{4})-(\d{2}) \| (\d+)년차/;
+const GRID_OLD_RE = /^(.+) \(계약용량 /; // 예전 형식 블록 (실적 합계 한 줄)
+
 function getYearlyGridSheet_() {
   const ss = SpreadsheetApp.openById(SHEET_ID);
   let sheet = ss.getSheetByName(SHEET_YEARLY_GRID);
   if (!sheet) sheet = ss.insertSheet(SHEET_YEARLY_GRID);
   return sheet;
 }
+const gridNum_ = v => (v === "" || v === null || v === undefined || isNaN(Number(v))) ? null : Number(v);
+const trimName_ = s => String(s == null ? "" : s).trim();
 
-function findPlantBlockRow_(sheet, plant) {
-  const lastRow = sheet.getLastRow();
-  if (lastRow < 1) return null;
-  const colA = sheet.getRange(1, 1, lastRow, 1).getValues();
-  const prefix = plant + " (";
-  for (let i = 0; i < colA.length; i++) {
-    if (String(colA[i][0]).indexOf(prefix) === 0) return i + 1;
-  }
-  return null;
-}
-
-// 계약일자(startYm) 기준으로 month(예: "202606")가 몇 차년도(k, 1~20)의 몇 번째 달(pos, 0~11)인지 계산.
-// 계약일자 이전이거나 20차년도를 넘어가면 null.
-function findYearPos_(startYm, month) {
-  if (!startYm) return null;
-  const ym = parseYearMonth_(month);
-  if (!ym) return null;
-  const totalMonths = (ym.y - startYm.y) * 12 + (ym.m - startYm.m);
-  if (totalMonths < 0) return null;
-  const k = Math.floor(totalMonths / 12) + 1;
-  if (k > 20) return null;
-  return { k: k, pos: totalMonths % 12 };
-}
-
-function ensurePlantBlock_(sheet, plant, m) {
-  const existing = findPlantBlockRow_(sheet, plant);
-  if (existing) return existing;
-
-  const lastRow = sheet.getLastRow();
-  const start = lastRow > 0 ? lastRow + 1 : 1;
-  const capacity = Number(m["계약용량"]) || 0;
-
-  sheet.getRange(start, 1, 1, 13).merge();
-  sheet.getRange(start, 1).setValue(`${plant} (계약용량 ${capacity} kW)`).setFontWeight("bold").setBackground("#ECECEC");
-
-  const headerRow = ["연차"].concat(Array.from({ length: 12 }, (_, i) => (i + 1) + "월"));
-  sheet.getRange(start + 1, 1, 1, 13).setValues([headerRow]).setFontWeight("bold");
-
-  const yearCol = Array.from({ length: 20 }, (_, i) => [i + 1]);
-  sheet.getRange(start + 2, 1, 20, 1).setValues(yearCol);
-
-  // 기존 월별실적로그에 이미 쌓인 과거 데이터로 최초 백필 (이후로는 upsertYearlyGridCell_이 셀 단위로만 갱신)
-  const startYm = parseYearMonth_(m["계약일자"]);
-  if (startYm) {
-    const history = sheetToObjects_(getSheet_(SHEET_PERFORMANCE)).filter(r => r["발전소명"] === plant);
-    history.forEach(r => {
-      const pos = findYearPos_(startYm, r["정산월"]);
-      if (pos) sheet.getRange(start + 2 + (pos.k - 1), 2 + pos.pos).setValue(Math.max(Number(r["발전량"]) || 0, Number(r["공급량"]) || 0));
-    });
-  }
-
-  return start;
-}
-
-function upsertYearlyGridCell_(ss, plant, month, supply) {
-  const master = getMaster_();
-  const m = master[plant];
-  if (!m) return; // 마스터에 없는 발전소명이면 연차 계산 불가 — 조용히 건너뜀
-  const startYm = parseYearMonth_(m["계약일자"]);
-  const pos = findYearPos_(startYm, month);
-  if (!pos) return;
-  const sheet = getYearlyGridSheet_();
-  const start = ensurePlantBlock_(sheet, plant, m);
-  sheet.getRange(start + 2 + (pos.k - 1), 2 + pos.pos).setValue(Number(supply) || 0);
-}
-
-function getYearlyGrid_(plant) {
-  const sheet = getYearlyGridSheet_();
-  const start = findPlantBlockRow_(sheet, plant);
-  if (!start) return {};
-  const values = sheet.getRange(start + 2, 2, 20, 12).getValues();
+// 시트에 적힌 값(수동 보정 포함): { 발전소: { YYYYMM: { gen, supply } } }
+function readGrid_(sheet, master) {
   const out = {};
-  values.forEach((row, i) => {
-    out[String(i + 1)] = row.map(v => (v === "" || v === null ? null : Number(v)));
+  const last = sheet.getLastRow();
+  if (last < 1) return out;
+  const values = sheet.getRange(1, 1, last, 14).getValues();
+  const put = (plant, ym, k, v) => { if (v == null) return; const p = out[plant] || (out[plant] = {}); (p[ym] || (p[ym] = {}))[k] = v; };
+  for (let i = 0; i < values.length; i++) {
+    const a = String(values[i][0]);
+    const nw = GRID_TITLE_RE.exec(a);
+    if (nw) {
+      const plant = trimName_(nw[1]), start = { y: Number(nw[2]), m: Number(nw[3]) }, years = Number(nw[4]);
+      for (let k = 0; k < years; k++) {
+        const g = values[i + 2 + 3 * k], s = values[i + 3 + 3 * k];
+        if (!g || !s) break;
+        for (let pos = 0; pos < 12; pos++) {
+          const ym = ymKey_(addMonths_(start, k * 12 + pos));
+          put(plant, ym, "gen", gridNum_(g[2 + pos])); put(plant, ym, "supply", gridNum_(s[2 + pos]));
+        }
+      }
+      i += 1 + 3 * years;
+      continue;
+    }
+    const old = GRID_OLD_RE.exec(a);
+    if (old) { // 예전 형식: 20연차 × 12달 실적 합계 → 발전량으로 옮긴다
+      const plant = trimName_(old[1]), start = master[plant] ? parseYearMonth_(master[plant]["계약일자"]) : null;
+      if (start) for (let k = 0; k < 20; k++) {
+        const row = values[i + 2 + k]; if (!row) break;
+        for (let pos = 0; pos < 12; pos++) put(plant, ymKey_(addMonths_(start, k * 12 + pos)), "gen", gridNum_(row[1 + pos]));
+      }
+      i += 21;
+    }
+  }
+  return out;
+}
+
+// 월별실적로그: { 발전소: { YYYYMM: { gen, supply } } }
+function readLog_() {
+  const out = {};
+  sheetToObjects_(getSheet_(SHEET_PERFORMANCE)).forEach(r => {
+    const plant = trimName_(r["발전소명"]), ym = String(r["정산월"]);
+    if (!plant || !/^\d{6}$/.test(ym)) return;
+    (out[plant] || (out[plant] = {}))[ym] = { gen: Number(r["발전량"]) || 0, supply: Number(r["공급량"]) || 0 };
   });
   return out;
 }
 
-// 편집기에서 수동 실행: 최초 롤아웃 시 모든 발전소의 실적그리드 블록을 월별실적로그 데이터로 채워준다.
-function backfillYearlyGrid() {
-  const sheet = getYearlyGridSheet_();
-  const master = getMaster_();
-  Object.keys(master).forEach(plant => ensurePlantBlock_(sheet, plant, master[plant]));
+// 그리드 값 우선, 비어 있는 칸은 로그 값으로
+function mergeActuals_(grid, log) {
+  const out = {};
+  [grid, log].forEach(src => Object.keys(src).forEach(p => { out[p] = out[p] || {}; }));
+  Object.keys(out).forEach(p => {
+    const yms = {}; Object.keys(grid[p] || {}).forEach(y => yms[y] = 1); Object.keys(log[p] || {}).forEach(y => yms[y] = 1);
+    Object.keys(yms).forEach(ym => {
+      const g = (grid[p] || {})[ym] || {}, l = (log[p] || {})[ym] || {};
+      const gen = g.gen != null ? g.gen : (l.gen != null ? l.gen : null), supply = g.supply != null ? g.supply : (l.supply != null ? l.supply : null);
+      if (gen == null && supply == null) return;
+      out[p][ym] = { gen: gen == null ? supply : gen, supply: supply == null ? 0 : supply };
+    });
+  });
+  return out;
 }
+
+function gridStart_(m, months) {
+  const s = m ? parseYearMonth_(m["계약일자"]) : null;
+  if (s) return { start: s, fromContract: true };
+  const first = Object.keys(months || {}).sort()[0];
+  return first ? { start: { y: Number(first.slice(0, 4)), m: 1 }, fromContract: false } : null;
+}
+function gridYears_(m, start, months) {
+  let n = m ? Math.round(Number(m["계약기간"]) || 0) : 0;
+  const lastYm = Object.keys(months || {}).sort().pop();
+  if (lastYm) { const need = Math.floor(((Number(lastYm.slice(0, 4)) - start.y) * 12 + (Number(lastYm.slice(4)) - start.m)) / 12) + 1; n = Math.max(n, need); }
+  return Math.min(GRID_YEARS_MAX, Math.max(1, n || 1));
+}
+
+// 시트 전체를 다시 쓴다 (발전소 마스터 순서 → 마스터에 없는 발전소는 뒤에, "마스터 미등록" 표시)
+function writeGrid_(sheet, master, data) {
+  const plants = Object.keys(master).concat(Object.keys(data).filter(p => !master[p]).sort());
+  const rows = [], blocks = [];
+  plants.forEach(plant => {
+    const m = master[plant], months = data[plant] || {};
+    const st = gridStart_(m, months);
+    if (!st) return; // 계약일자도 실적도 없으면 블록을 만들지 않는다
+    const years = gridYears_(m, st.start, months), cap = m ? Number(m["계약용량"]) || 0 : 0;
+    const top = rows.length + 1;
+    const title = `${plant} | 시작 ${st.start.y}-${String(st.start.m).padStart(2, "0")} | ${years}년차 | ` + (m ? `계약용량 ${cap} kW` : "마스터 미등록") + (st.fromContract ? "" : " | 계약일자 없음 (첫 실적 연도 기준)");
+    rows.push([title].concat(new Array(13).fill("")));
+    rows.push(["연차", "구분"].concat(Array.from({ length: 12 }, (_, i) => (i + 1) + "번째 달")));
+    for (let k = 0; k < years; k++) {
+      const a = addMonths_(st.start, k * 12), b = addMonths_(st.start, k * 12 + 11);
+      const label = `${k + 1}년차\n${a.y}.${String(a.m).padStart(2, "0")}~${b.y}.${String(b.m).padStart(2, "0")}`;
+      const gRow = [label, "발전량"], sRow = ["", "공급량"], eRow = ["", "초과발전량"];
+      const gr = rows.length + 1, sr = gr + 1;
+      for (let pos = 0; pos < 12; pos++) {
+        const v = months[ymKey_(addMonths_(st.start, k * 12 + pos))];
+        const col = String.fromCharCode(67 + pos); // C~N
+        gRow.push(v ? v.gen : ""); sRow.push(v ? v.supply : "");
+        eRow.push(`=IF(AND(${col}${gr}="",${col}${sr}=""),"",N(${col}${gr})-N(${col}${sr}))`);
+      }
+      rows.push(gRow, sRow, eRow);
+    }
+    rows.push(new Array(14).fill(""));
+    blocks.push({ top, years });
+  });
+  const old = sheet.getLastRow();
+  if (old > 0) { sheet.getRange(1, 1, old, Math.max(14, sheet.getLastColumn())).breakApart(); sheet.clear(); }
+  if (!rows.length) return;
+  sheet.getRange(1, 1, rows.length, 14).setValues(rows);
+  sheet.getRange(1, 3, rows.length, 12).setNumberFormat("#,##0.000");
+  blocks.forEach(b => {
+    sheet.getRange(b.top, 1, 1, 14).merge().setFontWeight("bold").setBackground("#D9D9D9");
+    sheet.getRange(b.top + 1, 1, 1, 14).setFontWeight("bold").setBackground("#F2F2F2");
+    for (let k = 0; k < b.years; k++) {
+      const r = b.top + 2 + 3 * k;
+      sheet.getRange(r, 1, 3, 1).merge().setVerticalAlignment("middle");
+      sheet.getRange(r + 2, 2, 1, 13).setBackground("#FFF8EC"); // 초과발전량(수식) 행
+    }
+  });
+}
+
+// 업로드한 달(updates: {발전소: {gen, supply}})만 새 값으로 바꿔 그리드를 다시 쓴다
+function refreshGrid_(month, updates) {
+  const sheet = getYearlyGridSheet_(), master = getMaster_();
+  const data = mergeActuals_(readGrid_(sheet, master), readLog_());
+  Object.keys(updates || {}).forEach(p => { (data[p] || (data[p] = {}))[month] = updates[p]; });
+  writeGrid_(sheet, master, data);
+  return data;
+}
+
+// 웹·대시보드용 실적: {발전소: {YYYYMM: {supply, total}}}  (total = 발전량 = 공급량 + 초과발전량)
+function monthlyActuals_() {
+  const data = mergeActuals_(readGrid_(getYearlyGridSheet_(), getMaster_()), readLog_());
+  const out = {};
+  Object.keys(data).forEach(p => Object.keys(data[p]).forEach(ym => {
+    const v = data[p][ym], total = Math.max(v.gen || 0, v.supply || 0);
+    (out[p] || (out[p] = {}))[ym] = { supply: Math.min(v.supply || 0, total), total };
+  }));
+  return out;
+}
+
+// 정산서 연간보장공급량용: {연차: [12달 실적 합계]} (계약일자 기준)
+function getYearlyGrid_(plant) {
+  const master = getMaster_(), m = master[plant];
+  const start = m ? parseYearMonth_(m["계약일자"]) : null;
+  if (!start) return {};
+  const act = monthlyActuals_()[plant] || {};
+  const out = {};
+  for (let k = 0; k < GRID_YEARS_MAX; k++) {
+    out[String(k + 1)] = Array.from({ length: 12 }, (_, pos) => { const v = act[ymKey_(addMonths_(start, k * 12 + pos))]; return v ? v.total : null; });
+  }
+  return out;
+}
+
+// 편집기에서 수동 실행: 실적그리드를 새 형식으로 다시 그린다 (시트에 고친 값 유지, 빈 칸은 월별실적로그로 채움)
+function refillYearlyGrid() {
+  refreshGrid_("", {});
+  rebuildDashboard_();
+}
+function backfillYearlyGrid() { refillYearlyGrid(); }
 
 /* ============ 로그인 · 계정 · 권한 (구글시트 "관리자" 탭) ============
  * 권한: 관리자(전체 + 계정관리) / 정산담당자(정산 발행·대금 수령·발전사업자 정산) / 실무담당자(계약 등록·수정). 빈칸 = 조회만.
