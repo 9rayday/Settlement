@@ -276,12 +276,25 @@ function runCalc() {
     const inv = Engine.invoice(match, ctx, P.rates);
     billState.result = { mode: "provisional", preview: P.preview, app: P.app, month: P.g.month, customer: P.customer, rates: P.rates, match, inv, ctx, loss: P.loss, note: $("bill_note").value.trim(), dueDate: $("dueDate").value };
     out.innerHTML = (P.preview ? previewNotice(err) : "") + noticeHtml(warn, "warn") + invoiceHtml(billState.result);
+    fitDocs(out);
     $("billActions").style.display = "flex";
     $("billSave").disabled = !!P.preview; // 미리보기는 저장 불가
   } catch (e) { out.innerHTML = `<div class="notice bad">계산 오류: ${esc(e.message)}</div>`; }
 }
 
 // 정산서 공통 (실무 엑셀 양식: 한 페이지 A4 — 로고 · 제목 · 고객정보 · 거래내역 · 청구내역 · 청구정보 · 서명)
+// A4 한 장 맞춤: 넘치면 글자 크기(--dfs)를 0.25px씩 줄이고(11px → 최소 7.5px), 남으면 행 간격(--dpad)을 늘려 고르게 채운다
+function fitDocs(root) {
+  (root || document).querySelectorAll(".doc.bill").forEach(doc => {
+    if (!doc.offsetWidth) return; // 화면에 안 보이면 건너뜀
+    const a4 = doc.offsetWidth * 297 / 210, set = (k, v) => doc.style.setProperty(k, v);
+    const natural = () => { doc.style.minHeight = "0"; const h = doc.offsetHeight; doc.style.minHeight = ""; return h; };
+    let fs = 11, pad = 0.26; set("--dfs", fs + "px"); set("--dpad", pad);
+    while (natural() > a4 + 1 && fs > 7.5) { fs -= 0.25; set("--dfs", fs + "px"); }
+    while (pad < 0.8 && natural() < a4 - 40) { pad += 0.04; set("--dpad", pad); }
+    if (natural() > a4 + 1) set("--dpad", Math.max(0.26, pad - 0.04));
+  });
+}
 const DOC_COLS = `<colgroup><col style="width:7%"><col style="width:19%"><col><col><col style="width:19%"><col><col></colgroup>`;
 const kwh2 = n => (n == null || isNaN(n)) ? "-" : (Math.abs(n) < 0.005 ? 0 : Number(n)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " kWh";
 const kwh3 = n => (n == null || isNaN(n)) ? "-" : (Math.abs(n) < 0.0005 ? 0 : Number(n)).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 }) + " kWh";
@@ -295,7 +308,7 @@ const lastDay = m => new Date(Number(m.slice(0, 4)), Number(m.slice(4)), 0).getD
 function docHead(title, R, no) {
   return `<div class="doc-header bill-head"><img src="assets/logo.jpg" alt="한화 신한 테라와트아워" class="doc-logo">
       <div class="bill-title"><h1 class="title">${title}</h1><div class="month">(${R.month.slice(0, 4)}년 ${R.month.slice(4)}월 거래분)</div></div>
-      <div class="bill-no">${no ? `${title.includes("오차") ? "오차 정산서" : "청구서"} 번호: ${esc(no)}` : ""}</div></div>`;
+      <div class="bill-no">${no ? `${title.includes("오차") ? "오차 정산서" : "청구서"} 번호<br><b class="nw">${esc(no)}</b>` : ""}</div></div>`;
 }
 const docField = (label, val, span) => `<td class="label">${label}</td><td colspan="${span || 2}">${val}</td>`;
 function customerInfoTable(c) {
@@ -515,6 +528,7 @@ function renderTrueUpResult() {
   const R = billState.result;
   try { R.fields = readTrueUpFields(); } catch (e) { $("billResult").innerHTML = `<div class="notice bad">${esc(e.message)}</div>`; $("billActions").style.display = "none"; return false; }
   $("billResult").innerHTML = (R.preview ? previewNotice(R.err || []) : "") + noticeHtml(R.warn, "warn") + trueUpHtml(R);
+  fitDocs($("billResult"));
   $("billActions").style.display = "flex";
   $("billSave").disabled = !!R.preview; // 미리보기는 저장 불가
   return true;

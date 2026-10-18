@@ -471,3 +471,51 @@ table.perf-years td:nth-child(-n+2), table.perf-years .perf-sub{ white-space:now
 .users-table .u-actions .btn{ padding:5px 10px; font-size:12px; margin:2px 0; }
 .side-link[hidden], .page-ro[hidden]{ display:none !important; }
 #usersPage .adj-grid input, #usersPage .adj-grid select{ width:100%; min-width:0; padding:7px 9px; border:1px solid var(--line); border-radius:6px; font-size:13px; }
+
+/* ===== A4 정산 문서 공통 (가정산 청구서 · 오차 정산서 · 발전사업자 정산서) =====
+ * 화면에서도 A4 한 장(210×297mm) 비율로 보이고, 인쇄하면 그대로 한 장. 내용이 적으면 서명이 아래로 붙는다.
+ * 표 안 글자는 가운데 정렬, 길면 단어 단위 줄바꿈.
+ */
+.doc.bill{ width:210mm; max-width:100%; min-height:297mm; box-sizing:border-box; padding:12mm 13mm 11mm; margin:0 auto 18px;
+  display:flex; flex-direction:column; background:#fff; border:1px solid var(--line); box-shadow:0 2px 12px rgba(20,30,50,.07); font-size:10px; }
+.doc.bill + .doc.bill{ margin-top:0; }
+.doc.bill .bill-head{ grid-template-columns:28% 1fr 28%; margin-bottom:9px; }
+.doc.bill .bill-title h1.title{ font-size:19px; letter-spacing:.5px; }
+.doc.bill .doc-logo{ height:30px; }
+.doc.bill table.doc-table{ font-size:10px; margin-bottom:7px; table-layout:fixed; }
+.doc.bill table.doc-table td, .doc.bill table.doc-table th{
+  padding:3px 5px; line-height:1.35; text-align:center; vertical-align:middle;
+  white-space:normal; word-break:keep-all; overflow-wrap:anywhere; }
+.doc.bill table.doc-table td.num{ text-align:center; white-space:normal; font-variant-numeric:tabular-nums; }
+.doc.bill table.doc-table td.basis{ font-size:9px; text-align:center; color:#333; }
+.doc.bill table.doc-table td.plant-l{ text-align:center; padding-left:5px; }
+.doc.bill table.doc-table td.label small{ display:block; font-weight:400; font-size:8.5px; color:#555; }
+.doc.bill table.doc-table th.section{ font-size:10px; letter-spacing:.5px; }
+.doc.bill table.doc-table td.label-dark{ background:#7F7F7F; color:#fff; font-weight:700; }
+.doc.bill table.doc-table tr.hl td{ background:#FFF8EC; }
+.doc.bill table.doc-table td.editable, .doc.bill .editable{ background:#FFFDF4; color:#9A6B00; }
+.doc.bill .doc-note{ text-align:center; }
+.doc.bill .doc-date{ margin-top:auto; padding-top:10px; text-align:center; font-size:12px; }
+.doc.bill .doc-signature{ margin-top:6px; }
+.doc.bill .bill-notes{ text-align:left; }
+@media print{
+  @page{ size:A4; margin:0; }
+  .doc.bill{ width:210mm; height:297mm; min-height:297mm; max-width:none; margin:0; padding:12mm 13mm 11mm; border:none; box-shadow:none;
+    overflow:hidden; page-break-after:always; break-after:page; page-break-inside:avoid; }
+  .doc.bill:last-child{ page-break-after:auto; break-after:auto; }
+  .doc.bill table.doc-table{ font-size:10px; }
+}
+/* 글자 크기는 --dfs 하나로 조절 (fitDocs 가 A4 한 장에 맞게 줄인다) */
+.doc.bill{ --dfs:11px; }
+.doc.bill table.doc-table, .doc.bill table.doc-table th.section{ font-size:var(--dfs); }
+.doc.bill table.doc-table td, .doc.bill table.doc-table th{ padding:calc(var(--dfs) * .26) 5px; line-height:1.28; }
+.doc.bill table.doc-table td.basis, .doc.bill table.doc-table .plant{ font-size:calc(var(--dfs) - 1px); }
+.doc.bill table.doc-table td.label small{ font-size:calc(var(--dfs) - 1.5px); }
+.doc.bill .bill-notes{ font-size:calc(var(--dfs) - 1.5px); }
+@media print{ .doc.bill table.doc-table{ font-size:var(--dfs); } }
+.doc.bill{ --dpad:.26; }
+.doc.bill table.doc-table td, .doc.bill table.doc-table th{ padding:calc(var(--dfs) * var(--dpad)) 5px; }
+.doc.bill .bill-head{ grid-template-columns:22% 1fr 22%; }
+.doc.bill .bill-title h1.title{ white-space:nowrap; }
+.doc.bill .bill-no{ font-size:9px; white-space:normal; word-break:keep-all; }
+.doc.bill .bill-no .nw{ white-space:nowrap; }

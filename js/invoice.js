@@ -157,6 +157,7 @@ async function renderInvoicePreview(){
   if(!selectedPlant || !aggByPlant[selectedPlant]){ host.style.display="none"; return; }
   host.style.display = "block";
   host.innerHTML = await buildInvoiceHtml(selectedPlant);
+  if(typeof fitDocs === "function") fitDocs(host); // A4 한 장 맞춤 (js/billing.js)
 }
 
 async function buildInvoiceHtml(plant){
@@ -164,102 +165,82 @@ async function buildInvoiceHtml(plant){
   const m = masterData[plant] || {};
   const calc = calcInvoice(plant);
   const fmt = n => n==null ? "-" : Math.round(n).toLocaleString();
-  const fmtK = n => n==null ? "-" : Math.round(n).toLocaleString()+' kWh';
-  const fmt2 = n => n==null ? "-" : n.toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2});
+  const won = n => n==null ? "-" : Math.round(n).toLocaleString() + " 원";
+  const kwh = n => n==null ? "-" : Number(n).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}) + " kWh";
   const monthLabel = settleMonth ? `${settleMonth.slice(0,4)}년 ${settleMonth.slice(4,6)}월` : "-";
   const lossRate = siteTotals.lossRatePct!=null ? siteTotals.lossRatePct
     : (siteTotals.usage ? (siteTotals.usage - siteTotals.supply)/siteTotals.usage : 0);
   const grid = await fetchYearlyGrid(plant);
   const schedule = buildGuaranteeSchedule(plant, grid);
-  const today = new Date();
-  const todayLabel = `${today.getFullYear()}년 ${String(today.getMonth()+1).padStart(2,"0")}월 ${String(today.getDate()).padStart(2,"0")}일`;
-  const field = (label,val,editable)=> `<td class="label">${label}</td><td colspan="2"${editable?' class="editable"':''}>${val}</td>`;
-  const COLGROUP = `<colgroup><col><col><col><col><col><col><col></colgroup>`;
-
+  const t = new Date(todayYmd() + "T00:00:00");
+  const todayLabel = `${t.getFullYear()}년 ${String(t.getMonth()+1).padStart(2,"0")}월 ${String(t.getDate()).padStart(2,"0")}일`;
+  const todo = "입력 예정";
+  const field = (label, val, span) => `<td class="label">${label}</td><td colspan="${span||2}"${val===todo?' class="editable"':''}>${val}</td>`;
+  const docNo = `${BUYER.invoicePrefix}-${settleMonth}-0001`;
+  // 연간보장공급량: 계약기간 안에서 진행 중인 회차 + 2회차까지만 (최소 3회차) — 20회차를 모두 넣으면 A4를 넘는다
+  const years = Math.min(20, Math.round(Number(m["계약기간"])) || 20);
+  const startYm = parseYm(m["계약일자"]), curYm = parseYm(settleMonth);
+  const curK = startYm && curYm ? Math.floor(((curYm.y - startYm.y) * 12 + (curYm.m - startYm.m)) / 12) + 1 : 1;
+  const shown = schedule.slice(0, Math.min(years, Math.max(3, curK + 2)));
+  const hasSchedule = shown.some(r => r.expected != null);
+  // 정산내역 행: 항목 | 금액 | 산출근거(4칸)
+  const row = (l, amt, basis, cls) => `<tr${cls?` class="${cls}"`:""}><td class="label">${l}</td><td class="num">${amt}</td><td class="basis" colspan="4">${basis||""}</td></tr>`;
+  const adj = calc.adj;
+  const rows = [
+    row("전력량 요금", calc.energyFee==null ? '<span class="editable">단가 입력 필요</span>' : won(calc.energyFee), calc.unitPrice==null ? "계약단가 미등록" : `공급량 ${fmt(a.supply)} kWh × ${calc.unitPrice} 원/kWh`),
+    row("공급가액", won(calc.supplyValue), "전력량 요금"),
+    row("부가가치세", won(calc.vat1), "공급가액 × 10%"),
+    row("계 (전력량 요금)", won(calc.subtotal1), "공급가액 + 부가가치세", "total"),
+    row("거래수수료", won(calc.fee), `공급량 ${fmt(a.supply)} kWh × ${calc.feeRate} 원/kWh`),
+    row("부가가치세", won(calc.vat2), "거래수수료 × 10%"),
+    row("계 (거래수수료)", won(calc.subtotal2), "거래수수료 + 부가가치세", "total"),
+    row("전월 차액", won(adj.전월차액), "전월 정산 차액 (차감)"),
+    row("전월 미지급액", won(adj.전월미지급액), "전월 미지급분 (차감)"),
+    row("기타정산", won(adj.기타정산), "기타 정산 (차감)")
+  ].concat(calc.penalty ? [row("위약금 차감", won(calc.penalty), `연간보장공급량 ${calc.penaltyLabel}`)] : []);
   return `
-  <div class="doc">
-    <div class="doc-header"><img src="assets/logo.jpg" alt="한화 신한 테라와트아워" class="doc-logo"></div>
-    <h1 class="title">직접PPA 전력거래대금 정산서</h1>
-    <div class="month">(${monthLabel} 거래분)</div>
-    <table class="doc-table">
-      ${COLGROUP}
-      <tr><th class="section" rowspan="3">발전사업자<br>정보</th>
-        ${field("사업자명 (대표자명)", m["사업자명(대표자명)"] || "입력 예정", !m["사업자명(대표자명)"])}
-        ${field("사업자등록번호", m["사업자등록번호"] || "입력 예정", !m["사업자등록번호"])}</tr>
-      <tr>${field("사업자 주소", m["사업자주소"] || "입력 예정", !m["사업자주소"])}
-        ${field("계좌번호", m["계좌번호"] || "입력 예정", !m["계좌번호"])}</tr>
-      <tr><td class="label">발전소명</td><td colspan="2">${plant}</td>
-        ${field("연락처", [m["담당자"], m["연락처"]].filter(Boolean).join(" / ") || "입력 예정", !(m["담당자"]||m["연락처"]))}</tr>
+  <div class="doc bill gen">
+    <div class="doc-header bill-head"><img src="assets/logo.jpg" alt="한화 신한 테라와트아워" class="doc-logo">
+      <div class="bill-title"><h1 class="title">직접PPA 전력거래대금 정산서</h1><div class="month">(${monthLabel} 거래분)</div></div>
+      <div class="bill-no">정산서 번호: ${docNo}</div></div>
+    <table class="doc-table">${DOC_COLS}
+      <tr><th class="section" rowspan="3">발전<br>사업자<br>정보</th>
+        ${field("사업자명 (대표자명)", m["사업자명(대표자명)"] || todo)}${field("사업자등록번호", m["사업자등록번호"] || todo)}</tr>
+      <tr>${field("사업자 주소", m["사업자주소"] || todo)}${field("계좌번호", m["계좌번호"] || todo)}</tr>
+      <tr>${field("발전소명", plant)}${field("연락처", [m["담당자"], m["연락처"]].filter(Boolean).join("<br>") || todo)}</tr>
     </table>
-    <table class="doc-table">
-      ${COLGROUP}
-      <tr><th class="section" rowspan="5">전력<br>거래내역</th>
-        <td class="label">총 전기사용량</td><td class="num" colspan="2">${fmtK(siteTotals.usage)}</td>
-        <td class="label">총 발전량</td><td class="num" colspan="2">${fmtK(siteTotals.generation)}</td></tr>
-      <tr><td class="label">전력손실률</td><td class="num" colspan="2">${(lossRate*100).toFixed(2)}%</td>
-        <td class="label">총 공급량</td><td class="num" colspan="2">${fmtK(siteTotals.supply)}</td></tr>
-      <tr><td class="label">총 초과발전량</td><td class="num" colspan="2">${fmtK(siteTotals.excess)}</td>
-        <td class="label">총 부족전력량</td><td class="num" colspan="2">${fmtK(siteTotals.deficit)}</td></tr>
-      <tr><td class="label hl-top hl-left">해당 발전소 발전량</td><td class="num hl-top" colspan="2">${fmtK(a.generation)}</td>
-        <td class="label hl-top">해당 발전소 공급량</td><td class="num hl-top hl-right" colspan="2">${fmtK(a.supply)}</td></tr>
-      <tr><td class="label hl-bottom hl-left">해당 발전소 초과발전량</td><td class="num hl-bottom" colspan="2">${fmtK(a.excess)}</td>
-        <td class="label hl-bottom">-</td><td class="num hl-bottom hl-right" colspan="2">-</td></tr>
+    <table class="doc-table">${DOC_COLS}
+      <tr><th class="section" rowspan="5">전력<br>거래<br>내역</th>${field("총 전기사용량", kwh(siteTotals.usage))}${field("총 발전량", kwh(siteTotals.generation))}</tr>
+      <tr>${field("전력손실률", (lossRate*100).toFixed(2) + "%")}${field("총 공급량", kwh(siteTotals.supply))}</tr>
+      <tr>${field("총 초과발전량", kwh(siteTotals.excess))}${field("총 부족전력량", kwh(siteTotals.deficit))}</tr>
+      <tr class="hl">${field("해당 발전소 발전량", kwh(a.generation))}${field("해당 발전소 공급량", kwh(a.supply))}</tr>
+      <tr class="hl">${field("해당 발전소 초과발전량", kwh(a.excess))}<td class="label">-</td><td colspan="2">-</td></tr>
     </table>
-    <table class="doc-table">
-      ${COLGROUP}
-      <tr><th class="section" rowspan="12">정산<br>내역</th><td class="label-dark">항목</td><td class="label-dark">금액</td><td colspan="4" class="label-dark">산출 근거</td></tr>
-      <tr><td class="label">전력량 요금</td><td class="num${calc.energyFee==null?' editable':''}">${calc.energyFee==null? '단가 입력 필요' : fmt(calc.energyFee)+' 원'}</td>
-        <td class="basis">( =</td><td class="basis">${fmt(a.supply)} kWh</td><td class="basis">x</td><td class="basis">${calc.unitPrice==null?'-':calc.unitPrice+' 원/KWh)'}</td></tr>
-      <tr><td class="label">공급가액</td><td class="num">${fmt(calc.supplyValue)} 원</td><td></td><td></td><td></td><td></td></tr>
-      <tr><td class="label">부가가치세</td><td class="num">${fmt(calc.vat1)} 원</td>
-        <td class="basis">( =</td><td class="basis">${fmt(calc.supplyValue)} 원</td><td class="basis">x</td><td class="basis">10.00% )</td></tr>
-      <tr class="total"><td class="label">계</td><td class="num">${fmt(calc.subtotal1)} 원</td><td></td><td></td><td></td><td></td></tr>
-      <tr><td class="label">거래수수료</td><td class="num">${fmt(calc.fee)} 원</td>
-        <td class="basis">( =</td><td class="basis">${fmt(a.supply)} kWh</td><td class="basis">x</td><td class="basis">${calc.feeRate} 원/KWh)</td></tr>
-      <tr><td class="label">부가가치세</td><td class="num">${fmt(calc.vat2)} 원</td>
-        <td class="basis">( =</td><td class="basis">${fmt(calc.fee)} 원</td><td class="basis">x</td><td class="basis">10.00% )</td></tr>
-      <tr class="total"><td class="label">계</td><td class="num">${fmt(calc.subtotal2)} 원</td><td></td><td></td><td></td><td></td></tr>
-      <tr><td class="label">전월 차액</td><td class="num">${fmt(calc.adj.전월차액)} 원</td>
-        <td class="basis">( =</td><td class="basis">${fmt(calc.adj.전월차액)} 원</td><td class="basis">-</td><td class="basis">0 원)</td></tr>
-      <tr><td class="label">전월 미지급액</td><td class="num">${fmt(calc.adj.전월미지급액)} 원</td>
-        <td class="basis">( =</td><td class="basis">${fmt(calc.adj.전월미지급액)} 원</td><td class="basis">-</td><td class="basis">0 원)</td></tr>
-      <tr><td class="label">기타정산</td><td class="num">${fmt(calc.adj.기타정산)} 원</td><td></td><td></td><td></td><td></td></tr>
-      ${calc.penalty ? `<tr><td class="label">위약금 차감</td><td class="num">${fmt(calc.penalty)} 원</td><td class="basis" colspan="4">연간보장공급량 ${calc.penaltyLabel}</td></tr>` : ""}
-      <tr class="pay"><td class="label">지급금액</td><td class="num" colspan="5">${calc.payment==null?'단가 입력 후 계산됩니다':fmt(calc.payment)+' 원'}</td></tr>
+    <table class="doc-table">${DOC_COLS}
+      <tr><th class="section" rowspan="${rows.length + 2}">정산<br>내역</th><td class="label-dark">항목</td><td class="label-dark">금액</td><td colspan="4" class="label-dark">산출근거</td></tr>
+      ${rows.join("")}
+      <tr class="pay"><td class="label">지급금액</td><td class="num">${calc.payment==null ? "단가 입력 후 계산" : won(calc.payment)}</td><td class="basis" colspan="4">계 (전력량 요금) − 계 (거래수수료) − 전월 차액 − 전월 미지급액 − 기타정산${calc.penalty ? " − 위약금" : ""}</td></tr>
     </table>
-    <table class="doc-table">
-      ${COLGROUP}
-      <tr><th class="section" rowspan="4">정산<br>정보</th>
-        <td class="label">사업자명 (대표자명)</td><td colspan="2">${BUYER.bizName}</td>
-        <td class="label">사업자등록번호</td><td colspan="2">${BUYER.bizRegNo}</td></tr>
-      <tr><td class="label">주소</td><td colspan="5">${BUYER.address.replace(/\n/g,'<br>')}</td></tr>
-      <tr><td class="label">담당자</td><td colspan="2">${BUYER.manager}</td>
-        <td class="label">연락처</td><td colspan="2">${BUYER.contact}</td></tr>
-      <tr><td class="label">정산서번호</td><td colspan="2">${BUYER.invoicePrefix}-${settleMonth}-0001</td>
-        <td class="label">납부기한</td><td colspan="2">계산서 발행 후 5영업일 내</td></tr>
+    <table class="doc-table">${DOC_COLS}
+      <tr><th class="section" rowspan="4">정산<br>정보</th>${field("사업자명 (대표자명)", BUYER.bizName.replace(" (", "<br>("))}${field("사업자등록번호", BUYER.bizRegNo)}</tr>
+      <tr>${field("주소", BUYER.address.replace(/\n/g, "<br>"), 5)}</tr>
+      <tr>${field("담당자", BUYER.manager)}${field("연락처", BUYER.contact.replace(" / ", "<br>"))}</tr>
+      <tr>${field("정산서 번호", docNo)}${field("지급기한", "계산서 발행 후 5영업일 내")}</tr>
     </table>
-    <table class="doc-table guarantee-table">
-      ${COLGROUP}
-      <tr><th class="section" rowspan="${schedule.length+1}">연간<br>보장<br>공급량</th>
-        <td class="label">회차</td><td class="label">예상 공급량</td><td class="label">실적 누계 (공급+초과)</td><td class="label">미달 공급량</td><td class="label">미달 구매량</td><td class="label">비고</td></tr>
-      ${schedule.map(row=>`
-      <tr><td class="label">${row.k}회차<br>${row.label}</td>
-        <td class="num">${row.expected==null?'-':fmt2(row.expected)+' kWh'}</td>
-        <td class="num">${row.actualCum==null?'-':fmt2(row.actualCum)+' kWh'}</td>
-        <td class="num">-</td><td class="num">-</td><td></td></tr>`).join("")}
+    <table class="doc-table">${DOC_COLS}
+      <tr><th class="section" rowspan="${(hasSchedule ? shown.length : 1) + 1}">연간<br>보장<br>공급량</th>
+        <td class="label">회차</td><td class="label">예상 공급량</td><td class="label">실적 누계<br>(공급+초과)</td><td class="label">미달 공급량</td><td class="label">미달 구매량</td><td class="label">비고</td></tr>
+      ${hasSchedule ? shown.map(r => `<tr><td class="label">${r.k}회차<br><small>${r.label}</small></td><td class="num">${r.expected==null ? "-" : fmt(r.expected) + " kWh"}</td>
+        <td class="num">${r.actualCum==null ? "-" : fmt(r.actualCum) + " kWh"}</td><td class="num">-</td><td class="num">-</td><td class="basis">${r.k === curK ? "진행 회차" : ""}</td></tr>`).join("")
+        : `<tr><td colspan="6" class="basis">계약 정보(설비용량·계약일자)가 없어 표시할 수 없습니다.</td></tr>`}
     </table>
+    ${hasSchedule && years > shown.length ? `<p class="doc-note">총 ${years}회차 중 ${shown.length}회차까지 표시 (전체는 [계약관리 > 계약이행현황])</p>` : ""}
     <div class="doc-date">${todayLabel}</div>
     <div class="doc-signature">
-      <div class="sign-block">
-        <div class="sign-label">위와 같이 ${monthLabel} 직접PPA 전력거래대금을 확인합니다.</div>
-        <div class="sign-role">발전사업자</div>
-        <div class="sign-name">${(m["사업자명(대표자명)"] || plant).split("(")[0].trim()} (인)</div>
-      </div>
-      <div class="sign-block">
-        <div class="sign-label">위와 같이 ${monthLabel} 직접PPA 전력거래대금을 지급합니다.</div>
-        <div class="sign-role">재생에너지전기공급사업자</div>
-        <div class="sign-name">한화신한테라와트아워 주식회사 (인)</div>
-      </div>
+      <div class="sign-block"><div class="sign-label">위와 같이 ${monthLabel} 직접PPA 전력거래대금을 확인합니다.</div><div class="sign-role">발전사업자</div>
+        <div class="sign-name">${(m["사업자명(대표자명)"] || plant).split("(")[0].trim()} (인)</div></div>
+      <div class="sign-block"><div class="sign-label">위와 같이 ${monthLabel} 직접PPA 전력거래대금을 지급합니다.</div><div class="sign-role">재생에너지전기공급사업자</div>
+        <div class="sign-name">${BUYER.bizNameLegal} (인)</div></div>
     </div>
   </div>`;
 }
