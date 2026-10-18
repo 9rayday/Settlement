@@ -8,8 +8,7 @@ function initApp(){
   initHeader(); // 헤더: 정산월·사용자·알림·로그아웃·자동 로그아웃 (js/header.js)
 
   initUploadZone();
-  document.getElementById("adjSaveBtn").addEventListener("click", handleSaveAdjustments);
-  document.getElementById("refreshMasterBtn").addEventListener("click", handleRefreshMaster);
+  document.getElementById("genCalcBtn").addEventListener("click", genCalculate); // 발전대금 계산 (js/invoice.js)
   document.getElementById("exportBtn").addEventListener("click", exportSinglePlantExcel);
   document.getElementById("pdfBtn").addEventListener("click", exportSinglePlantPdf);
   document.getElementById("exportAllBtn").addEventListener("click", exportAllPlants);

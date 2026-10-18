@@ -96,8 +96,9 @@ function provisionalFormHtml() {
       ${fieldHtml("청구일 (익월 N영업일 이내)", `<input type="number" id="cfg_send" min="1" max="31" step="1">`)}
       ${fieldHtml("검토일 (수령 후 N영업일 이내)", `<input type="number" id="cfg_review" min="1" max="31" step="1">`)}
       ${fieldHtml("납부기한 (매월 N일)", `<input type="number" id="cfg_pay" min="1" max="31" step="1">`)}
-      ${fieldHtml("납부기한 (일자)", `<input type="date" id="dueDate">`)}${fieldHtml("특이사항", `<input id="bill_note">`)}</div>
-    <div class="row" style="margin-top:10px"><button class="btn accent" id="calcBtn">가정산서 계산</button><span id="cfgStatus" class="hint" style="margin:0 0 0 8px"></span></div></div>`;
+      ${fieldHtml("특이사항", `<input id="bill_note">`)}</div>
+    <div class="rec-bill"><label>REC 청구</label><select id="recBillSel"></select><button class="btn secondary" id="recBillAdd">추가</button><div id="recBillList" class="rec-bill-list"></div></div>
+    <div class="row" style="margin-top:10px"><button class="btn accent" id="calcBtn">가정산서 계산</button><span id="cfgStatus" class="status warn" style="background:none"></span></div></div>`;
 }
 
 /* 청구일·검토일·납부일: 전기사용자(신청번호)별 billcfg:<신청번호> 에 저장 → 바꾸기 전까지 기본값.
@@ -114,12 +115,10 @@ function dueDateFor(month, payDay) { // 정산월 다음 달 N일 (말일 넘으
 function fillBillCfg(app, month) {
   const cfg = billCfg(app);
   setVal("cfg_send", cfg.sendDays); setVal("cfg_review", cfg.reviewDays); setVal("cfg_pay", cfg.payDay);
-  const due = $("dueDate"); due.value = dueDateFor(month, cfg.payDay); due.dataset.auto = due.value;
   const save = async () => {
     const v = { sendDays: Number($("cfg_send").value) || 8, reviewDays: Number($("cfg_review").value) || 2, payDay: Number($("cfg_pay").value) || 27 };
-    if (!due.value || due.value === due.dataset.auto) { due.value = dueDateFor(month, v.payDay); due.dataset.auto = due.value; } // 직접 고친 날짜는 유지
     const where = await Store.set(`billcfg:${app}`, v);
-    if (where !== "denied") $("cfgStatus").textContent = `청구일·검토일·납부일 저장됨 (${where === "remote" ? "구글시트" : "이 브라우저"}) — 다음 정산부터 기본값`;
+    if (where !== "denied") $("cfgStatus").textContent = "저장됨";
   };
   ["cfg_send", "cfg_review", "cfg_pay"].forEach(id => { $(id).onchange = save; });
 }
@@ -193,18 +192,7 @@ function renderFlow(app, month) {
   if (typeof renderDashboard === "function") renderDashboard(); // 정산 대시보드 갱신
   const host = $("billFlow"); if (!host) return;
   const steps = flowSteps(app, month), bill = Store.get(`bill:${month}:${app}`, null);
-  host.innerHTML = `<span class="hint">${monthLabel(month)} 진행</span>` + steps.map((x, i) => `<span class="flow-step${x.done ? " done" : ""}"><b>${i + 1}</b> ${x.label}${x.note ? ` <small>${esc(x.note)}</small>` : ""}</span>`).join('<span class="flow-arrow">›</span>')
-    + (bill && !bill.paidAt ? ` <input type="date" id="paidDate" value="${todayYmd()}"><input type="number" id="paidAmt" placeholder="수령액(원)" value="${bill.grandTotal == null ? "" : Math.round(bill.grandTotal)}" style="width:130px"><button class="btn secondary" id="paidBtn">대금 수령 확인</button>`
-       : bill && bill.paidAt ? ` <button class="btn secondary" id="paidUndo">수령 취소</button>` : "");
-  if ($("paidBtn")) $("paidBtn").onclick = async () => {
-    await Store.set(`bill:${month}:${app}`, Object.assign({}, bill, { paidAt: $("paidDate").value || todayYmd(), paidAmount: $("paidAmt").value === "" ? null : Number($("paidAmt").value) }));
-    renderFlow(app, month);
-  };
-  if ($("paidUndo")) $("paidUndo").onclick = async () => {
-    if (!confirm("전력대금 수령 기록을 지울까요?")) return;
-    const b = Object.assign({}, bill); delete b.paidAt; delete b.paidAmount;
-    await Store.set(`bill:${month}:${app}`, b); renderFlow(app, month);
-  };
+  host.innerHTML = steps.map((x, i) => `<span class="flow-step${x.done ? " done" : ""}"><b>${i + 1}</b> ${x.label}${x.note ? ` <small>${esc(x.note)}</small>` : ""}</span>`).join('<span class="flow-arrow">›</span>');
 }
 
 // 가정산: 전월 오차정산(carry:<이번달>:<신청번호>)이 있으면 그대로 채운다
@@ -220,6 +208,35 @@ function fillProvisionalForm(app, month) {
     setVal("cs_ratio", ratesFor(prevMonth).rates.taxableRatio);
   }
   fillBillCfg(app, month);
+  fillRecBill(app, month);
+}
+
+/* ---------- REC 청구: 확정한 초과발전량 REC 정산(recset:)을 가정산서에 추가 ----------
+ * 기본값 = 발생월(정산 기간 끝)이 정산월 2달 전인 정산. 다른 달 가정산서에 이미 넣은 정산은 목록에서 뺀다. */
+const recBillLabel = s => `${s.from === s.to ? monthLabel(s.from) : monthLabel(s.from) + "~" + monthLabel(s.to)} 발생 · ${s.totals.recQty} REC · ${won(s.totals.amount)}`;
+function recBillCandidates(app, month) {
+  if (typeof recSettlements !== "function") return [];
+  return recSettlements(app).filter(s => s.totals && s.totals.amount && (!s.billedIn || s.billedIn === month));
+}
+function fillRecBill(app, month) {
+  const cands = recBillCandidates(app, month), bill = Store.get(`bill:${month}:${app}`, null);
+  const twoBefore = prevYm(prevYm(month));
+  billState.recPicked = bill && bill.recBilled ? bill.recBilled.filter(k => cands.some(s => s.key === k))
+    : cands.filter(s => s.to === twoBefore || s.billedIn === month).map(s => s.key);
+  const draw = () => {
+    const sel = $("recBillSel"), rest = cands.filter(s => !billState.recPicked.includes(s.key));
+    sel.innerHTML = rest.length ? rest.map(s => `<option value="${esc(s.key)}">${esc(recBillLabel(s))}</option>`).join("") : `<option value="">-</option>`;
+    $("recBillAdd").disabled = !rest.length;
+    $("recBillList").innerHTML = billState.recPicked.map(k => { const s = cands.find(x => x.key === k);
+      return s ? `<span class="rec-chip">${esc(recBillLabel(s))}<button data-k="${esc(k)}" title="빼기">×</button></span>` : ""; }).join("");
+    $("recBillList").querySelectorAll("button").forEach(b => b.onclick = () => { billState.recPicked = billState.recPicked.filter(k => k !== b.dataset.k); draw(); });
+  };
+  $("recBillAdd").onclick = () => { const k = $("recBillSel").value; if (k && !billState.recPicked.includes(k)) billState.recPicked.push(k); draw(); };
+  draw();
+}
+function recBillItems(app) {
+  return (billState.recPicked || []).map(k => ({ k, s: Store.get(k, null) })).filter(x => x.s && x.s.totals).map(({ k, s }) => ({
+    key: k, label: s.from === s.to ? monthLabel(s.from) : `${monthLabel(s.from)}~${monthLabel(s.to)}`, amount: s.totals.amount, qty: s.totals.recQty }));
 }
 
 function splitConfirmed() {
@@ -295,7 +312,8 @@ function runCalc() {
       unitPrice: P.customer.unitPrice, priceSplits: safeSplits(Registry.priceSplits(P.app, P.g.month, match.supplyByPlant)), demandRegion: P.customer.demandRegion, demandGrid: P.customer.demandGrid, demandNode: P.customer.demandNode, plants: P.plants,
       confirmedSurcharge: { taxable: Number($("cs_taxable").value) || 0, exempt: Number($("cs_exempt").value) || 0 },
       prevDiff: { taxable: Number($("pd_taxable").value) || 0, exempt: Number($("pd_exempt").value) || 0 },
-      penalty: typeof penaltyDueGroup === "function" ? penaltyDueGroup(P.app, P.g.month) : null
+      penalty: typeof penaltyDueGroup === "function" ? penaltyDueGroup(P.app, P.g.month) : null,
+      recItems: recBillItems(P.app)
     };
     const carry = Store.get(`carry:${P.g.month}:${P.app}`, null);
     if (carry && (ctx.confirmedSurcharge.taxable !== carry.confirmed.taxable || ctx.confirmedSurcharge.exempt !== carry.confirmed.exempt
@@ -303,7 +321,7 @@ function runCalc() {
       warn.push("전월 오차정산 값을 직접 수정함");
     const inv = Engine.invoice(match, ctx, P.rates);
     const days = { sendDays: Number($("cfg_send").value) || 8, reviewDays: Number($("cfg_review").value) || 2, payDay: Number($("cfg_pay").value) || 27 };
-    billState.result = { mode: "provisional", preview: P.preview, app: P.app, month: P.g.month, customer: Object.assign({}, P.customer, days), rates: P.rates, match, inv, ctx, loss: P.loss, note: $("bill_note").value.trim(), dueDate: $("dueDate").value };
+    billState.result = { mode: "provisional", preview: P.preview, app: P.app, month: P.g.month, customer: Object.assign({}, P.customer, days), rates: P.rates, match, inv, ctx, loss: P.loss, note: $("bill_note").value.trim(), dueDate: dueDateFor(P.g.month, days.payDay) };
     out.innerHTML = (P.preview ? previewNotice(err) : "") + noticeHtml(warn, "warn") + invoiceHtml(billState.result);
     fitDocs(out);
     $("billActions").style.display = "flex";
@@ -404,13 +422,15 @@ function invoiceHtml(R) {
     `<tr class="total">${sub("사용요금 계", won(inv.netTotal), "발전소별 합계")}</tr>`,
     plantRows,
     row("거래수수료", won(inv.fee), `공급량 계 × ${rates.tradeFee} 원/kWh`),
+    ...(inv.recTotal ? [row("REC 대금", won(inv.recTotal), inv.recItems.map(x => `${esc(x.label)} 발생 ${x.qty} REC`).join(", "))] : []),
     row(`${prevM}월 확정 부가정산금 (과세)`, won(inv.confirmedSurcharge.taxable), `${prevM}월 직접PPA 전력거래대금 오차 정산서`),
-    row("공급가액 (전월 차액 반영 전)", won(inv.supplyBefore), "전력량요금 + 망이용요금 + 거래수수료 + 확정 부가정산금 (과세)", "total"),
+    row("공급가액 (전월 차액 반영 전)", won(inv.supplyBefore), "전력량요금 + 망이용요금 + 거래수수료" + (inv.recTotal ? " + REC 대금" : "") + " + 확정 부가정산금 (과세)", "total"),
     row("전월 차액 (과세)", won(inv.prevDiff.taxable), `${prevM}월 직접PPA 전력거래대금 오차 정산서`),
     row("공급가액 (전월 차액 반영 후)", won(inv.supplyAfter), "공급가액 (전월 차액 반영 전) + 전월 차액 (과세)", "total"),
-    `<tr><td class="label" rowspan="5">항목별<br>부가세</td>${sub("전력량요금", won(inv.vat.energy), "전력량요금 × 10%")}</tr>`,
+    `<tr><td class="label" rowspan="${inv.recTotal ? 6 : 5}">항목별<br>부가세</td>${sub("전력량요금", won(inv.vat.energy), "전력량요금 × 10%")}</tr>`,
     `<tr>${sub("망이용요금", won(inv.vat.network), "망이용요금 × 10%")}</tr>`,
     `<tr>${sub("거래수수료", won(inv.vat.fee), "거래수수료 × 10%")}</tr>`,
+    ...(inv.recTotal ? [`<tr>${sub("REC 대금", won(inv.vat.rec), "REC 대금 × 10%")}</tr>`] : []),
     `<tr>${sub("부가정산금", won(inv.vat.surcharge), `${prevM}월 확정 부가정산금 (과세) × 10%`)}</tr>`,
     `<tr>${sub("전월 차액", won(inv.vat.prevDiff), "전월 차액 (과세) × 10%")}</tr>`,
     row("부가가치세 계", won(inv.vatTotal), "항목별 부가가치세 합계"),
@@ -423,7 +443,7 @@ function invoiceHtml(R) {
     row("전월 차액 (비과세)", won(inv.prevDiff.exempt), `${prevM}월 직접PPA 전력거래대금 오차 정산서`)
   ].concat(inv.penalty ? [row("위약금 차감", won(-inv.penalty), `연간보장공급량 ${esc(inv.penaltyLabel)}`)] : [])
    .concat([row("청구서 계", won(inv.exemptSubtotal), `${prevM}월 확정 부가정산금 (비과세) + 전력산업기반기금 + 전월 차액 (비과세)` + (inv.penalty ? " − 위약금" : ""), "total")]);
-  const nTax = 15 + plantsN.length, nEx = exRows.length;
+  const nTax = (taxRows.join("").match(/<tr/g) || []).length, nEx = exRows.length;
   const no = docNo(R, "0001");
   return `<div class="doc bill">
     ${docHead("직접PPA 전력거래대금 청구서", R, "")}
@@ -458,9 +478,13 @@ async function saveBill() {
     confirmedSurcharge: inv.confirmedSurcharge, prevDiff: inv.prevDiff,
     expectedSurcharge: inv.expectedSurcharge, fund: inv.fund, taxInvoice: inv.taxInvoice, grandTotal: inv.grandTotal,
     unitPrice: R.ctx.unitPrice, customerName: R.customer.name, dueDate: R.dueDate || "", note: R.note || "",
-    invFull: R.inv, totals: R.match.totals, loss: R.loss, savedAt: new Date().toISOString()
+    invFull: R.inv, totals: R.match.totals, loss: R.loss, recBilled: (R.inv.recItems || []).map(x => x.key), savedAt: new Date().toISOString()
   }, old && old.paidAt ? { paidAt: old.paidAt, paidAmount: old.paidAmount } : {}));
-  $("billSaveStatus").textContent = (where === "remote" ? "발행 완료 (구글시트)" : "이 브라우저에만 저장됨") + " → 대금 수령 후 오차정산서에서 이 가정산서와 비교";
+  // REC 정산에 청구한 달 표시 (빠진 것은 해제)
+  const now = (R.inv.recItems || []).map(x => x.key), before = (old && old.recBilled) || [];
+  for (const k of before.filter(k => !now.includes(k))) { const s = Store.get(k, null); if (s && s.billedIn === R.month) { delete s.billedIn; await Store.set(k, s); } }
+  for (const k of now) { const s = Store.get(k, null); if (s && s.billedIn !== R.month) await Store.set(k, Object.assign(s, { billedIn: R.month })); }
+  $("billSaveStatus").textContent = (where === "remote" ? "발행 완료 (구글시트)" : "이 브라우저에만 저장됨") + "";
   renderFlow(R.app, R.month);
 }
 
@@ -545,7 +569,7 @@ function runTrueUp() {
     const conf = Engine.invoice(match, { unitPrice: P.customer.unitPrice, priceSplits: safeSplits(Registry.priceSplits(P.app, P.g.month, match.supplyByPlant)), demandRegion: P.customer.demandRegion, demandGrid: P.customer.demandGrid, demandNode: P.customer.demandNode, plants: P.plants,
       confirmedSurcharge: (A && A.confirmedSurcharge) || prov.confirmedSurcharge || { taxable: 0, exempt: 0 },
       prevDiff: (A && A.prevDiff) || prov.prevDiff || { taxable: 0, exempt: 0 },
-      penalty: A && A.penalty ? { amount: A.penalty, label: A.penaltyLabel } : null }, P.rates);
+      penalty: A && A.penalty ? { amount: A.penalty, label: A.penaltyLabel } : null, recItems: A && A.recItems ? A.recItems : [] }, P.rates);
     const diff = Engine.trueUpDiff(prov, conf);
     setVal("pd_taxable", diff.taxable); // 비교 결과로 채움 (직접 고친 값은 다시 계산하면 덮어씀)
     const aFund = A ? A.fund : prov.fund;
@@ -671,6 +695,7 @@ function trueUpHtml(R) {
     ...plantsN.map(p => { const n = conf.netByPlant[p];
       return line(`<span class="plant">${esc(p)}</span>`, aNet(p), n.fee, { plant: true, note: `${n.type ? "유형 " + TYPE_MARK[n.type - 1] + " · " : ""}${n.supplyRounded.toLocaleString()} kWh` }); }),
     line("거래수수료", aVal("fee"), conf.fee),
+    ...(conf.recTotal || (A && A.recTotal) ? [line("REC 대금", A ? A.recTotal || 0 : null, conf.recTotal, { note: (conf.recItems || []).map(x => esc(x.label) + " 발생").join(", ") })] : []),
     line(`${prevM}월 확정 부가정산금 (과세)`, cs.taxable, conf.confirmedSurcharge.taxable),
     line("공급가액 (전월 차액 반영 전)", aVal("supplyBefore"), conf.supplyBefore, { cls: "total" }),
     line("전월 차액 (과세)", pd.taxable, conf.prevDiff.taxable),
@@ -678,6 +703,7 @@ function trueUpHtml(R) {
     line("부가세 · 전력량요금", av("energy"), conf.vat.energy),
     line("부가세 · 망이용요금", av("network"), conf.vat.network),
     line("부가세 · 거래수수료", av("fee"), conf.vat.fee),
+    ...(conf.recTotal ? [line("부가세 · REC 대금", av("rec"), conf.vat.rec)] : []),
     line("부가세 · 부가정산금", av("surcharge"), conf.vat.surcharge),
     line("부가세 · 전월 차액", av("prevDiff"), conf.vat.prevDiff),
     line("부가가치세 계", aVal("vatTotal"), conf.vatTotal),

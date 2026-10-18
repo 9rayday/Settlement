@@ -81,10 +81,7 @@ function handleFile(file){
       buildColMap(rawRows);
       aggregate(rawRows);
       showGenStatus();
-      document.getElementById("exportBtn").disabled = false;
-      document.getElementById("pdfBtn").disabled = false;
-      document.getElementById("exportAllBtn").disabled = false;
-      syncPerformanceToGas();
+      if(typeof genReset === "function") genReset(); // 새 파일 → [발전대금 계산] 다시
     }catch(err){
       statusEl.textContent = "오류: " + err.message;
       statusEl.className = "status bad";
@@ -96,7 +93,7 @@ function handleFile(file){
 function showGenStatus(){
   const statusEl = document.getElementById("dataStatus");
   statusEl.style.display = "inline-flex";
-  statusEl.textContent = `발전소 수 ${plants.length} 처리 완료` + (genSettleNotes.length ? " · " + genSettleNotes.join(" · ") : "");
+  statusEl.textContent = `발전소 ${plants.length}곳` + (genSettleNotes.length ? " · " + genSettleNotes.join(" · ") : "");
   statusEl.className = "status ok";
 }
 
@@ -106,7 +103,7 @@ function onAmiForGen(){
   rawRows = kpxRowsOrig.map(r => Object.assign({}, r));
   aggregate(rawRows);
   showGenStatus();
-  syncPerformanceToGas();
+  if(typeof genReset === "function") genReset();
 }
 
 function pickHeaderIndex(headers, candidates){
@@ -199,7 +196,7 @@ function aggregate(rows){
   const apps = Object.keys(parsed.groups);
   // 사용량 파일(한 수요가 것)은 그룹이 하나일 때만 적용, 여럿이면 KPX 전기사용량 사용
   const ami = (typeof billState !== "undefined" && billState.ami && apps.length === 1) ? billState.ami : null;
-  if(typeof billState !== "undefined" && billState.ami && apps.length > 1) genSettleNotes.push("그룹이 여러 개라 사용량 파일 대신 KPX 전기사용량 사용");
+  if(typeof billState !== "undefined" && billState.ami && apps.length > 1) genSettleNotes.push("그룹 여러 개: KPX 사용량 적용");
   const put = (r, col, info, kwh) => { if(col) r[col] = Engine.round(kwh / mult(info), 6); };
   const covered = new Set(), sources = new Set();
   apps.forEach(app=>{
@@ -223,12 +220,12 @@ function aggregate(rows){
     siteTotals.usage += M.totals.usage;
     siteTotals.deficit += Math.max(0, M.totals.deficitSimple + M.totals.deficitLoss);
     sources.add(R.usage.source);
-    if(R.monthly && !g.hasPpa) genSettleNotes.push(`${app} 월간균등 정산 (발전량 월 균등 환산)`);
+    if(R.monthly && !g.hasPpa) genSettleNotes.push(`${app} 월간균등`);
   });
   plants.filter(p => !covered.has(p)).forEach(p=>{ aggByPlant[p].supply = raw[p].supply; aggByPlant[p].excess = raw[p].excess; });
   plants.forEach(p=>{ siteTotals.supply += aggByPlant[p].supply; siteTotals.excess += aggByPlant[p].excess; });
-  if(sources.has("none")) genSettleNotes.push("사용량 정보가 없어 사용량 = 발전량으로 계산(가정산, 초과 0)");
-  if(sources.has("ami")) genSettleNotes.push("사용량 파일 기준 공급량 계산");
+  if(sources.has("none")) genSettleNotes.push("사용량 없음: 사용량 = 발전량");
+  if(sources.has("ami")) genSettleNotes.push("사용량 파일 적용");
 
   if(settleMonth && typeof setHeaderMonth === "function") setHeaderMonth(settleMonth); // 헤더 정산월을 업로드한 달로
   renderSiteKpis();

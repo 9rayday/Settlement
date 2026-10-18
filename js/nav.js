@@ -15,7 +15,7 @@ const PAGES = {
   "page-rate-kpx":    { group: "settle", crumb: ["정산관리", "정산", "정산요율관리"], title: "KPX 요율 관리" },
   "page-rate-tou":    { group: "settle", crumb: ["정산관리", "정산", "정산요율관리"], title: "시간대별 요금제 관리" },
   "page-rate-market": { group: "settle", crumb: ["정산관리", "정산", "정산요율관리"], title: "SMP · REC 가격" },
-  "page-rec":         { group: "settle", crumb: ["정산관리"], title: "초과발전량 REC 관리" },
+  "page-rec":         { group: "settle", crumb: ["정산관리", "정산"], title: "초과발전량 REC 관리" },
   "page-admin-users": { group: "settle", crumb: ["정산관리"], title: "권한관리", need: "admin" }
 };
 // 페이지별 수정 권한 (없으면 "조회 전용" 표시, 실제 저장은 서버가 막는다)

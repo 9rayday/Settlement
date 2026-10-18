@@ -31,6 +31,7 @@ const PLANT_FORM = [
   { section: "계약정보" },
   { k: "정산방식", label: "정산방식", type: "select", options: ["", "실시간 정산", "월간균등 정산"] },
   { k: "계약단가", label: "계약단가 (원/kWh)", type: "number" },
+  { k: "REC가중치", label: "REC 가중치", type: "number", placeholder: "1.0" },
   { k: "수수료율", label: "거래수수료 (원/kWh)", type: "number", placeholder: "0.1193" },
   { k: "계약기간", label: "계약기간 (년)", type: "number" },
   { k: "계약일자", label: "계약시작일", type: "date" },

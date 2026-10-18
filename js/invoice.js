@@ -17,14 +17,47 @@ function onPlantSelectChange(newPlant){
 }
 
 async function loadPlantContext(){
-  if(!selectedPlant || !settleMonth){
-    renderPlantAdjustTab();
-    renderInvoicePreview();
-    return;
-  }
-  adjustmentsByPlant[selectedPlant] = await fetchAdjustments(settleMonth, selectedPlant);
-  renderPlantAdjustTab();
   renderInvoicePreview();
+}
+
+/* ============ 발전대금 계산 (버튼 하나): 실적 기록 · 발전소별 지급액 저장 · 정산서 ============ */
+let genCalcDone = false;
+function genReset(){
+  genCalcDone = false;
+  const btn = document.getElementById("genCalcBtn"); if(btn) btn.disabled = !plants.length;
+  ["exportBtn","pdfBtn","exportAllBtn"].forEach(id => { const b = document.getElementById(id); if(b) b.disabled = true; });
+  const r = document.getElementById("genResult"); if(r) r.innerHTML = "";
+  const p = document.getElementById("genPick"); if(p) p.style.display = "none";
+  const st = document.getElementById("genCalcStatus"); if(st) st.textContent = "";
+  renderInvoicePreview();
+}
+async function genCalculate(){
+  if(!plants.length || !settleMonth) return;
+  if(typeof requirePerm === "function" && !requirePerm("settle")) return;
+  const btn = document.getElementById("genCalcBtn"), st = document.getElementById("genCalcStatus");
+  btn.disabled = true; st.textContent = "계산 중...";
+  try{
+    genCalcDone = true;
+    await syncPerformanceToGas(); // 월별실적로그·실적그리드 기록, 계약이행현황 갱신, 발전대금 저장(genpay)
+    renderGenResult();
+    ["exportBtn","pdfBtn","exportAllBtn"].forEach(id => { document.getElementById(id).disabled = false; });
+    document.getElementById("genPick").style.display = "flex";
+    st.textContent = `${settleMonth.slice(0,4)}.${settleMonth.slice(4)} 계산 완료`;
+  }catch(e){ st.textContent = "오류: " + e.message; }
+  btn.disabled = false;
+}
+function renderGenResult(){
+  const host = document.getElementById("genResult"); if(!host) return;
+  const f = n => n==null ? "-" : Math.round(n).toLocaleString();
+  const rows = plants.map(p => ({ p, c: calcInvoice(p) })).filter(x => x.c);
+  const sum = k => rows.reduce((t, x) => t + (Number(x.c[k]) || 0), 0);
+  host.innerHTML = `<div class="table-wrap" style="margin-top:12px"><table class="grid gen-result">
+    <tr><th>발전소</th><th>공급량 (kWh)</th><th>계약단가</th><th>전력량요금 (VAT 포함)</th><th>거래수수료 (VAT 포함)</th><th>위약금</th><th>지급액</th></tr>
+    ${rows.map(({p, c}) => `<tr data-p="${p}"><td><a href="#" class="gen-open" data-p="${p}">${p}</a></td><td class="num">${f(c.supply)}</td><td class="num">${c.unitPrice==null ? '<span class="tag bad">미등록</span>' : c.unitPrice}</td>
+      <td class="num">${f(c.subtotal1)}</td><td class="num">${f(c.subtotal2)}</td><td class="num">${c.penalty ? f(c.penalty) : "-"}</td><td class="num"><b>${f(c.payment)}</b></td></tr>`).join("")}
+    <tr class="total"><td>합계 (${rows.length}개소)</td><td class="num">${f(sum("supply"))}</td><td></td><td class="num">${f(sum("subtotal1"))}</td><td class="num">${f(sum("subtotal2"))}</td><td class="num">${f(sum("penalty"))}</td><td class="num"><b>${f(sum("payment"))}</b></td></tr>
+  </table></div>`;
+  host.querySelectorAll(".gen-open").forEach(a => a.onclick = e => { e.preventDefault(); onPlantSelectChange(a.dataset.p); document.getElementById("invoiceHost").scrollIntoView({ behavior: "smooth" }); });
 }
 
 /* ============ Date helpers (연간보장공급량 회차 계산) ============ */
@@ -108,6 +141,7 @@ async function saveGenPay(){
 /* ============ Tab 2: 발전소별 확인/조정 ============ */
 function renderPlantAdjustTab(){
   const host = document.getElementById("plantAdjustHost");
+  if(!host) return; // 발전소별 확인/조정 화면은 없앰 (발전대금 계산 버튼 하나로)
   if(!selectedPlant || !aggByPlant[selectedPlant]){ host.style.display="none"; return; }
   host.style.display = "block";
   const a = aggByPlant[selectedPlant];
@@ -154,7 +188,7 @@ async function handleRefreshMaster(){
 /* ============ Tab 3: 정산서 미리보기 ============ */
 async function renderInvoicePreview(){
   const host = document.getElementById("invoiceHost");
-  if(!selectedPlant || !aggByPlant[selectedPlant]){ host.style.display="none"; return; }
+  if(!genCalcDone || !selectedPlant || !aggByPlant[selectedPlant]){ host.style.display="none"; return; }
   host.style.display = "block";
   host.innerHTML = await buildInvoiceHtml(selectedPlant);
   if(typeof fitDocs === "function") fitDocs(host); // A4 한 장 맞춤 (js/billing.js)
