@@ -586,3 +586,13 @@ td.empty{ text-align:center; }
 .btn-link{ border:0; background:none; color:var(--sub); text-decoration:underline; cursor:pointer; font-size:12px; }
 .gen-result td.num{ text-align:right; }
 .gen-result a{ color:var(--ink); }
+/* 등록 폼: 4열 고정 · 라벨 한 줄 → 칸 위치 정렬 */
+.reg-form{ grid-template-columns:repeat(4, minmax(0, 1fr)) !important; align-items:end; }
+.reg-field label{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.4; }
+.reg-field.wide{ grid-column:span 2; }
+@media (max-width:1100px){ .reg-form{ grid-template-columns:repeat(2, minmax(0, 1fr)) !important; } }
+@media (max-width:600px){ .reg-form{ grid-template-columns:1fr !important; } .reg-field.wide{ grid-column:auto; } }
+.reg-field.full{ grid-column:1 / -1 !important; }
+.rec-detail{ max-width:520px; margin-top:12px; }
+.rec-detail th{ width:55%; text-align:left; background:#F4F6F9; }
+.rec-detail td.num{ text-align:right; }

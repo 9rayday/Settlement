@@ -208,22 +208,22 @@
     const pd = ctx.prevDiff || { taxable: 0, exempt: 0 };
     const expectedSurcharge = E.round(supplyTotal * rates.surcharge);
     // 초과발전량 REC 대금 (과세): ctx.recItems [{ key, label, amount, qty }] — 발생월 2달 뒤 가정산에 반영
-    const recItems = (ctx.recItems || []).map(x => Object.assign({}, x, { amount: Math.round(Number(x.amount) || 0) }));
-    const recTotal = recItems.reduce((t, x) => t + x.amount, 0);
+    const recItems = (ctx.recItems || []).map(x => Object.assign({}, x, { amount: Math.round(Number(x.amount) || 0), fee: Math.round(Number(x.fee) || 0) }));
+    const recTotal = recItems.reduce((t, x) => t + x.amount, 0), recFee = recItems.reduce((t, x) => t + x.fee, 0); // REC 매매금액 · 용역 수수료 (별도)
 
-    const supplyBefore = energy + netTotal + fee + recTotal + cs.taxable;
+    const supplyBefore = energy + netTotal + fee + recTotal + recFee + cs.taxable;
     const supplyAfter = supplyBefore + pd.taxable;
     const vat = {
       energy: E.round(energy * rates.vatRate), network: E.round(netTotal * rates.vatRate),
-      fee: E.round(fee * rates.vatRate), rec: E.round(recTotal * rates.vatRate), surcharge: E.round(cs.taxable * rates.vatRate), prevDiff: E.round(pd.taxable * rates.vatRate)
+      fee: E.round(fee * rates.vatRate), rec: E.round(recTotal * rates.vatRate), recFee: E.round(recFee * rates.vatRate), surcharge: E.round(cs.taxable * rates.vatRate), prevDiff: E.round(pd.taxable * rates.vatRate)
     };
-    const vatTotal = vat.energy + vat.network + vat.fee + vat.rec + vat.surcharge + vat.prevDiff;
+    const vatTotal = vat.energy + vat.network + vat.fee + vat.rec + vat.recFee + vat.surcharge + vat.prevDiff;
     const taxInvoice = supplyAfter + vatTotal;
     const fund = E.floorTo((energy + netTotal + fee + expectedSurcharge) * rates.fundRate, -1);
     const penalty = (ctx.penalty && ctx.penalty.amount) || 0; // 계약 위약금 (청구서 차감 방식) — 비과세 차감
     const billTotal = cs.exempt + fund + pd.exempt - penalty;
     return {
-      supplyTotal, energy, energyParts, netByPlant: net, netTotal, fee, recItems, recTotal, expectedSurcharge, fund,
+      supplyTotal, energy, energyParts, netByPlant: net, netTotal, fee, recItems, recTotal, recFee, expectedSurcharge, fund,
       confirmedSurcharge: cs, prevDiff: pd, supplyBefore, supplyAfter, vat, vatTotal, taxInvoice,
       penalty, penaltyLabel: (ctx.penalty && ctx.penalty.label) || "", exemptSubtotal: billTotal, grandTotal: taxInvoice + billTotal,
       loss: { deficitSimple: match.totals.deficitSimple, deficitLoss: match.totals.deficitLoss }

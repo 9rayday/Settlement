@@ -213,7 +213,7 @@ function fillProvisionalForm(app, month) {
 
 /* ---------- REC 청구: 확정한 초과발전량 REC 정산(recset:)을 가정산서에 추가 ----------
  * 기본값 = 발생월(정산 기간 끝)이 정산월 2달 전인 정산. 다른 달 가정산서에 이미 넣은 정산은 목록에서 뺀다. */
-const recBillLabel = s => `${s.from === s.to ? monthLabel(s.from) : monthLabel(s.from) + "~" + monthLabel(s.to)} 발생 · ${s.totals.recQty} REC · ${won(s.totals.amount)}`;
+const recBillLabel = s => `${s.from === s.to ? monthLabel(s.from) : monthLabel(s.from) + "~" + monthLabel(s.to)} 발생 · ${s.totals.recQty} REC · ${won(s.totals.amount)}${s.fee ? " + 수수료 " + won(s.fee) : ""}`;
 function recBillCandidates(app, month) {
   if (typeof recSettlements !== "function") return [];
   return recSettlements(app).filter(s => s.totals && s.totals.amount && (!s.billedIn || s.billedIn === month));
@@ -236,7 +236,7 @@ function fillRecBill(app, month) {
 }
 function recBillItems(app) {
   return (billState.recPicked || []).map(k => ({ k, s: Store.get(k, null) })).filter(x => x.s && x.s.totals).map(({ k, s }) => ({
-    key: k, label: s.from === s.to ? monthLabel(s.from) : `${monthLabel(s.from)}~${monthLabel(s.to)}`, amount: s.totals.amount, qty: s.totals.recQty }));
+    key: k, label: s.from === s.to ? monthLabel(s.from) : `${monthLabel(s.from)}~${monthLabel(s.to)}`, amount: s.totals.amount, fee: s.fee || 0, mwhU: s.totals.eligibleU || 0, qty: s.totals.recQty }));
 }
 
 function splitConfirmed() {
@@ -423,14 +423,16 @@ function invoiceHtml(R) {
     plantRows,
     row("거래수수료", won(inv.fee), `공급량 계 × ${rates.tradeFee} 원/kWh`),
     ...(inv.recTotal ? [row("REC 대금", won(inv.recTotal), inv.recItems.map(x => `${esc(x.label)} 발생 ${x.qty} REC`).join(", "))] : []),
+    ...(inv.recFee ? [row("REC 용역 수수료", won(inv.recFee), inv.recItems.filter(x => x.fee).map(x => `${esc(x.label)} 정산 ${(x.mwhU / 1e6).toLocaleString(undefined, { maximumFractionDigits: 3 })} MWh`).join(", "))] : []),
     row(`${prevM}월 확정 부가정산금 (과세)`, won(inv.confirmedSurcharge.taxable), `${prevM}월 직접PPA 전력거래대금 오차 정산서`),
-    row("공급가액 (전월 차액 반영 전)", won(inv.supplyBefore), "전력량요금 + 망이용요금 + 거래수수료" + (inv.recTotal ? " + REC 대금" : "") + " + 확정 부가정산금 (과세)", "total"),
+    row("공급가액 (전월 차액 반영 전)", won(inv.supplyBefore), "전력량요금 + 망이용요금 + 거래수수료" + (inv.recTotal ? " + REC 대금" : "") + (inv.recFee ? " + REC 용역 수수료" : "") + " + 확정 부가정산금 (과세)", "total"),
     row("전월 차액 (과세)", won(inv.prevDiff.taxable), `${prevM}월 직접PPA 전력거래대금 오차 정산서`),
     row("공급가액 (전월 차액 반영 후)", won(inv.supplyAfter), "공급가액 (전월 차액 반영 전) + 전월 차액 (과세)", "total"),
-    `<tr><td class="label" rowspan="${inv.recTotal ? 6 : 5}">항목별<br>부가세</td>${sub("전력량요금", won(inv.vat.energy), "전력량요금 × 10%")}</tr>`,
+    `<tr><td class="label" rowspan="${5 + (inv.recTotal ? 1 : 0) + (inv.recFee ? 1 : 0)}">항목별<br>부가세</td>${sub("전력량요금", won(inv.vat.energy), "전력량요금 × 10%")}</tr>`,
     `<tr>${sub("망이용요금", won(inv.vat.network), "망이용요금 × 10%")}</tr>`,
     `<tr>${sub("거래수수료", won(inv.vat.fee), "거래수수료 × 10%")}</tr>`,
     ...(inv.recTotal ? [`<tr>${sub("REC 대금", won(inv.vat.rec), "REC 대금 × 10%")}</tr>`] : []),
+    ...(inv.recFee ? [`<tr>${sub("REC 수수료", won(inv.vat.recFee), "REC 용역 수수료 × 10%")}</tr>`] : []),
     `<tr>${sub("부가정산금", won(inv.vat.surcharge), `${prevM}월 확정 부가정산금 (과세) × 10%`)}</tr>`,
     `<tr>${sub("전월 차액", won(inv.vat.prevDiff), "전월 차액 (과세) × 10%")}</tr>`,
     row("부가가치세 계", won(inv.vatTotal), "항목별 부가가치세 합계"),
@@ -704,6 +706,7 @@ function trueUpHtml(R) {
     line("부가세 · 망이용요금", av("network"), conf.vat.network),
     line("부가세 · 거래수수료", av("fee"), conf.vat.fee),
     ...(conf.recTotal ? [line("부가세 · REC 대금", av("rec"), conf.vat.rec)] : []),
+    ...(conf.recFee ? [line("REC 용역 수수료", A ? A.recFee || 0 : null, conf.recFee), line("부가세 · REC 수수료", av("recFee"), conf.vat.recFee)] : []),
     line("부가세 · 부가정산금", av("surcharge"), conf.vat.surcharge),
     line("부가세 · 전월 차액", av("prevDiff"), conf.vat.prevDiff),
     line("부가가치세 계", aVal("vatTotal"), conf.vatTotal),
