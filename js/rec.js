@@ -266,6 +266,7 @@ function renderRecPage() {
   }
   const smpMonths = Store.keys("smp:").map(k => k.split(":")[1]).sort();
   const plants = Object.values(idx).filter(e => (e.app || "") === app).sort((a, b) => a.name.localeCompare(b.name));
+  if (!recState.result && months.length && recState.from && recState.to) { try { recState.result = recCompute(app, recState.from, recState.to); } catch (e) { /* 계산 버튼으로 다시 */ } } // 열면 바로 계산
   const ymOpts = sel => [...new Set(months.concat(sel ? [sel] : []))].sort().map(m => `<option value="${m}"${m === sel ? " selected" : ""}>${ymLab(m)}</option>`).join("");
   host.innerHTML = `
     <div class="card">
@@ -286,13 +287,11 @@ function renderRecPage() {
             <td class="num">${recFmt(exU)}</td></tr>`; }).join("")
           : `<tr><td colspan="5" class="empty">초과발전량 없음</td></tr>`}</table></div>
       <div class="rec-actions">${plants.some(e => !recPlantCfg(e.name, app).weightReg) ? `<button class="btn secondary" id="recSaveCfg">가중치 저장</button>` : ""}
-        <span class="rec-smp">시간별 SMP ${smpMonths.length ? smpMonths.map(ymLab).join(", ") : "없음"}</span>
-        <label class="btn secondary rec-up">SMP 업로드<input type="file" id="recFile" accept=".xlsx,.xls,.csv" multiple hidden></label></div>
+        <a class="rec-smp" href="#rate-market">시간대별 SMP ${smpMonths.length ? smpMonths.map(ymLab).join(", ") : "없음"}</a></div>
       <div id="recResult">${recState.result && recState.result.app === app ? recResultHtml(recState.result) : ""}</div>
     </div>
     <div class="card"><h2>초과발전량 REC 현황</h2><div id="recCal">${recCalendarHtml()}</div></div>
     <div class="card"><h2>확정 이력</h2>${recHistoryHtml()}</div>`;
-  document.getElementById("recFile").onchange = e => { if (e.target.files.length) recOnFiles([...e.target.files]); e.target.value = ""; };
   if (document.getElementById("recSaveCfg")) document.getElementById("recSaveCfg").onclick = async () => {
     const w = recW();
     host.querySelectorAll(".rec-w").forEach(i => { const n = i.dataset.n; w[n] = Object.assign({}, w[n], { weight: i.value === "" ? null : Number(i.value) }); });

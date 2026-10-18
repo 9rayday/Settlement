@@ -100,7 +100,24 @@ function resetIdle() {
   _idleTimer = setTimeout(() => logout("5분 동안 사용이 없어 자동 로그아웃되었습니다."), IDLE_LIMIT_MS);
 }
 
+/* ----- 화면 배율 (80~120%, 이 브라우저에 기억) — 화면 크기에 따라 표가 잘리면 줄여서 본다. 인쇄할 때는 100% ----- */
+const ZOOM_KEY = "settlement.zoom";
+function applyZoom(v) { // 배율만큼 화면 높이(vh) 보정 — 사이드 메뉴가 끝까지 차도록
+  const z = v / 100, root = document.documentElement;
+  root.style.zoom = v === 100 ? "" : String(z);
+  root.style.setProperty("--zoom", String(z));
+}
+function initZoom() {
+  const sel = document.getElementById("zoomSel"); if (!sel) return;
+  let v = 100; try { v = Number(localStorage.getItem(ZOOM_KEY)) || 100; } catch (e) { /* 무시 */ }
+  sel.value = String(v); applyZoom(v);
+  sel.onchange = () => { const z = Number(sel.value) || 100; applyZoom(z); try { localStorage.setItem(ZOOM_KEY, String(z)); } catch (e) { /* 무시 */ } };
+  window.addEventListener("beforeprint", () => { document.documentElement.style.zoom = ""; });
+  window.addEventListener("afterprint", () => applyZoom(Number(sel.value) || 100));
+}
+
 function initHeader() {
+  initZoom();
   let name = ""; try { name = sessionStorage.getItem(USER_KEY) || ""; } catch (e) { /* 무시 */ }
   document.getElementById("hdrUser").textContent = name ? `${name}님 · ${userRole()}` : "";
   if (TEST_TODAY) { const t = document.getElementById("testToday"); t.hidden = false; t.textContent = `테스트 날짜 ${TEST_TODAY}`; }

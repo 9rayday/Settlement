@@ -596,3 +596,24 @@ td.empty{ text-align:center; }
 .rec-detail{ max-width:520px; margin-top:12px; }
 .rec-detail th{ width:55%; text-align:left; background:#F4F6F9; }
 .rec-detail td.num{ text-align:right; }
+
+/* 화면 배율 · 넓은 표 가로 스크롤 */
+.hdr-zoom{ display:inline-flex; align-items:center; gap:4px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.25); border-radius:8px; padding:3px 6px; color:#E5E7EB; }
+.hdr-zoom svg{ width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:2; }
+.hdr-zoom select{ background:transparent; border:0; color:#fff; font:inherit; font-size:13px; font-weight:600; min-width:0; padding:2px; color-scheme:dark; cursor:pointer; }
+.card{ overflow-x:auto; }
+.grid-wrap, .table-wrap{ overflow-x:auto; max-width:100%; }
+@media (max-width:720px){ .hdr-zoom{ display:none; } }
+/* 시간대별 SMP 표 */
+.smp-wrap{ max-height:none; margin-top:10px; }
+.smp-table th, .smp-table td{ padding:2px 3px; font-size:11.5px; text-align:center; }
+.smp-table input{ width:100%; min-width:46px; padding:3px 2px; border:1px solid var(--line); border-radius:4px; font-size:11.5px; text-align:right; }
+.smp-table td.num{ text-align:right; white-space:nowrap; font-weight:600; }
+.mkt-table td.mkt-cur{ background:#FFF4E6; }
+.mkt-table a.mkt-m{ color:var(--ink); }
+:root{ --zoom:1; }
+.layout{ min-height:calc(100vh / var(--zoom) - 72px); }
+.sidebar{ height:calc(100vh / var(--zoom)); }
+.smp-table th, .smp-table td{ padding:1px 1px; }
+.smp-table input{ min-width:44px; width:44px; padding:3px 2px; font-size:11px; letter-spacing:-0.2px; text-align:right; border-color:#E3E7EC; }
+.smp-table th:first-child{ position:sticky; left:0; z-index:1; background:#EEF1F5; }
