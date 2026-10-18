@@ -151,7 +151,7 @@
   /* ---------- 2) 망이용요금 (발전소별) ----------
    * KPX 망이용 유형 (js/kpxrates.js NET_TYPES). 배전요금 여부는 전기사용자(수요망)가 정한다 — 발전소가 배전망이어도 사용자가 송전이면 배전요금 없음.
    *  1·5·6 사용자 송전:                 TRUNC(s×발전측) + TRUNC(s×(1−송전손실률)×수요측)
-   *  2     사용자 배전고압 (접속점 다름): 위 + TRUNC(s×(1−종합손실률)×배전고압)
+   *  2·7·8 사용자 배전고압 (송전 발전사, 또는 배전 발전사·다른 변전소): 위 + TRUNC(s×(1−종합손실률)×배전고압)
    *  3·4   배전 발전사 – 배전 사용자 같은 접속점: TRUNC(s×(1−배전손실률)×배전고압)
    * s = ROUND(월 공급량). demand: 수요지 지역 문자열 또는 { region, grid: "송전망"|"배전망", node: 접속점 }
    */
@@ -175,7 +175,8 @@
       fee += E.trunc(s * (1 - rates.totalLossRate) * dist);
       basis = `${s.toLocaleString()} kWh × [ ${g} + (1 − ${pct(rates.transLossRate)}) × ${dm} + (1 − ${pct(rates.totalLossRate)}) × ${dist} ]`;
     }
-    return { supplyRounded: s, fee, type: userDist ? 2 : plantDist ? (plantInfo.distLow ? 6 : 5) : 1, basis };
+    const type = userDist ? (plantDist ? (plantInfo.distLow ? 8 : 7) : 2) : (plantDist ? (plantInfo.distLow ? 6 : 5) : 1);
+    return { supplyRounded: s, fee, type, basis };
   };
 
   /* ---------- 3) 청구서 (가정산) ----------

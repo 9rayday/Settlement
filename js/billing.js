@@ -353,7 +353,7 @@ function invoiceHtml(R) {
       <tr class="pay"><th class="section">합계</th><td class="label">당월 청구 계</td><td class="num" colspan="5">${won(inv.grandTotal)}</td></tr></table>
     <table class="doc-table">${DOC_COLS}
       <tr><th class="section" rowspan="${plantsN.length + 1}">발전소별<br>망이용요금</th><td class="label">발전소</td><td class="label">공급량 (반올림)</td><td class="label">망이용요금</td><td class="label" colspan="3">산출근거 (원/kWh)</td></tr>
-      ${plantsN.map(p => `<tr><td>${esc(p)}</td><td class="num">${inv.netByPlant[p].supplyRounded.toLocaleString()} kWh</td><td class="num">${won(inv.netByPlant[p].fee)}</td><td class="basis" colspan="3">= ${esc(inv.netByPlant[p].basis || "")}</td></tr>`).join("")}</table>
+      ${plantsN.map(p => `<tr><td>${esc(p)}</td><td class="num">${inv.netByPlant[p].supplyRounded.toLocaleString()} kWh</td><td class="num">${won(inv.netByPlant[p].fee)}</td><td class="basis" colspan="3">${inv.netByPlant[p].type ? "유형 " + "①②③④⑤⑥⑦⑧"[inv.netByPlant[p].type - 1] + " " : ""}= ${esc(inv.netByPlant[p].basis || "")}</td></tr>`).join("")}</table>
     ${buyerTable(R, `${INVOICE_PREFIX}-${R.month}-0001`)}
     ${docSignature(R, "가정산", c)}
   </div>`;
