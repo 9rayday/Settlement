@@ -166,7 +166,7 @@ function renderPerfPage(kind) {
             <td>${y.n} / ${c.years}년차</td><td>${bar}</td>
             <td class="num">${mwh(y.guar)}</td><td class="num">${future ? "-" : mwh(y.actual)}</td><td class="num">${future ? "-" : Math.round((y.ratio + 1) * 100) + "%"}</td>
             <td><span class="perf-badge ${STATUS_CLS[y.status]}">${y.status}</span></td></tr>`;
-        }).join("") : `<tr><td colspan="10" class="hint">등록된 계약이 없습니다.</td></tr>`}</table></div>
+        }).join("") : `<tr><td colspan="10" class="empty">없음</td></tr>`}</table></div>
       ${pagerHtml(pk, pg.page, pg.pages)}
       <div id="${kind}PerfDetail"></div></div>`;
   bindPager(host, () => renderPerfPage(kind));

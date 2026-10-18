@@ -546,3 +546,27 @@ table.perf-years td:nth-child(-n+2), table.perf-years .perf-sub{ white-space:now
 .rc-chip.rc-done{ background:#E6F5F1; color:var(--accent-2); }
 .rc-chip.rc-open{ background:#FFF1E0; color:#9A5B00; }
 .rec-cal td span{ white-space:nowrap; } .rec-cal th, .rec-cal td{ min-width:52px; }
+
+/* 깔끔한 빈 상태 · REC 화면 · 대시보드 연간 종합 · 그룹화(위아래) */
+.empty{ padding:14px 4px; color:#9AA1AB; font-size:13px; text-align:center; }
+td.empty{ text-align:center; }
+.rec-top{ display:flex; flex-wrap:wrap; align-items:center; gap:8px 10px; }
+.rec-top label{ font-size:12.5px; color:var(--sub); font-weight:600; }
+.rec-top select{ min-width:0; }
+.rec-top #recApp{ min-width:240px; }
+.rec-actions{ display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-top:12px; }
+.rec-actions .rec-smp{ font-size:12.5px; color:var(--sub); margin-left:auto; }
+.rec-up{ cursor:pointer; }
+.rec-years{ display:flex; gap:6px; margin-bottom:10px; }
+.dash-tabs{ display:inline-flex; margin-left:14px; border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+.dash-tabs button{ border:0; background:#fff; padding:6px 14px; font:inherit; font-size:13px; cursor:pointer; color:var(--sub); }
+.dash-tabs button.on{ background:var(--navy); color:#fff; }
+.dash-trend tr.muted td{ color:#B5BAC2; }
+.dash-trend .bar-cell{ width:18%; }
+.pl-bar{ display:block; height:10px; border-radius:3px; }
+.pl-bar.pos{ background:#9FD5C8; } .pl-bar.neg{ background:#E9A8A2; }
+.dash-year-table th, .dash-year-table td{ font-size:12px; white-space:nowrap; }
+.group-layout{ grid-template-columns:1fr !important; }
+.group-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+.group-head h2{ margin:0; }
+.group-list .reg-cards{ grid-template-columns:repeat(auto-fill, minmax(230px, 1fr)); }

@@ -1,16 +1,10 @@
-/* ============ 초과발전량 REC 관리 (#page-rate-rec) ============
- * 초과발전량(MWh) × REC 가중치 → REC 환산(소수 6자리 절사). REC가 정수 1개 찼을 때만 그 REC에 속한 초과발전량을 정산.
- *   REC 매매금액 = 계약가(원/MWh) × 정산대상 초과전력량(MWh) − Σ(정산대상 초과전력량 × 시간별 SMP × 1000)
- *   REC 단가(원/REC) = 매매금액 / REC 수량, 용역 수수료 = 정산 MWh 합 × 수수료(원/kWh) × 1000
- * 정수로 차지 않은 REC(소수 부분)는 다음 정산으로 이월한다 (이월분이 다음 정산의 맨 앞에 들어감).
- * 계산은 정수(백만분의 1 MWh/REC, 1/100 원) 단위로 해서 엑셀 부동소수점 오차 없이 정확하게 맞춘다.
- *
- * 저장 (앱데이터):
- *   recx:YYYYMM:신청번호 = { 발전기명: [[일, 시(0~23), 초과전력량(μMWh)], ...] }   초과전력량 > 0 인 시간만
- *   smp:YYYYMM          = { 일: [24시간 SMP 원/kWh] }
- *   recw                = { 발전소(공백 제거): { weight, price } }   가중치 · 계약가(원/MWh, 빈칸이면 발전소 계약단가 × 1000 → 기본값)
- *   reccfg              = { contract: 기본 계약가 원/MWh, fee: 용역 수수료 원/kWh }
- *   recset:신청번호:FROM-TO = 확정한 정산 (발전소별 결과 + 이월 REC)
+/* ============ 초과발전량 REC 관리 (#page-rec) ============
+ * 초과발전량(MWh) × REC 가중치 → REC 환산(6자리 절사). 정수 REC에 속한 초과발전량만 정산, 소수 REC는 다음 정산으로 이월.
+ *   매매금액 = 계약가(원/MWh) × 정산 MWh − Σ(MWh × 시간별 SMP × 1000),  REC 단가 = 매매금액 / REC 수량
+ *   기본계약가 = 전기사용자 계약단가 × 1000 (발전소별로 바꿀 수 있음)
+ *   용역 수수료 = 정산 MWh × (전기사용자 계약단가 − 발전사업자 계약단가) × 1000
+ * 초과발전량은 전기사용자 오차정산서를 발행할 때 계산한 시간별 값(recx:YYYYMM:신청번호)을 쓴다. 시간별 SMP는 업로드.
+ * 정수(μMWh·μREC, 1/100원) 단위로 계산해 엑셀과 정확히 일치한다.
  */
 const REC = (() => {
   const norm = s => String(s == null ? "" : s).replace(/\s/g, "");
@@ -57,7 +51,7 @@ const REC = (() => {
 
 const recState = { app: "", from: "", to: "", result: null, year: null, msg: "" };
 const rEscR = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const recCfg = () => Object.assign({ contract: 174000, fee: 3 }, Store.get("reccfg", {}) || {});
+const recCfg = () => Object.assign({ contracts: {} }, Store.get("reccfg", {}) || {});
 const recW = () => Store.get("recw", {}) || {};
 const ymAdd = (ym, n) => { const t = Number(ym.slice(0, 4)) * 12 + Number(ym.slice(4)) - 1 + n; return `${Math.floor(t / 12)}${String(t % 12 + 1).padStart(2, "0")}`; };
 const ymLab = ym => `${ym.slice(0, 4)}.${ym.slice(4)}`;
@@ -144,58 +138,66 @@ async function recOnFiles(files) {
   recState.msg = msgs.join("\n");
   renderRecPage();
 }
-// 발전사업자 정산에서 올린 KPX 확정 파일(초과전력량 있음)도 자동 저장 (upload.js 에서 호출)
-async function recCaptureKpxRows(rows) {
-  if (!rows || !rows.length || typeof can === "function" && !can("settle")) return;
-  const ws = XLSX.utils.json_to_sheet(rows), wb = { SheetNames: ["kpx"], Sheets: { kpx: ws } };
-  const p = recParseWorkbook(wb); if (!p.exRows) return;
-  await recSaveParsed(p);
-  if (document.getElementById("recPage")) renderRecPage();
+// 전기사용자 오차정산서 발행 때 계산한 시간별 초과발전량을 저장 (billing.js saveTrueUp 에서 호출)
+// byPlant: { 발전기명: [[일, 시, 초과 kWh], ...] }  → recx:YYYYMM:신청번호 (그 달·그룹 전체 교체)
+async function recSaveTrueUpExcess(app, month, byPlant) {
+  const data = {};
+  Object.keys(byPlant).forEach(p => { const rows = byPlant[p].filter(r => r[2] > 0).map(r => [r[0], r[1], Math.round(r[2] * 1000)]); if (rows.length) data[p] = rows; });
+  return Store.set(`recx:${month}:${app}`, data);
 }
 
 /* ---------- 데이터 모으기 ---------- */
 function recExcessIndex() { // { plantNorm: { name, app, months: {YYYYMM: [[d,h,exU]]} } }
   const idx = {};
-  Store.keys("recx:").forEach(k => {
+  Store.keys("recx:").forEach(k => { // "-"(파일, 신청번호 없음) 키가 먼저, 신청번호(오차정산서) 키가 뒤 → 같은 시간은 오차정산서 값
     const parts = k.split(":"), ym = parts[1], app = parts.slice(2).join(":"), noApp = app.charAt(0) === "-", data = Store.get(k, {}) || {};
     Object.keys(data).forEach(name => {
       const n = REC.norm(name), e = idx[n] || (idx[n] = { name, app: noApp ? "" : app, months: {} });
       if (!noApp && !e.app) e.app = app;
       const mm = e._m || (e._m = {}), byH = mm[ym] || (mm[ym] = {});
-      data[name].forEach(r => { byH[r[0] + "|" + r[1]] = r; }); // 같은 발전소·시간이 여러 파일에 있어도 한 번만
+      data[name].forEach(r => { byH[r[0] + "|" + r[1]] = r; });
     });
   });
-  Object.values(idx).forEach(e => { Object.keys(e._m).forEach(ym => { e.months[ym] = Object.values(e._m[ym]); }); delete e._m; });
-  // 그룹(신청번호): 설정에서 지정한 값 → 파일의 신청번호 → 발전소 등록 정보
   const w = recW();
   Object.entries(idx).forEach(([n, e]) => {
-    if (w[n] && w[n].app) { e.app = String(w[n].app).trim(); return; }
-    if (!e.app) { const m = recMaster(e.name); if (m) e.app = String(m["KPX신청번호"] || "").trim(); }
+    Object.keys(e._m).forEach(ym => { e.months[ym] = Object.values(e._m[ym]); }); delete e._m;
+    if (w[n] && w[n].app) e.app = String(w[n].app).trim();
+    else if (!e.app) { const m = recMaster(e.name); if (m) e.app = String(m["KPX신청번호"] || "").trim(); }
   });
   return idx;
 }
 function recMaster(name) { const n = REC.norm(name), all = (typeof Registry !== "undefined" && Registry.plants) ? Registry.plants() : {}; const k = Object.keys(all).find(x => REC.norm(x) === n); return k ? all[k] : null; }
-function recPlantCfg(name) {
-  const w = recW()[REC.norm(name)] || {}, m = recMaster(name), cfg = recCfg();
-  const price = Number(w.price) > 0 ? Number(w.price) : (m && Number(m["계약단가"]) > 0 ? Number(m["계약단가"]) * 1000 : cfg.contract);
-  const priceFrom = Number(w.price) > 0 ? "직접 입력" : (m && Number(m["계약단가"]) > 0 ? "발전소 계약단가" : "기본값");
-  return { weight: Number(w.weight) > 0 ? Number(w.weight) : null, price: Math.round(price), priceFrom };
+const recCustomer = app => app && typeof Registry !== "undefined" ? Registry.customerByApp(app) : null;
+// 기본계약가 = 저장값 → 전기사용자 계약단가 × 1000
+function recBaseContract(app) {
+  const saved = (recCfg().contracts || {})[app];
+  if (Number(saved) > 0) return { price: Math.round(Number(saved)), from: "입력값" };
+  const c = recCustomer(app);
+  return c && Number(c.unitPrice) > 0 ? { price: Math.round(Number(c.unitPrice) * 1000), from: "전기사용자 계약단가" } : { price: 0, from: "미등록" };
+}
+// 발전소별: 가중치 · 계약가(빈칸 = 기본계약가) · 수수료 단가(= 전기사용자 계약단가 − 발전사업자 계약단가, 원/kWh)
+function recPlantCfg(name, app) {
+  const w = recW()[REC.norm(name)] || {}, m = recMaster(name), base = recBaseContract(app);
+  const price = Number(w.price) > 0 ? Math.round(Number(w.price)) : base.price;
+  const genUnit = m && Number(m["계약단가"]) > 0 ? Number(m["계약단가"]) : null;
+  const feeRate = genUnit != null && base.price > 0 ? Math.round((base.price / 1000 - genUnit) * 10000) / 10000 : null;
+  return { weight: Number(w.weight) > 0 ? Number(w.weight) : null, price, genUnit, feeRate };
 }
 const recSmp = (ym, d, h) => { const s = Store.get(`smp:${ym}`, null); const v = s && s[d] ? s[d][h] : null; return v == null ? null : Math.round(Number(v) * 100); };
 function recSettlements(app) { return Store.keys(`recset:${app}:`).map(k => Object.assign({ key: k }, Store.get(k, {}))).filter(s => s.from).sort((a, b) => a.to.localeCompare(b.to)); }
 function recAllSettlements() { return Store.keys("recset:").map(k => Object.assign({ key: k }, Store.get(k, {}))).filter(s => s.from); }
-const recCustName = app => { const c = app && typeof Registry !== "undefined" ? Registry.customerByApp(app) : null; return c ? c.name : (app || "그룹 미지정"); };
+const recCustName = app => { const c = recCustomer(app); return c ? c.name : (app || "미지정"); };
 
 /* ---------- 정산 계산 ---------- */
 function recCompute(app, from, to) {
-  const idx = recExcessIndex(), cfg = recCfg(), warn = [];
+  const idx = recExcessIndex(), warn = [];
   const prev = recSettlements(app).filter(s => s.to < from).pop();
-  if (prev && ymAdd(prev.to, 1) !== from) warn.push(`직전 정산(${ymLab(prev.from)}~${ymLab(prev.to)}) 다음 달은 ${ymLab(ymAdd(prev.to, 1))}입니다. 그 사이 달이 정산에서 빠집니다.`);
-  if (recSettlements(app).some(s => !(s.to < from || s.from > to))) warn.push("이미 확정한 정산 기간과 겹칩니다. 확정하면 그 정산을 덮어씁니다.");
-  const plants = Object.values(idx).filter(e => (e.app || "") === app);
-  const rows = [], missingSmp = [];
-  plants.sort((a, b) => a.name.localeCompare(b.name)).forEach(e => {
-    const pc = recPlantCfg(e.name), carryIn = prev && prev.plants && prev.plants[REC.norm(e.name)] ? (prev.plants[REC.norm(e.name)].carry || []) : [];
+  if (prev && ymAdd(prev.to, 1) !== from) warn.push(`직전 정산(${ymLab(prev.from)}~${ymLab(prev.to)}) 이후 ${ymLab(ymAdd(prev.to, 1))}부터 빠진 달이 있습니다.`);
+  if (recSettlements(app).some(s => !(s.to < from || s.from > to))) warn.push("확정한 정산 기간과 겹칩니다. 확정하면 덮어씁니다.");
+  if (!recBaseContract(app).price) warn.push("기본계약가가 없습니다.");
+  const rows = [], missingSmp = [], noGenUnit = [];
+  Object.values(idx).filter(e => (e.app || "") === app).sort((a, b) => a.name.localeCompare(b.name)).forEach(e => {
+    const pc = recPlantCfg(e.name, app), carryIn = prev && prev.plants && prev.plants[REC.norm(e.name)] ? (prev.plants[REC.norm(e.name)].carry || []) : [];
     const pieces = carryIn.map(c => ({ ym: c.ym, d: c.d, h: c.h, smpC: c.smpC, recU: c.recU, carried: true }));
     Object.keys(e.months).filter(ym => ym >= from && ym <= to).sort().forEach(ym => {
       e.months[ym].slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]).forEach(([d, h, exU]) => {
@@ -206,40 +208,42 @@ function recCompute(app, from, to) {
     });
     if (!pieces.length) return;
     if (!pc.weight) { rows.push({ name: e.name, err: "가중치 미입력", pc }); return; }
-    rows.push(Object.assign({ name: e.name, pc, carryIn: carryIn.reduce((t, c) => t + c.recU, 0) }, REC.settle(pieces, pc.weight, pc.price)));
+    const r = REC.settle(pieces, pc.weight, pc.price);
+    r.fee = pc.feeRate != null ? REC.halfUp(r.eligibleU * Math.round(pc.feeRate * 10000), 1e7) : 0; // 정산 MWh × 수수료 단가(원/kWh) × 1000
+    if (pc.feeRate == null && r.recQty) noGenUnit.push(e.name);
+    rows.push(Object.assign({ name: e.name, pc, carryIn: carryIn.reduce((t, c) => t + c.recU, 0) }, r));
   });
-  if (missingSmp.length) warn.push(`SMP가 없는 시간 ${missingSmp.length}개 (예: ${[...new Set(missingSmp)].slice(0, 3).join(", ")}) — 시간별 SMP 파일을 올리세요. 지금은 0원으로 계산됩니다.`);
+  if (noGenUnit.length) warn.push(`발전사업자 계약단가 없음 ${noGenUnit.length}곳 — 수수료 0원`);
+  if (missingSmp.length) warn.push(`SMP 없는 시간 ${missingSmp.length}개 (${[...new Set(missingSmp)].slice(0, 3).join(", ")}…) — 0원으로 계산됨`);
   const ok = rows.filter(r => !r.err);
-  const totalMwhU = ok.reduce((t, r) => t + r.eligibleU, 0);
-  const fee = REC.halfUp(totalMwhU * cfg.fee * 1000, 1e6);
-  return { app, from, to, rows, warn, prev, totals: { recQty: ok.reduce((t, r) => t + r.recQty, 0), amount: ok.reduce((t, r) => t + r.amount, 0), eligibleU: totalMwhU, carryRecU: ok.reduce((t, r) => t + r.carryRecU, 0) }, fee, feeRate: cfg.fee, missingSmp: missingSmp.length };
+  return { app, from, to, rows, warn, prev, base: recBaseContract(app),
+    totals: { recQty: ok.reduce((t, r) => t + r.recQty, 0), amount: ok.reduce((t, r) => t + r.amount, 0), eligibleU: ok.reduce((t, r) => t + r.eligibleU, 0), carryRecU: ok.reduce((t, r) => t + r.carryRecU, 0) },
+    fee: ok.reduce((t, r) => t + r.fee, 0), missingSmp: missingSmp.length };
 }
 
 async function recConfirm() {
   const R = recState.result; if (!R) return;
-  if (R.rows.some(r => r.err)) { alert("가중치가 없는 발전소가 있습니다. 설정에서 가중치를 입력하세요."); return; }
-  if (R.missingSmp && !confirm(`SMP가 없는 시간이 ${R.missingSmp}개 있어 0원으로 계산됐습니다. 그래도 확정할까요?`)) return;
-  // 겹치는 기존 정산 삭제
+  if (R.rows.some(r => r.err)) { alert("가중치가 없는 발전소가 있습니다."); return; }
+  if (R.missingSmp && !confirm(`SMP 없는 시간 ${R.missingSmp}개가 0원으로 계산됐습니다. 확정할까요?`)) return;
   for (const s of recSettlements(R.app).filter(s => !(s.to < R.from || s.from > R.to))) await Store.set(s.key, {});
   const plants = {};
-  R.rows.forEach(r => { plants[REC.norm(r.name)] = { name: r.name, weight: r.pc.weight, contract: r.pc.price, recQty: r.recQty, eligibleU: r.eligibleU, smpSum: r.smpSum, amount: r.amount, recPrice: r.recPrice, recPerMwh: r.recPerMwh, carryRecU: r.carryRecU, carryInU: r.carryIn, carry: r.carry }; });
-  const where = await Store.set(`recset:${R.app || "-"}:${R.from}-${R.to}`, { app: R.app, from: R.from, to: R.to, plants, totals: R.totals, fee: R.fee, feeRate: R.feeRate, savedAt: new Date().toISOString() });
-  if (where !== "denied") { recState.msg = `${recCustName(R.app)} ${ymLab(R.from)}~${ymLab(R.to)} REC 정산 확정 (${where === "remote" ? "구글시트" : "이 브라우저"} 저장) — 남은 소수 REC는 다음 정산으로 이월`; renderRecPage(); }
+  R.rows.forEach(r => { plants[REC.norm(r.name)] = { name: r.name, weight: r.pc.weight, contract: r.pc.price, feeRate: r.pc.feeRate, recQty: r.recQty, eligibleU: r.eligibleU, smpSum: r.smpSum, amount: r.amount, fee: r.fee, recPrice: r.recPrice, recPerMwh: r.recPerMwh, carryRecU: r.carryRecU, carryInU: r.carryIn, carry: r.carry }; });
+  const where = await Store.set(`recset:${R.app || "-"}:${R.from}-${R.to}`, { app: R.app, from: R.from, to: R.to, plants, totals: R.totals, fee: R.fee, contract: R.base.price, savedAt: new Date().toISOString() });
+  if (where !== "denied") { recState.msg = `${recCustName(R.app)} ${ymLab(R.from)}~${ymLab(R.to)} 확정`; renderRecPage(); }
 }
 
 function recExportExcel() {
   const R = recState.result; if (!R) return;
   const wb = XLSX.utils.book_new();
-  const fin = [["구분", "가중치", "계약가(원/MWh)", "매매단가(원/REC)", "매매수량(REC)", "매매금액(원)", "매매단가(원/MWh)", "매매수량(MWh)", "매매금액(원)", "이월 REC"]];
-  R.rows.forEach(r => fin.push(r.err ? [r.name, "", "", r.err] : [r.name, r.pc.weight, r.pc.price, r.recPrice, r.recQty, r.amount, r.recPerMwh, r.eligible, REC.halfUp(Math.round(r.recPerMwh * 1e6) * r.eligibleU, 1e12), r.carryRecU / 1e6]));
-  fin.push(["합계", "", "", "", R.totals.recQty, R.totals.amount, "", R.totals.eligibleU / 1e6, R.totals.amount, R.totals.carryRecU / 1e6]);
-  fin.push(["REC 용역 수수료", "", "", "", "", "", R.feeRate + " 원/kWh", R.totals.eligibleU / 1e6, R.fee]);
+  const fin = [["구분", "가중치", "계약가(원/MWh)", "매매단가(원/REC)", "매매수량(REC)", "매매금액(원)", "매매단가(원/MWh)", "매매수량(MWh)", "매매금액(원)", "수수료 단가(원/kWh)", "용역 수수료(원)", "이월 REC"]];
+  R.rows.forEach(r => fin.push(r.err ? [r.name, "", "", r.err] : [r.name, r.pc.weight, r.pc.price, r.recPrice, r.recQty, r.amount, r.recPerMwh, r.eligible, r.amount, r.pc.feeRate, r.fee, r.carryRecU / 1e6]));
+  fin.push(["합계", "", "", "", R.totals.recQty, R.totals.amount, "", R.totals.eligibleU / 1e6, R.totals.amount, "", R.fee, R.totals.carryRecU / 1e6]);
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(fin), "최종 정산");
   R.rows.filter(r => !r.err).forEach(r => {
-    const aoa = [["발전소명", r.name], ["가중치", r.pc.weight], ["REC 수량", r.recQty], ["REC의 SMP 단가", r.smpPerRec], ["REC 단가", r.recPrice], ["초과전력량(정산)", r.eligible], ["초과전력 단가", r.smpPerMwh], ["초과전력의 REC 단가", r.recPerMwh], ["검증", r.pc.price], [],
+    const aoa = [["발전소명", r.name], ["가중치", r.pc.weight], ["REC 수량", r.recQty], ["REC의 SMP 단가", r.smpPerRec], ["REC 단가", r.recPrice], ["초과전력량(정산)", r.eligible], ["초과전력 단가", r.smpPerMwh], ["초과전력의 REC 단가", r.recPerMwh], ["계약가", r.pc.price], [],
       ["거래일자", "시간", "초과전력량(MWh)", "REC 환산", "누적 REC", "REC 번호", "해당 REC", "해당 실제 전력량(MWh)", "정산 SMP(원)", "SMP(원/kWh)", "비고"]];
     r.segs.forEach(s => { const p = r.pieces[s.idx];
-      aoa.push([`${p.ym.slice(0, 4)}-${p.ym.slice(4)}-${String(p.d).padStart(2, "0")}`, p.h, p.exU != null ? p.exU / 1e6 : "", p.f / 1e6, p.cum / 1e6, s.no, s.rec / 1e6, s.mwhU / 1e6, s.smpAmt, p.smpC / 100, (p.carried ? "이월분 " : "") + (s.no > r.recQty ? "미정산(이월)" : "")]); });
+      aoa.push([`${p.ym.slice(0, 4)}-${p.ym.slice(4)}-${String(p.d).padStart(2, "0")}`, p.h, p.exU != null ? p.exU / 1e6 : "", p.f / 1e6, p.cum / 1e6, s.no, s.rec / 1e6, s.mwhU / 1e6, s.smpAmt, p.smpC / 100, (p.carried ? "이월분 " : "") + (s.no > r.recQty ? "이월" : "")]); });
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), r.name.slice(0, 31).replace(/[\\/?*[\]:]/g, ""));
   });
   XLSX.writeFile(wb, `초과발전량_REC_정산_${recCustName(R.app)}_${R.from}-${R.to}.xlsx`);
@@ -247,48 +251,50 @@ function recExportExcel() {
 
 /* ---------- 화면 ---------- */
 function recMonthsAvailable(app) { const set = new Set(); Object.values(recExcessIndex()).forEach(e => { if ((e.app || "") === app) Object.keys(e.months).forEach(m => set.add(m)); }); return [...set].sort(); }
+function recApps(idx) {
+  const set = new Set(Object.values(idx).map(e => e.app || ""));
+  if (typeof Registry !== "undefined" && Registry.groups) Registry.groups().forEach(a => set.add(a)); // 등록된 전기사용자도 선택 가능
+  return [...set].sort((a, b) => recCustName(a).localeCompare(recCustName(b)));
+}
 
 function renderRecPage() {
   const host = document.getElementById("recPage"); if (!host || typeof Store === "undefined") return;
-  const idx = recExcessIndex(), cfg = recCfg();
-  const apps = [...new Set(Object.values(idx).map(e => e.app || ""))].sort();
+  const idx = recExcessIndex(), apps = recApps(idx);
   if (!apps.includes(recState.app)) recState.app = apps[0] || "";
-  const months = recMonthsAvailable(recState.app), last = recSettlements(recState.app).pop();
-  if (!recState.from || !months.length) { recState.from = last ? ymAdd(last.to, 1) : (months[0] || ""); recState.to = months[months.length - 1] || recState.from; }
-  const exMonths = [...new Set(Store.keys("recx:").map(k => k.split(":")[1]))].sort(), smpMonths = Store.keys("smp:").map(k => k.split(":")[1]).sort();
-  const plantsList = Object.values(idx).sort((a, b) => (a.app || "").localeCompare(b.app || "") || a.name.localeCompare(b.name));
-  const ymOpts = sel => { const all = [...new Set(months.concat(sel ? [sel] : []))].sort(); return all.map(m => `<option value="${m}"${m === sel ? " selected" : ""}>${ymLab(m)}</option>`).join(""); };
+  const app = recState.app, months = recMonthsAvailable(app), last = recSettlements(app).pop(), base = recBaseContract(app);
+  if (!recState.from || (months.length && !months.includes(recState.from) && !(last && recState.from === ymAdd(last.to, 1)))) {
+    recState.from = last ? ymAdd(last.to, 1) : (months[0] || ""); recState.to = months[months.length - 1] || recState.from;
+  }
+  const smpMonths = Store.keys("smp:").map(k => k.split(":")[1]).sort();
+  const plants = Object.values(idx).filter(e => (e.app || "") === app).sort((a, b) => a.name.localeCompare(b.name));
+  const ymOpts = sel => [...new Set(months.concat(sel ? [sel] : []))].sort().map(m => `<option value="${m}"${m === sel ? " selected" : ""}>${ymLab(m)}</option>`).join("");
   host.innerHTML = `
-    <div class="card"><h2>데이터</h2>
-      <p class="hint">KPX 직접전력거래량(확정) 파일, 초과발전량 정산 엑셀(Back Data · 시간별 SMP 시트), 전력거래소 시간별 SMP 파일을 올리세요. 여러 개를 한 번에 올려도 됩니다. 초과전력량 &gt; 0 인 시간만 저장합니다.</p>
-      <div class="drop-zone" id="recDrop"><div class="drop-zone-text">드래그해서 파일을 놓거나 클릭해서 선택하세요</div><input type="file" id="recFile" accept=".xlsx,.xls,.csv" multiple></div>
-      ${recState.msg ? `<div class="notice ${/⚠/.test(recState.msg) ? "bad" : "warn"}" style="margin-top:10px;white-space:pre-line">${rEscR(recState.msg)}</div>` : ""}
-      <div class="rec-cover"><span><b>초과발전량</b> ${exMonths.length ? exMonths.map(ymLab).join(", ") : "없음"}</span><span><b>시간별 SMP</b> ${smpMonths.length ? smpMonths.map(m => `${ymLab(m)} (${Object.keys(Store.get("smp:" + m, {}) || {}).length}일)`).join(", ") : "없음"}</span></div>
-    </div>
-    <div class="card"><h2>설정</h2>
-      <div class="row"><label>기본 계약가 (원/MWh)</label><input type="number" id="recContract" value="${cfg.contract}" style="width:120px">
-        <label>REC 용역 수수료 (원/kWh)</label><input type="number" id="recFee" step="any" value="${cfg.fee}" style="width:80px">
-        <span class="hint" style="margin:0">계약가 = SMP + REC 합계 단가. 발전소 계약가가 비어 있으면 발전소 계약단가 × 1000, 그것도 없으면 기본값</span></div>
-      <div class="table-wrap" style="margin-top:10px"><table class="grid rec-table"><tr><th>발전소</th><th>전기사용자</th><th>신청번호 (그룹)</th><th>REC 가중치</th><th>계약가 (원/MWh)</th><th>적용 계약가</th></tr>
-        ${plantsList.length ? plantsList.map(e => { const pc = recPlantCfg(e.name), w = recW()[REC.norm(e.name)] || {};
-          return `<tr><td>${rEscR(e.name)}</td><td>${rEscR(recCustName(e.app))}</td>
-            <td><input class="rec-a" data-n="${rEscR(REC.norm(e.name))}" value="${rEscR(w.app || "")}" placeholder="${rEscR(e.app || "예: 26-PR00057")}"></td>
-            <td><input type="number" step="0.001" class="rec-w" data-n="${rEscR(REC.norm(e.name))}" value="${w.weight || ""}" placeholder="예: 1.024"${pc.weight ? "" : ' style="border-color:#E3A09A"'}></td>
-            <td><input type="number" class="rec-p" data-n="${rEscR(REC.norm(e.name))}" value="${w.price || ""}" placeholder="${pc.priceFrom === "직접 입력" ? "" : pc.price}"></td>
-            <td class="num">${pc.price.toLocaleString()} <span class="perf-sub">${pc.priceFrom}</span></td></tr>`; }).join("")
-          : `<tr><td colspan="6" class="hint">초과발전량 데이터를 올리면 발전소가 표시됩니다.</td></tr>`}</table></div>
-      <div class="row" style="margin-top:10px"><button class="btn accent" id="recSaveCfg">설정 저장</button></div>
-    </div>
-    <div class="card"><h2>REC 정산</h2>
-      <div class="row"><label>전기사용자</label><select id="recApp" style="min-width:280px">${apps.map(a => `<option value="${rEscR(a)}"${a === recState.app ? " selected" : ""}>${rEscR(recCustName(a))}${a ? " (" + rEscR(a) + ")" : ""}</option>`).join("") || "<option>데이터 없음</option>"}</select>
-        <label>기간</label><select id="recFrom">${ymOpts(recState.from)}</select> ~ <select id="recTo">${ymOpts(recState.to)}</select>
+    <div class="card">
+      <div class="rec-top">
+        <label>전기사용자</label><select id="recApp">${apps.map(a => `<option value="${rEscR(a)}"${a === app ? " selected" : ""}>${rEscR(recCustName(a))}${a ? " · " + rEscR(a) : ""}</option>`).join("") || "<option value=''>-</option>"}</select>
+        <label>기본계약가 (원/MWh)</label><input type="number" id="recBase" value="${base.price || ""}" style="width:120px">
+        <label>기간</label><select id="recFrom">${ymOpts(recState.from)}</select><span>~</span><select id="recTo">${ymOpts(recState.to)}</select>
         <button class="btn accent" id="recCalc">정산 계산</button>
-        ${last ? `<span class="hint" style="margin:0">직전 확정: ${ymLab(last.from)}~${ymLab(last.to)} · 이월 ${recFmt(Object.values(last.plants || {}).reduce((t, p) => t + (p.carryRecU || 0), 0), 6)} REC</span>` : ""}</div>
-      <div id="recResult">${recState.result ? recResultHtml(recState.result) : ""}</div>
+      </div>
+      ${recState.msg ? `<div class="notice ${/⚠/.test(recState.msg) ? "bad" : "warn"}" style="margin-top:10px;white-space:pre-line">${rEscR(recState.msg)}</div>` : ""}
+      <div class="table-wrap" style="margin-top:12px"><table class="grid rec-table"><tr><th>발전소</th><th>REC 가중치</th><th>계약가 (원/MWh)</th><th>발전사업자 계약단가 (원/kWh)</th><th>수수료 단가 (원/kWh)</th><th>초과발전량 (MWh)</th><th>신청번호</th></tr>
+        ${plants.length ? plants.map(e => { const pc = recPlantCfg(e.name, app), w = recW()[REC.norm(e.name)] || {}, n = rEscR(REC.norm(e.name));
+          const exU = Object.keys(e.months).filter(m => !recState.from || (m >= recState.from && m <= recState.to)).reduce((t, m) => t + e.months[m].reduce((a, r) => a + r[2], 0), 0);
+          return `<tr><td>${rEscR(e.name)}</td>
+            <td><input type="number" step="0.001" class="rec-w" data-n="${n}" value="${w.weight || ""}"${pc.weight ? "" : ' style="border-color:#E3A09A"'}></td>
+            <td><input type="number" class="rec-p" data-n="${n}" value="${w.price || ""}" placeholder="${base.price || ""}"></td>
+            <td class="num">${pc.genUnit == null ? '<span class="tag bad">미등록</span>' : pc.genUnit}</td>
+            <td class="num">${pc.feeRate == null ? "-" : pc.feeRate}</td>
+            <td class="num">${recFmt(exU)}</td>
+            <td><input class="rec-a" data-n="${n}" value="${rEscR(w.app || "")}" placeholder="${rEscR(e.app || "")}"></td></tr>`; }).join("")
+          : `<tr><td colspan="7" class="empty">초과발전량 없음</td></tr>`}</table></div>
+      <div class="rec-actions"><button class="btn secondary" id="recSaveCfg">설정 저장</button>
+        <span class="rec-smp">시간별 SMP ${smpMonths.length ? smpMonths.map(ymLab).join(", ") : "없음"}</span>
+        <label class="btn secondary rec-up">SMP 업로드<input type="file" id="recFile" accept=".xlsx,.xls,.csv" multiple hidden></label></div>
+      <div id="recResult">${recState.result && recState.result.app === app ? recResultHtml(recState.result) : ""}</div>
     </div>
-    <div class="card"><h2>전기사용자별 REC 현황</h2><div id="recCal">${recCalendarHtml()}</div></div>
-    <div class="card"><h2>확정한 REC 정산</h2>${recHistoryHtml()}</div>`;
-  bindDropZone("recDrop", "recFile", f => recOnFiles([f]));
+    <div class="card"><h2>초과발전량 REC 현황</h2><div id="recCal">${recCalendarHtml()}</div></div>
+    <div class="card"><h2>확정 이력</h2>${recHistoryHtml()}</div>`;
   document.getElementById("recFile").onchange = e => { if (e.target.files.length) recOnFiles([...e.target.files]); e.target.value = ""; };
   document.getElementById("recSaveCfg").onclick = async () => {
     const w = recW();
@@ -296,78 +302,78 @@ function renderRecPage() {
     host.querySelectorAll(".rec-p").forEach(i => { const n = i.dataset.n; w[n] = Object.assign({}, w[n], { price: i.value === "" ? null : Number(i.value) }); });
     host.querySelectorAll(".rec-a").forEach(i => { const n = i.dataset.n; w[n] = Object.assign({}, w[n], { app: i.value.trim() || null }); });
     if ((await Store.set("recw", w)) === "denied") return;
-    await Store.set("reccfg", { contract: Number(document.getElementById("recContract").value) || 174000, fee: Number(document.getElementById("recFee").value) || 0 });
-    recState.msg = "설정 저장 완료"; recState.result = null; renderRecPage();
+    await recSaveBase();
+    recState.msg = "저장됨"; recState.result = null; renderRecPage();
   };
-  document.getElementById("recApp").onchange = e => { recState.app = e.target.value; recState.from = ""; recState.result = null; renderRecPage(); };
+  document.getElementById("recBase").onchange = async () => { await recSaveBase(); recState.result = null; renderRecPage(); };
+  document.getElementById("recApp").onchange = e => { recState.app = e.target.value; recState.from = ""; recState.result = null; recState.msg = ""; renderRecPage(); };
   document.getElementById("recFrom").onchange = e => { recState.from = e.target.value; if (recState.to < recState.from) recState.to = recState.from; recState.result = null; renderRecPage(); };
   document.getElementById("recTo").onchange = e => { recState.to = e.target.value; recState.result = null; renderRecPage(); };
-  document.getElementById("recCalc").onclick = () => { try { recState.result = recCompute(recState.app, recState.from, recState.to); } catch (e) { recState.msg = "⚠ " + e.message; } renderRecPage(); };
+  document.getElementById("recCalc").onclick = () => { try { recState.msg = ""; recState.result = recCompute(recState.app, recState.from, recState.to); } catch (e) { recState.msg = "⚠ " + e.message; } renderRecPage(); };
   const cf = document.getElementById("recConfirm"); if (cf) cf.onclick = recConfirm;
   const ex = document.getElementById("recExcel"); if (ex) ex.onclick = recExportExcel;
-  host.querySelectorAll(".rec-del").forEach(b => b.onclick = async () => { if (!confirm("이 REC 정산 확정을 취소할까요? (이월 REC도 다시 계산됩니다)")) return; await Store.set(b.dataset.k, {}); renderRecPage(); });
-  host.querySelectorAll(".rec-year").forEach(b => b.onclick = () => { recState.year = Number(b.dataset.y); document.getElementById("recCal").innerHTML = recCalendarHtml(); renderRecPage(); });
+  host.querySelectorAll(".rec-del").forEach(b => b.onclick = async () => { if (!confirm("확정을 취소할까요?")) return; await Store.set(b.dataset.k, {}); renderRecPage(); });
+  host.querySelectorAll(".rec-year").forEach(b => b.onclick = () => { recState.year = Number(b.dataset.y); document.getElementById("recCal").innerHTML = recCalendarHtml(); bindRecYear(host); });
+}
+function bindRecYear(host) { host.querySelectorAll(".rec-year").forEach(b => b.onclick = () => { recState.year = Number(b.dataset.y); document.getElementById("recCal").innerHTML = recCalendarHtml(); bindRecYear(host); }); }
+async function recSaveBase() { // 기본계약가: 전기사용자 계약단가 × 1000 과 다르게 입력했을 때만 저장
+  const v = Number(document.getElementById("recBase").value) || 0, c = recCustomer(recState.app), def = c && Number(c.unitPrice) > 0 ? Math.round(c.unitPrice * 1000) : 0;
+  const cfg = recCfg(), contracts = Object.assign({}, cfg.contracts || {});
+  if (v > 0 && v !== def) contracts[recState.app] = v; else delete contracts[recState.app];
+  return Store.set("reccfg", Object.assign({}, cfg, { contracts }));
 }
 
 function recResultHtml(R) {
-  const won = n => Math.round(n).toLocaleString();
-  return `${R.warn.length ? `<div class="notice warn" style="margin-top:10px">${R.warn.map(rEscR).join("<br>")}</div>` : ""}
-    <div class="table-wrap" style="margin-top:10px"><table class="grid rec-table">
-      <tr><th rowspan="2">발전소</th><th rowspan="2">가중치</th><th rowspan="2">계약가<br>(원/MWh)</th><th rowspan="2">누적 REC<br>(이월 포함)</th><th colspan="3">REC 기준</th><th colspan="3">MWh 기준</th><th rowspan="2">이월 REC</th></tr>
-      <tr><th>매매단가 (원/REC)</th><th>매매수량 (REC)</th><th>매매금액 (원)</th><th>매매단가 (원/MWh)</th><th>매매수량 (MWh)</th><th>매매금액 (원)</th></tr>
-      ${R.rows.map(r => r.err ? `<tr><td>${rEscR(r.name)}</td><td colspan="10"><span class="tag bad">${r.err}</span> 설정에서 입력하세요</td></tr>`
-        : `<tr><td>${rEscR(r.name)}</td><td class="num">${r.pc.weight}</td><td class="num">${r.pc.price.toLocaleString()}</td><td class="num">${recFmt(r.totalRecU)}${r.carryIn ? `<div class="perf-sub">이월 ${recFmt(r.carryIn)}</div>` : ""}</td>
-          <td class="num">${r.recQty ? r.recPrice.toLocaleString(undefined, { maximumFractionDigits: 2 }) : "-"}</td><td class="num"><b>${r.recQty}</b></td><td class="num"><b>${won(r.amount)}</b></td>
-          <td class="num">${r.recQty ? r.recPerMwh.toLocaleString(undefined, { maximumFractionDigits: 2 }) : "-"}</td><td class="num">${recFmt(r.eligibleU)}</td><td class="num">${won(r.amount)}</td>
-          <td class="num rec-carry">${recFmt(r.carryRecU)}</td></tr>`).join("")}
-      <tr class="total"><td colspan="5">합계</td><td class="num">${R.totals.recQty}</td><td class="num">${won(R.totals.amount)}</td><td></td><td class="num">${recFmt(R.totals.eligibleU)}</td><td class="num">${won(R.totals.amount)}</td><td class="num">${recFmt(R.totals.carryRecU)}</td></tr>
-      <tr><td colspan="8">REC 용역 수수료 (${R.feeRate} 원/kWh × 정산 MWh)</td><td class="num">${recFmt(R.totals.eligibleU)}</td><td class="num"><b>${won(R.fee)}</b></td><td></td></tr>
+  const won = n => Math.round(n).toLocaleString(), dec = n => n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  return `${R.warn.length ? `<div class="notice warn" style="margin-top:12px">${R.warn.map(rEscR).join("<br>")}</div>` : ""}
+    <div class="table-wrap" style="margin-top:12px"><table class="grid rec-table">
+      <tr><th rowspan="2">발전소</th><th rowspan="2">누적 REC</th><th colspan="3">REC 기준</th><th colspan="3">MWh 기준</th><th colspan="2">용역 수수료</th><th rowspan="2">이월 REC</th></tr>
+      <tr><th>매매단가 (원/REC)</th><th>매매수량 (REC)</th><th>매매금액 (원)</th><th>매매단가 (원/MWh)</th><th>매매수량 (MWh)</th><th>매매금액 (원)</th><th>단가 (원/kWh)</th><th>금액 (원)</th></tr>
+      ${R.rows.map(r => r.err ? `<tr><td>${rEscR(r.name)}</td><td colspan="10"><span class="tag bad">${r.err}</span></td></tr>`
+        : `<tr><td>${rEscR(r.name)}</td><td class="num">${recFmt(r.totalRecU)}</td>
+          <td class="num">${r.recQty ? dec(r.recPrice) : "-"}</td><td class="num"><b>${r.recQty}</b></td><td class="num"><b>${won(r.amount)}</b></td>
+          <td class="num">${r.recQty ? dec(r.recPerMwh) : "-"}</td><td class="num">${recFmt(r.eligibleU)}</td><td class="num">${won(r.amount)}</td>
+          <td class="num">${r.pc.feeRate == null ? "-" : r.pc.feeRate}</td><td class="num">${won(r.fee)}</td><td class="num rec-carry">${recFmt(r.carryRecU)}</td></tr>`).join("")}
+      <tr class="total"><td colspan="3">합계</td><td class="num">${R.totals.recQty}</td><td class="num">${won(R.totals.amount)}</td><td></td><td class="num">${recFmt(R.totals.eligibleU)}</td><td class="num">${won(R.totals.amount)}</td><td></td><td class="num">${won(R.fee)}</td><td class="num">${recFmt(R.totals.carryRecU)}</td></tr>
     </table></div>
-    <div class="row" style="margin-top:10px"><button class="btn accent" id="recConfirm">정산 확정 (저장 · 이월 반영)</button><button class="btn secondary" id="recExcel">Excel 다운 (발전소별 시간대 상세)</button></div>`;
+    <div class="rec-actions"><button class="btn accent" id="recConfirm">정산 확정</button><button class="btn secondary" id="recExcel">Excel 다운</button></div>`;
 }
 
-// 전기사용자별 연간 달력: 월마다 REC 발생량 · 정산 여부, 오른쪽에 미정산 REC
+// 초과발전량 REC 현황: 전기사용자 × 월 (REC 발생량 · 정산 여부), 미정산 REC
 function recCalendarHtml() {
   const idx = recExcessIndex(), sets = recAllSettlements();
   const years = [...new Set(Object.values(idx).flatMap(e => Object.keys(e.months).map(m => Number(m.slice(0, 4)))).concat([Number(todayYmd().slice(0, 4))]))].sort();
   const y = recState.year && years.includes(recState.year) ? recState.year : years[years.length - 1];
   const months = Array.from({ length: 12 }, (_, i) => `${y}${String(i + 1).padStart(2, "0")}`);
   const byApp = {}; Object.values(idx).forEach(e => (byApp[e.app || ""] || (byApp[e.app || ""] = [])).push(e));
-  const recOfMonth = (e, ym) => { const w = recPlantCfg(e.name).weight; if (!w) return null; const w4 = Math.round(w * 10000); return (e.months[ym] || []).reduce((t, r) => t + Math.floor(r[2] * w4 / 10000), 0); };
+  const recOfMonth = (e, ym) => { const w = recPlantCfg(e.name, e.app).weight; if (!w) return null; const w4 = Math.round(w * 10000); return (e.months[ym] || []).reduce((t, r) => t + Math.floor(r[2] * w4 / 10000), 0); };
   const settledIn = (app, ym) => sets.find(s => (s.app || "") === app && s.from <= ym && ym <= s.to);
-  const rowsHtml = Object.keys(byApp).sort().map(app => {
-    const plants = byApp[app];
-    let unsettledU = 0, missingW = false;
+  const rowsHtml = Object.keys(byApp).sort((a, b) => recCustName(a).localeCompare(recCustName(b))).map(app => {
+    const plants = byApp[app]; let openU = 0, missingW = false;
     const cells = months.map(ym => {
-      const has = plants.some(e => e.months[ym]);
-      if (!has) return `<td class="rc-none">-</td>`;
+      if (!plants.some(e => e.months[ym])) return `<td class="rc-none">-</td>`;
       let rec = 0; plants.forEach(e => { const v = recOfMonth(e, ym); if (v == null) missingW = true; else rec += v; });
-      const st = settledIn(app, ym);
-      if (!st) unsettledU += rec;
-      return `<td class="${st ? "rc-done" : "rc-open"}"><b>${recFmt(rec, 3)}</b><span>${st ? "정산완료" : "미정산"}</span></td>`;
+      const st = settledIn(app, ym); if (!st) openU += rec;
+      return `<td class="${st ? "rc-done" : "rc-open"}"><b>${recFmt(rec, 3)}</b><span>${st ? "정산" : "미정산"}</span></td>`;
     }).join("");
+    plants.forEach(e => Object.keys(e.months).forEach(ym => { if (!ym.startsWith(String(y)) && !settledIn(app, ym)) { const v = recOfMonth(e, ym); if (v != null) openU += v; } }));
     const lastSet = sets.filter(s => (s.app || "") === app).sort((a, b) => a.to.localeCompare(b.to)).pop();
-    const carryU = lastSet ? Object.values(lastSet.plants || {}).reduce((t, p) => t + (p.carryRecU || 0), 0) : 0;
-    // 다른 해의 미정산 월도 포함
-    Object.values(plants).forEach(e => Object.keys(e.months).forEach(ym => { if (!ym.startsWith(String(y)) && !settledIn(app, ym)) { const v = recOfMonth(e, ym); if (v != null) unsettledU += v; } }));
-    const totalOpen = unsettledU + carryU;
-    const soldQty = sets.filter(s => (s.app || "") === app && s.to.startsWith(String(y))).reduce((t, s) => t + (s.totals ? s.totals.recQty : 0), 0);
-    const soldAmt = sets.filter(s => (s.app || "") === app && s.to.startsWith(String(y))).reduce((t, s) => t + (s.totals ? s.totals.amount : 0), 0);
-    return `<tr><td class="rc-name">${rEscR(recCustName(app))}<div class="perf-sub">${rEscR(app || "")} · ${plants.length}개 발전소${missingW ? ' · <span class="tag bad">가중치 미입력</span>' : ""}</div></td>${cells}
-      <td class="rc-sum"><b class="${totalOpen >= 1e6 ? "rc-alert" : ""}">${recFmt(totalOpen, 3)}</b><div class="perf-sub">미정산 월 ${recFmt(unsettledU, 3)} + 이월 ${recFmt(carryU, 3)}${totalOpen >= 1e6 ? ` · 정산 가능 ${Math.floor(totalOpen / 1e6)} REC` : ""}</div></td>
-      <td class="rc-sum">${soldQty} REC<div class="perf-sub">${Math.round(soldAmt).toLocaleString()} 원</div></td></tr>`;
+    const carryU = lastSet ? Object.values(lastSet.plants || {}).reduce((t, p) => t + (p.carryRecU || 0), 0) : 0, open = openU + carryU;
+    const yearSets = sets.filter(s => (s.app || "") === app && s.to.startsWith(String(y)));
+    return `<tr><td class="rc-name">${rEscR(recCustName(app))}${missingW ? ' <span class="tag bad">가중치</span>' : ""}</td>${cells}
+      <td class="rc-sum"><b class="${open >= 1e6 ? "rc-alert" : ""}">${recFmt(open, 3)}</b>${open >= 1e6 ? `<span>정산 가능 ${Math.floor(open / 1e6)}</span>` : ""}</td>
+      <td class="rc-sum"><b>${yearSets.reduce((t, s) => t + (s.totals ? s.totals.recQty : 0), 0)}</b><span>${Math.round(yearSets.reduce((t, s) => t + (s.totals ? s.totals.amount : 0), 0)).toLocaleString()} 원</span></td></tr>`;
   }).join("");
-  return `<div class="dash-year" style="margin-bottom:10px">${years.map(v => `<button class="btn ${v === y ? "accent" : "secondary"} rec-year" data-y="${v}">${v}년</button>`).join(" ")}</div>
-    <p class="hint">칸 = 그 달 REC 발생량(가중치 적용, REC) · <span class="rc-chip rc-done">정산완료</span> <span class="rc-chip rc-open">미정산</span> · 미정산 REC = 정산 안 된 달의 REC + 직전 정산에서 이월된 소수 REC (1 이상이면 정산 가능)</p>
-    <div class="table-wrap"><table class="grid rec-cal"><tr><th>전기사용자</th>${months.map(m => `<th>${Number(m.slice(4))}월</th>`).join("")}<th>미정산 REC</th><th>${y}년 정산</th></tr>
-      ${rowsHtml || `<tr><td colspan="15" class="hint">초과발전량 데이터가 없습니다.</td></tr>`}</table></div>`;
+  return `<div class="rec-years">${years.map(v => `<button class="btn ${v === y ? "accent" : "secondary"} rec-year" data-y="${v}">${v}</button>`).join("")}</div>
+    <div class="table-wrap"><table class="grid rec-cal"><tr><th>전기사용자</th>${months.map(m => `<th>${Number(m.slice(4))}월</th>`).join("")}<th>미정산 REC</th><th>${y} 정산 REC</th></tr>
+      ${rowsHtml || `<tr><td colspan="15" class="empty">없음</td></tr>`}</table></div>`;
 }
 
 function recHistoryHtml() {
   const sets = recAllSettlements().sort((a, b) => b.to.localeCompare(a.to));
-  if (!sets.length) return `<p class="hint">확정한 정산이 없습니다.</p>`;
-  return `<div class="table-wrap"><table class="grid rec-table"><tr><th>전기사용자</th><th>기간</th><th>REC 수량</th><th>매매금액</th><th>정산 MWh</th><th>용역 수수료</th><th>이월 REC</th><th>확정일</th><th></th></tr>
-    ${sets.map(s => `<tr><td>${rEscR(recCustName(s.app))}</td><td>${ymLab(s.from)} ~ ${ymLab(s.to)}</td><td class="num">${s.totals.recQty}</td><td class="num">${Math.round(s.totals.amount).toLocaleString()} 원</td>
-      <td class="num">${recFmt(s.totals.eligibleU)}</td><td class="num">${Math.round(s.fee).toLocaleString()} 원</td><td class="num">${recFmt(s.totals.carryRecU)}</td><td>${String(s.savedAt || "").slice(0, 10)}</td>
-      <td><button class="btn secondary rec-del" data-k="${rEscR(s.key)}">확정 취소</button></td></tr>`).join("")}</table></div>`;
+  if (!sets.length) return `<div class="empty">없음</div>`;
+  return `<div class="table-wrap"><table class="grid rec-table"><tr><th>전기사용자</th><th>기간</th><th>REC</th><th>매매금액</th><th>정산 MWh</th><th>용역 수수료</th><th>이월 REC</th><th>확정일</th><th></th></tr>
+    ${sets.map(s => `<tr><td>${rEscR(recCustName(s.app))}</td><td>${ymLab(s.from)} ~ ${ymLab(s.to)}</td><td class="num">${s.totals.recQty}</td><td class="num">${Math.round(s.totals.amount).toLocaleString()}</td>
+      <td class="num">${recFmt(s.totals.eligibleU)}</td><td class="num">${Math.round(s.fee).toLocaleString()}</td><td class="num">${recFmt(s.totals.carryRecU)}</td><td>${String(s.savedAt || "").slice(0, 10)}</td>
+      <td><button class="btn secondary rec-del" data-k="${rEscR(s.key)}">취소</button></td></tr>`).join("")}</table></div>`;
 }

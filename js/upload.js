@@ -81,7 +81,6 @@ function handleFile(file){
       buildColMap(rawRows);
       aggregate(rawRows);
       showGenStatus();
-      if(typeof recCaptureKpxRows === "function") recCaptureKpxRows(kpxRowsOrig); // 초과발전량 REC 데이터 (js/rec.js, 초과전력량 있는 확정 파일만)
       document.getElementById("exportBtn").disabled = false;
       document.getElementById("pdfBtn").disabled = false;
       document.getElementById("exportAllBtn").disabled = false;

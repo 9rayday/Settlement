@@ -401,9 +401,8 @@ function renderGroupPage() {
   if ((regState.openGroup === null || !apps.includes(regState.openGroup)) && apps.length) regState.openGroup = apps[0];
   const pg = pageSlice("group", apps);
   host.innerHTML = `${loadFailNotice()}<div class="group-layout">
-    <div class="card group-list"><h2>PPA 계약</h2>
-      <div class="reg-cards single">${groupCardsHtml(regState.openGroup, pg.items)}</div>${pagerHtml("group", pg.page, pg.pages)}
-      <p class="hint" style="margin-top:10px">그룹 미연결 발전소: <b>${unlinked.length}</b>개</p></div>
+    <div class="card group-list"><div class="group-head"><h2>PPA 계약</h2><span class="tag">미연결 발전소 ${unlinked.length}</span></div>
+      <div class="reg-cards">${groupCardsHtml(regState.openGroup, pg.items)}</div>${pagerHtml("group", pg.page, pg.pages)}</div>
     <div class="card group-main" id="regGroupMain"></div></div>`;
   bindPager(host, renderGroupPage);
   host.querySelectorAll(".group-card").forEach(b => b.onclick = () => { regState.openGroup = b.dataset.app; markActive(".group-card", "app", b.dataset.app); renderGroupMain(); });
@@ -430,7 +429,7 @@ function renderGroupMain() {
         <td>${rEsc(m["사업자명(대표자명)"])}</td>
         <td>${m["지역(요금구분)"] ? rEsc(m["지역(요금구분)"]) : '<span class="tag bad">미지정</span>'}</td><td>${GRID_LABEL[gridOf(m["배전연결"])]}</td>
         <td class="num">${rEsc(fmtKw(m["계약용량"]))}</td><td style="text-align:center"><button class="btn secondary small grp-remove" data-plant="${rEsc(p)}">제외</button></td></tr>`; }).join("")
-        : `<tr><td colspan="7" class="hint">아직 묶인 발전소가 없습니다.</td></tr>`}</table></div>
+        : `<tr><td colspan="7" class="empty">없음</td></tr>`}</table></div>
     <div class="row" style="margin-top:10px"><select id="grpAddSel" style="min-width:300px">${others.map(p => { const a = rStr(all[p]["KPX신청번호"]);
         return `<option value="${rEsc(p)}">${rEsc(p)}${a ? ` (현재: ${rEsc(groupLabel(a) || a)})` : " (미연결)"}</option>`; }).join("")}</select>
       <select id="grpAddContract" style="min-width:180px">${contracts.map(x => `<option value="${rEsc(Registry.custKey(x))}">${rEsc(Registry.custKey(x))}</option>`).join("")}</select>
@@ -492,7 +491,7 @@ async function renderGroupAgg(app) {
     source = "월별실적로그 (가정산 업로드 시 기록)";
   }
   const names = Array.from(new Set(registered.concat(Object.keys(rows))));
-  if (!names.length) { host.innerHTML = `<div class="hint">이 신청번호로 연결된 발전소가 없습니다. 위에서 [그룹에 추가]로 발전소를 묶으세요.</div>`; return; }
+  if (!names.length) { host.innerHTML = `<div class="empty">연결된 발전소 없음</div>`; return; }
   const tot = { generation: 0, supply: 0, excess: 0 };
   const body = names.map(p => {
     const r = rows[p], info = Registry.plantInfo(p);
@@ -507,7 +506,7 @@ async function renderGroupAgg(app) {
       <div class="kpi"><div class="label">초과발전량 (kWh)</div><div class="value">${rNum(tot.excess)}</div></div></div>
     <div class="grid-wrap" style="margin-top:10px"><table class="grid"><tr><th>발전소</th><th>지역</th><th>발전량 (kWh)</th><th>공급량 (kWh)</th><th>초과발전량 (kWh)</th></tr>${body}
       <tr class="total"><td><b>계</b></td><td></td><td class="num"><b>${rNum(tot.generation)}</b></td><td class="num"><b>${rNum(tot.supply)}</b></td><td class="num"><b>${rNum(tot.excess)}</b></td></tr></table></div>
-    ${hasData ? "" : `<p class="hint">${month.slice(0, 4)}.${month.slice(4)} 실적이 없습니다.</p>`}`;
+    ${hasData ? "" : `<div class="empty">${month.slice(0, 4)}.${month.slice(4)} 실적 없음</div>`}`;
 }
 
 async function saveRegistry(kind, formId, form, originalKey, statusId) {

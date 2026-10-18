@@ -235,12 +235,12 @@ function prepareGroup(err, warn) {
   const customer = Registry.customerByApp(app, g.month);
   const nContracts = Registry.contractsOfApp(app).length;
   const priceSplits = Registry.priceSplits(app, g.month); // 그 달 유효 계약이 여러 건이면 전력량요금을 계약별 단가로
-  if (priceSplits && priceSplits.some(x => !(x.unitPrice > 0))) err.push(`신청번호 ${app} 의 계약 중 계약단가가 비어 있는 계약이 있습니다: ${priceSplits.filter(x => !(x.unitPrice > 0)).map(x => x.id).join(", ")}`);
-  if (!customer) err.push(`신청번호 ${app} 에 해당하는 전기사용자 계약이 없습니다. [정산관리 > 계약관리]에서 등록하세요.`);
+  if (priceSplits && priceSplits.some(x => !(x.unitPrice > 0))) err.push(`계약단가 없음: ${priceSplits.filter(x => !(x.unitPrice > 0)).map(x => x.id).join(", ")}`);
+  if (!customer) err.push(`전기사용자 미등록: ${app}`);
   const unreg = Object.keys(g.plants).filter(p => { const i = Registry.plantInfo(p); return !i || !i.region; });
-  if (unreg.length) err.push("등록되지 않았거나 지역이 비어 있는 발전소: " + unreg.join(", ") + " → [정산관리 > 계약관리]에서 등록하세요.");
+  if (unreg.length) err.push("발전소 미등록·지역 없음: " + unreg.join(", "));
   const { rates, version } = ratesFor(g.month);
-  if (!version) warn.push(`${g.month} 에 적용되는 KPX 요율 버전이 없어 기본값으로 계산했습니다.`);
+  if (!version) warn.push(`KPX 요율 버전 없음 (${g.month}) — 기본값 적용`);
   const plants = {}; Object.keys(g.plants).forEach(p => {
     const i = Registry.plantInfo(p);
     plants[p] = i && i.region ? i : Object.assign({ distConnected: false, distLow: false }, i || {}, { region: "비수도권", tempRegion: true }); // 미리보기용 임시값
@@ -248,14 +248,14 @@ function prepareGroup(err, warn) {
   const S = settleGroup(g, billState.ami, rates);
   const days = S.days;
   if (S.usage.source === "ami") {
-    if (S.usage.amiMissing.length) warn.push(`사용량 파일에 없는 날짜 ${S.usage.amiMissing.length}일 — 해당일은 KPX 전기사용량(없으면 발전량)으로 계산했습니다.`);
+    if (S.usage.amiMissing.length) warn.push(`사용량 파일 누락 ${S.usage.amiMissing.length}일`);
     billState.ami.warnings.filter(w => /합계 불일치|96칸|미수신/.test(w)).forEach(w => warn.push(w));
   } else if (S.usage.source === "none") {
-    warn.push("사용량 정보가 없어(가정산 KPX 파일, 사용량 파일 없음) 사용량 = 발전량으로 보고 계산했습니다 (공급량 = 발전량, 초과발전량 0). 고객 사용량 파일을 올리면 시간별로 계산합니다.");
+    warn.push("사용량 없음 — 사용량 = 발전량으로 계산");
   }
-  if (S.monthly && !g.hasPpa) warn.push("월간균등 정산: 발전기별 발전량을 월 균등값(ROUND(월합/시간수, 6) MWh)으로 바꿔 계산했습니다.");
+  if (S.monthly && !g.hasPpa) warn.push("월간균등 정산 적용");
   if (S.kpxSupply > 0 && Math.abs(S.kpxSupply - S.match.totals.supplyHourly) > 1)
-    warn.push(`KPX 재생E공급량 합계(${kwhStr(S.kpxSupply)})와 계산 공급량(${kwhStr(S.match.totals.supplyHourly)})이 다릅니다. 사용량·손실률을 확인하세요.`);
+    warn.push(`공급량 차이: KPX ${kwhStr(S.kpxSupply)} / 계산 ${kwhStr(S.match.totals.supplyHourly)}`);
   // 정보가 부족하면 미리보기: 임시값(전기사용자 = 신청번호, 지역 비수도권, 단가 0원)으로 계산하고 저장은 막는다
   const preview = err.length > 0;
   const cust = customer ? Object.assign({}, customer) : { name: `(미등록) ${app}`, bizNo: "", address: "", manager: "", contact: "", demandRegion: "비수도권", unitPrice: 0, appNo: app, contractId: app };
@@ -263,7 +263,7 @@ function prepareGroup(err, warn) {
   if (!(cust.unitPrice >= 0)) cust.unitPrice = 0;
   return { app, g, customer: cust, rates, plants, days, match: S.match, loss: S.loss, priceSplits, preview };
 }
-const previewNotice = err => `<div class="notice bad"><b>미리보기 — 등록 정보가 부족해 임시값으로 계산했습니다 (저장 불가)</b><br>${err.map(esc).join("<br>")}<br>임시값: 미등록 전기사용자는 신청번호로 표시, 지역 없음 = 비수도권, 단가 없음 = 0원</div>`;
+const previewNotice = err => `<div class="notice bad"><b>미리보기 (저장 불가)</b><br>${err.map(esc).join("<br>")}</div>`;
 // 단가가 비어 있는 계약은 0원으로 계산 (미리보기)
 const safeSplits = sp => sp ? sp.map(x => Object.assign({}, x, { unitPrice: x.unitPrice > 0 ? x.unitPrice : 0 })) : sp;
 /* ---------- 시간별 공통 산정 (발전사업자 정산·전기사용자 정산 공통, 가정산·오차정산 공통) ----------
@@ -300,7 +300,7 @@ function runCalc() {
     const carry = Store.get(`carry:${P.g.month}:${P.app}`, null);
     if (carry && (ctx.confirmedSurcharge.taxable !== carry.confirmed.taxable || ctx.confirmedSurcharge.exempt !== carry.confirmed.exempt
       || ctx.prevDiff.taxable !== carry.prevDiff.taxable || ctx.prevDiff.exempt !== carry.prevDiff.exempt))
-      warn.push("전월 오차정산 칸이 저장된 오차정산 값과 다릅니다. 직접 고친 값으로 계산했습니다.");
+      warn.push("전월 오차정산 값을 직접 수정함");
     const inv = Engine.invoice(match, ctx, P.rates);
     const days = { sendDays: Number($("cfg_send").value) || 8, reviewDays: Number($("cfg_review").value) || 2, payDay: Number($("cfg_pay").value) || 27 };
     billState.result = { mode: "provisional", preview: P.preview, app: P.app, month: P.g.month, customer: Object.assign({}, P.customer, days), rates: P.rates, match, inv, ctx, loss: P.loss, note: $("bill_note").value.trim(), dueDate: $("dueDate").value };
@@ -734,6 +734,14 @@ async function saveTrueUp() {
   }, R.fields, { savedAt: new Date().toISOString() });
   const where = await Store.set(key, rec);
   $("billSaveStatus").textContent = (where === "remote" ? "발행 완료 (구글시트)" : "이 브라우저에만 저장됨") + ` → ${monthLabel(nextYm(R.month))} 가정산서에 자동 반영`;
+  // 초과발전량 REC: 확정 데이터로 계산한 발전소별 시간별 초과발전량 저장 (js/rec.js)
+  if (where !== "denied" && typeof recSaveTrueUpExcess === "function" && billState.kpx && billState.kpx.groups[R.app]) {
+    const byPlant = {};
+    settleGroup(billState.kpx.groups[R.app], billState.ami, R.rates, (d, h, m) => {
+      Object.keys(m.excess).forEach(p => { if (m.excess[p] > 0) (byPlant[p] || (byPlant[p] = [])).push([Number(d.date.slice(8)), h, m.excess[p]]); });
+    });
+    await recSaveTrueUpExcess(R.app, R.month, byPlant);
+  }
   renderFlow(R.app, R.month);
 }
 

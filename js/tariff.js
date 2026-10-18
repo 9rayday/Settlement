@@ -78,7 +78,7 @@ function renderLoadTab() {
       <div class="reg-field"><label>적용 종료일</label><input type="date" id="touEnd" value="${tEsc(v.end)}"${ro}></div>
       <div class="reg-field"><label>메모</label><input id="touMemo" value="${tEsc(v.memo)}"${ro}></div>
     </div>
-    <div class="tou-legend">${Object.keys(TOU_NAME).map(k => `<span class="tou-key ${k}"></span>${TOU_NAME[k]}`).join("")}${editable ? "" : `<span class="hint" style="margin:0 0 0 8px">조회 전용입니다.</span>`}</div>
+    <div class="tou-legend">${Object.keys(TOU_NAME).map(k => `<span class="tou-key ${k}"></span>${TOU_NAME[k]}`).join("")}</div>
     <div class="grid-wrap tou-wrap"><table class="tou-table"><tr><th>구분</th>${Array.from({ length: 12 }, (_, m) => `<th>${m + 1}</th>`).join("")}</tr>
       ${Array.from({ length: 24 }, (_, h) => `<tr><th>${h + 1}</th>${v.tariff.map((row, m) =>
         `<td class="tou-cell ${row[h]}${editable ? " edit" : ""}" data-m="${m}" data-h="${h}">${TOU_NAME[row[h]]}</td>`).join("")}</tr>`).join("")}</table></div>
@@ -123,7 +123,7 @@ function renderHolidayTab() {
     <div class="grid-wrap" style="margin-top:12px; max-height:none"><table class="grid"><tr><th style="width:160px">날짜</th><th>휴일명</th><th style="width:120px">출처</th><th style="width:70px"></th></tr>
       ${list.length ? list.map((h, i) => `<tr><td>${y}-${h.d}</td><td>${tEsc(h.name)}</td><td><span class="tag">${tEsc(h.src || "수동")}</span></td>
         <td style="text-align:center"><button class="btn secondary small hol-del" data-i="${i}">삭제</button></td></tr>`).join("")
-        : `<tr><td colspan="4" class="hint">등록된 휴일이 없습니다.</td></tr>`}</table></div>
+        : `<tr><td colspan="4" class="empty">없음</td></tr>`}</table></div>
     <div class="row" style="margin-top:12px"><input type="date" id="holDate" min="${y}-01-01" max="${y}-12-31"><input id="holName" placeholder="휴일명" style="padding:7px 9px;border:1px solid var(--line);border-radius:6px;font-size:13px">
       <button class="btn secondary" id="holAdd">휴일 추가</button><span id="holStatus" class="status warn" style="background:none"></span></div>`;
   document.getElementById("holYear").onchange = e => { touState.year = e.target.value; renderHolidayTab(); };
