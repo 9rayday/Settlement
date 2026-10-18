@@ -93,8 +93,35 @@ function provisionalFormHtml() {
     <div class="adj-grid">
       ${numField("전월 확정 부가정산금 (과세)", "cs_taxable", 0)}${numField("전월 확정 부가정산금 (비과세)", "cs_exempt", 0)}
       ${numField("전월 차액 (과세)", "pd_taxable", 0)}${numField("전월 차액 (비과세)", "pd_exempt", 0)}
-      ${fieldHtml("납부기한", `<input type="date" id="dueDate">`)}${fieldHtml("특이사항", `<input id="bill_note">`)}</div>
-    <div class="row" style="margin-top:10px"><button class="btn accent" id="calcBtn">가정산서 계산</button></div></div>`;
+      ${fieldHtml("청구일 (익월 N영업일 이내)", `<input type="number" id="cfg_send" min="1" max="31" step="1">`)}
+      ${fieldHtml("검토일 (수령 후 N영업일 이내)", `<input type="number" id="cfg_review" min="1" max="31" step="1">`)}
+      ${fieldHtml("납부기한 (매월 N일)", `<input type="number" id="cfg_pay" min="1" max="31" step="1">`)}
+      ${fieldHtml("납부기한 (일자)", `<input type="date" id="dueDate">`)}${fieldHtml("특이사항", `<input id="bill_note">`)}</div>
+    <div class="row" style="margin-top:10px"><button class="btn accent" id="calcBtn">가정산서 계산</button><span id="cfgStatus" class="hint" style="margin:0 0 0 8px"></span></div></div>`;
+}
+
+/* 청구일·검토일·납부일: 전기사용자(신청번호)별 billcfg:<신청번호> 에 저장 → 바꾸기 전까지 기본값.
+ * 저장된 값이 없으면 전기사용자 등록 값(청구서송부기한·납부일), 그것도 없으면 8 / 2 / 27. */
+function billCfg(app) {
+  const s = Store.get(`billcfg:${app}`, null) || {}, c = Registry.customerByApp(app) || {};
+  const pick = (a, b, d) => Number(a) > 0 ? Number(a) : (Number(b) > 0 ? Number(b) : d);
+  return { sendDays: pick(s.sendDays, c.sendDays, 8), reviewDays: pick(s.reviewDays, null, 2), payDay: pick(s.payDay, c.payDay, 27) };
+}
+function dueDateFor(month, payDay) { // 정산월 다음 달 N일 (말일 넘으면 말일)
+  const nm = nextYm(month), y = Number(nm.slice(0, 4)), m = Number(nm.slice(4)), last = new Date(y, m, 0).getDate();
+  return `${y}-${String(m).padStart(2, "0")}-${String(Math.min(payDay, last)).padStart(2, "0")}`;
+}
+function fillBillCfg(app, month) {
+  const cfg = billCfg(app);
+  setVal("cfg_send", cfg.sendDays); setVal("cfg_review", cfg.reviewDays); setVal("cfg_pay", cfg.payDay);
+  const due = $("dueDate"); due.value = dueDateFor(month, cfg.payDay); due.dataset.auto = due.value;
+  const save = async () => {
+    const v = { sendDays: Number($("cfg_send").value) || 8, reviewDays: Number($("cfg_review").value) || 2, payDay: Number($("cfg_pay").value) || 27 };
+    if (!due.value || due.value === due.dataset.auto) { due.value = dueDateFor(month, v.payDay); due.dataset.auto = due.value; } // 직접 고친 날짜는 유지
+    const where = await Store.set(`billcfg:${app}`, v);
+    if (where !== "denied") $("cfgStatus").textContent = `청구일·검토일·납부일 저장됨 (${where === "remote" ? "구글시트" : "이 브라우저"}) — 다음 정산부터 기본값`;
+  };
+  ["cfg_send", "cfg_review", "cfg_pay"].forEach(id => { $(id).onchange = save; });
 }
 
 function trueUpFormHtml() {
@@ -192,6 +219,7 @@ function fillProvisionalForm(app, month) {
     setVal("cs_total", ""); ["cs_taxable", "cs_exempt", "pd_taxable", "pd_exempt"].forEach(id => setVal(id, 0));
     setVal("cs_ratio", ratesFor(prevMonth).rates.taxableRatio);
   }
+  fillBillCfg(app, month);
 }
 
 function splitConfirmed() {
@@ -215,7 +243,7 @@ function prepareGroup(err, warn) {
   if (!version) warn.push(`${g.month} 에 적용되는 KPX 요율 버전이 없어 기본값으로 계산했습니다.`);
   const plants = {}; Object.keys(g.plants).forEach(p => {
     const i = Registry.plantInfo(p);
-    plants[p] = i && i.region ? i : Object.assign({ distConnected: false, distLow: false }, i || {}, { region: "비수도권" }); // 미리보기용 임시값
+    plants[p] = i && i.region ? i : Object.assign({ distConnected: false, distLow: false }, i || {}, { region: "비수도권", tempRegion: true }); // 미리보기용 임시값
   });
   const S = settleGroup(g, billState.ami, rates);
   const days = S.days;
@@ -274,7 +302,8 @@ function runCalc() {
       || ctx.prevDiff.taxable !== carry.prevDiff.taxable || ctx.prevDiff.exempt !== carry.prevDiff.exempt))
       warn.push("전월 오차정산 칸이 저장된 오차정산 값과 다릅니다. 직접 고친 값으로 계산했습니다.");
     const inv = Engine.invoice(match, ctx, P.rates);
-    billState.result = { mode: "provisional", preview: P.preview, app: P.app, month: P.g.month, customer: P.customer, rates: P.rates, match, inv, ctx, loss: P.loss, note: $("bill_note").value.trim(), dueDate: $("dueDate").value };
+    const days = { sendDays: Number($("cfg_send").value) || 8, reviewDays: Number($("cfg_review").value) || 2, payDay: Number($("cfg_pay").value) || 27 };
+    billState.result = { mode: "provisional", preview: P.preview, app: P.app, month: P.g.month, customer: Object.assign({}, P.customer, days), rates: P.rates, match, inv, ctx, loss: P.loss, note: $("bill_note").value.trim(), dueDate: $("dueDate").value };
     out.innerHTML = (P.preview ? previewNotice(err) : "") + noticeHtml(warn, "warn") + invoiceHtml(billState.result);
     fitDocs(out);
     $("billActions").style.display = "flex";
@@ -289,10 +318,11 @@ function fitDocs(root) {
     if (!doc.offsetWidth) return; // 화면에 안 보이면 건너뜀
     const a4 = doc.offsetWidth * 297 / 210, set = (k, v) => doc.style.setProperty(k, v);
     const natural = () => { doc.style.minHeight = "0"; const h = doc.offsetHeight; doc.style.minHeight = ""; return h; };
-    let fs = 11, pad = 0.26; set("--dfs", fs + "px"); set("--dpad", pad);
+    const prev = doc.classList.contains("page2") && doc.previousElementSibling && doc.previousElementSibling.style.getPropertyValue("--dfs");
+    let fs = prev ? parseFloat(prev) : 11, pad = 0.26; set("--dfs", fs + "px"); set("--dpad", pad); // 같은 청구서 2쪽은 1쪽 글자 크기로
     while (natural() > a4 + 1 && fs > 7.5) { fs -= 0.25; set("--dfs", fs + "px"); }
-    while (pad < 0.8 && natural() < a4 - 40) { pad += 0.04; set("--dpad", pad); }
-    if (natural() > a4 + 1) set("--dpad", Math.max(0.26, pad - 0.04));
+    while (pad < 0.55 && natural() < a4 - 40) { pad += 0.03; set("--dpad", pad); }
+    if (natural() > a4 + 1) set("--dpad", Math.max(0.26, pad - 0.03));
   });
 }
 const DOC_COLS = `<colgroup><col style="width:7%"><col style="width:19%"><col><col><col style="width:19%"><col><col></colgroup>`;
@@ -353,7 +383,7 @@ function docSignature(R, what, c) {
 }
 
 /* ---------- 가정산 청구서 ---------- */
-const BILL_COLS = `<colgroup><col style="width:5%"><col style="width:5%"><col style="width:15%"><col style="width:15%"><col style="width:17%"><col></colgroup>`;
+const BILL_COLS = `<colgroup><col style="width:3.5%"><col style="width:3.5%"><col style="width:15%"><col style="width:15%"><col style="width:17%"><col></colgroup>`;
 function invoiceHtml(R) {
   const { inv, match, customer: c, rates, ctx } = R;
   const prevM = Number(prevYm(R.month).slice(4)), curM = Number(R.month.slice(4));
@@ -366,7 +396,8 @@ function invoiceHtml(R) {
     : `공급량 계 × ${ctx.unitPrice} 원/kWh`;
   const netRows = 2 + plantsN.length;
   const plantRows = plantsN.map(p => { const n = inv.netByPlant[p];
-    return `<tr>${sub(`<span class="plant">${esc(p)}</span>`, won(n.fee), `${n.type ? `유형 ${TYPE_MARK[n.type - 1]} ` : ""}= ${esc(n.basis || "")}`)}</tr>`; }).join("");
+    const temp = ctx.plants[p] && ctx.plants[p].tempRegion ? ' <b class="warn-t">※ 발전소 지역 미등록 → 임시 비수도권</b>' : "";
+    return `<tr>${sub(`<span class="plant">${esc(p)}</span>`, won(n.fee), `${n.type ? `유형 ${TYPE_MARK[n.type - 1]} ` : ""}= ${esc(n.basis || "")}${temp}`)}</tr>`; }).join("");
   const taxRows = [
     row("전력량요금", won(inv.energy), energyBasis),
     `<tr><td class="label" rowspan="${netRows}">송배전용<br>전기설비<br>이용요금<br>(망이용요금)</td>${sub("기본요금", "0 원", "0.00 kW (미적용)")}</tr>`,
@@ -588,7 +619,7 @@ function contractNotes(c) {
   const send = c.sendDays || 8, pay = c.payDay || 27, check = c.checkDays || 5;
   return `<div class="bill-notes">
     <p>. 재생에너지 전기공급사업자는 거래가 종료된 익월 [${esc(send)}]영업일 이내에 전기사용자에게 해당 월 발생한 전력거래 대금 및 전력량을 가정산하여 명시한 청구서를 송부합니다.</p>
-    <p>. 전기사용자는 가정산 청구서를 수령한 후 [2]영업일 이내에 검토하여 재생에너지 전기공급사업자에게 세금계산서발행을 요청하고, 요청을 받은 재생에너지 전기공급사업자는 세금계산서를 발행합니다.</p>
+    <p>. 전기사용자는 가정산 청구서를 수령한 후 [${esc(c.reviewDays || 2)}]영업일 이내에 검토하여 재생에너지 전기공급사업자에게 세금계산서발행을 요청하고, 요청을 받은 재생에너지 전기공급사업자는 세금계산서를 발행합니다.</p>
     <p>. 전기사용자는 세금계산서를 수령한 후 매월 [${esc(pay)}]일까지 재생에너지 전기공급사업자가 지정한 은행 계좌로 전력거래대금을 지급합니다. 단, 매월 ${esc(pay)}일이 공휴일일 경우 다음 영업일에 지급합니다.</p>
     <p>. 재생에너지 전기공급사업자는 한국전력공사, 한국전력거래소 등 관계 기관의 개별 청구서 수령 후 [${esc(check)}]영업일 이내에 가정산과의 오차를 확인하여 그 내역을 전기사용자에게 송부합니다.</p>
     <p>. 당사자가 본 계약에 따른 전력거래대금 계산상 착오가 있음을 발견하거나 기타 추가 정산할 사항이 있는 경우 추가 정산을 요청하는 당사자는 전력거래대금 지급일이 속한달의 말일까지 상대방 당사자에게 재정산을 요청하여야 하고, 당사자들은 본 항에 따른 다시 정산된 금액을 해당 금액이 발생한 월의 익월에 재정산합니다.</p></div>`;
@@ -686,8 +717,8 @@ function trueUpHtml(R) {
     ${docSignature(R, "오차", c)}
   </div>`;
 }
-const TU_COLS = `<colgroup><col style="width:5%"><col style="width:21%"><col><col><col><col><col style="width:15%"></colgroup>`;
-const CS_COLS = `<colgroup><col style="width:5%"><col style="width:9%"><col style="width:15%"><col style="width:9%"><col style="width:16%"><col><col><col></colgroup>`;
+const TU_COLS = `<colgroup><col style="width:7%"><col style="width:19%"><col><col><col><col><col style="width:15%"></colgroup>`;
+const CS_COLS = `<colgroup><col style="width:7%"><col style="width:8%"><col style="width:15%"><col style="width:9%"><col style="width:15%"><col><col><col></colgroup>`;
 
 async function saveTrueUp() {
   const R = billState.result; if (!R || R.mode !== "trueup" || R.preview) return;

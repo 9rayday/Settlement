@@ -2,7 +2,7 @@
  * 구글시트 "발전소 사업자 정보"(= 발전사업자 정산서 마스터, masterData)와 "전기사용자 정보" 탭을 읽고 행 단위로 저장/삭제한다.
  * 같은 KPX 신청번호를 가진 발전소들이 한 전기사용자 계약(그룹)이다. 계약을 누르면 그룹의 월별 발전소 집계를 보여준다.
  */
-const GEN_REGIONS = ["비수도권", "수도권북", "수도권남"];  // 등록 화면 지역 선택 (제주 제외)
+const GEN_REGIONS = [["", "선택 (KEPCO 청구서 기준)"], ["비수도권", "비수도권 (1.92)"], ["수도권북", "수도권북 (1.25)"], ["수도권남", "수도권남 (1.20)"]];  // 등록 화면 지역 선택 (제주 제외)
 const DEMAND_REGIONS = ["수도권", "비수도권"];
 const GRID_LABEL = { N: "송전", L: "배전저압", Y: "배전고압" };
 const gridOf = v => { v = String(v == null ? "" : v).trim().toUpperCase(); return v === "Y" || v === "L" ? v : "N"; };
@@ -377,7 +377,7 @@ function renderPlantPage() {
 function openPlant(name, keepScroll) {
   regState.openPlant = name; markActive(".reg-row", "plant", name);
   const isNew = !name;
-  const raw = isNew ? { "지역(요금구분)": "비수도권", "배전연결": "N" } : splitOwnerName(Object.assign({}, Registry.plants()[name]));
+  const raw = isNew ? { "지역(요금구분)": "", "배전연결": "N" } : splitOwnerName(Object.assign({}, Registry.plants()[name]));
   raw["배전연결"] = gridOf(raw["배전연결"]);
   if (!isNew) raw["계약ID"] = Registry.plantContract(name); // 예전 데이터: 신청번호 그룹의 계약이 1건이면 그 계약
   if (!rStr(raw["접속점"]) && rStr(raw["변전소"])) raw["접속점"] = raw["변전소"]; // 예전 변전소 칸 값 이어받기

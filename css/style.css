@@ -519,3 +519,11 @@ table.perf-years td:nth-child(-n+2), table.perf-years .perf-sub{ white-space:now
 .doc.bill .bill-title h1.title{ white-space:nowrap; }
 .doc.bill .bill-no{ font-size:9px; white-space:normal; word-break:keep-all; }
 .doc.bill .bill-no .nw{ white-space:nowrap; }
+/* 표 사이 간격 · 합계 행 색상 통일 (청구서 · 오차 정산서 · 발전사업자 정산서 공통) */
+.doc.bill table.doc-table{ margin-bottom:11px; }
+.doc.bill table.doc-table tr.pay td, .doc.bill table.doc-table tr.pay th,
+.doc.bill table.doc-table tr.pay td.label, .doc.bill table.doc-table tr.pay th.section{
+  background:#DCE6F2 !important; color:#1B2330 !important; font-weight:700; font-size:calc(var(--dfs) + 1px); border-top:1.5px solid #8EA9C8; border-bottom:1.5px solid #8EA9C8; }
+.doc.bill table.doc-table tr.total td{ background:#F2F2F2; font-weight:700; }
+.doc.bill .warn-t{ color:#C0392B; font-weight:700; }
+.doc.bill table.doc-table th.section{ padding-left:2px !important; padding-right:2px !important; overflow-wrap:normal; word-break:keep-all; letter-spacing:0; }
