@@ -750,8 +750,8 @@ function need_(s, perm) {
 // 앱데이터 키별 쓰기 권한
 function storePerm_(key) {
   key = String(key || "");
-  if (/^(netrate:|touver:|holidays|market:|rates:)/.test(key)) return "rates";
-  if (/^(bill:|carry:|genpay:)/.test(key)) return "settle";
+  if (/^(netrate:|touver:|holidays|market:|rates:|recw$|reccfg$)/.test(key)) return "rates";
+  if (/^(bill:|carry:|genpay:|recx:|smp:|recset:)/.test(key)) return "settle";
   return null; // 그 밖의 키는 쓰기 권한이 하나라도 있으면 허용
 }
 

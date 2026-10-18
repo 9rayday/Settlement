@@ -527,3 +527,22 @@ table.perf-years td:nth-child(-n+2), table.perf-years .perf-sub{ white-space:now
 .doc.bill table.doc-table tr.total td{ background:#F2F2F2; font-weight:700; }
 .doc.bill .warn-t{ color:#C0392B; font-weight:700; }
 .doc.bill table.doc-table th.section{ padding-left:2px !important; padding-right:2px !important; overflow-wrap:normal; word-break:keep-all; letter-spacing:0; }
+
+/* 초과발전량 REC 관리 */
+.rec-cover{ display:flex; flex-wrap:wrap; gap:18px; margin-top:10px; font-size:12.5px; color:var(--sub); }
+.rec-table td.num{ text-align:right; white-space:nowrap; }
+.rec-table input{ width:100%; min-width:80px; padding:5px 7px; border:1px solid var(--line); border-radius:6px; font-size:12.5px; }
+.rec-table td.rec-carry{ color:#9A6B00; }
+.rec-cal th, .rec-cal td{ text-align:center; padding:6px 4px; font-size:12px; }
+.rec-cal td.rc-name{ text-align:left; min-width:150px; }
+.rec-cal td b{ display:block; font-size:12.5px; }
+.rec-cal td span{ font-size:10.5px; }
+.rec-cal td.rc-done{ background:#E6F5F1; color:var(--accent-2); }
+.rec-cal td.rc-open{ background:#FFF1E0; color:#9A5B00; }
+.rec-cal td.rc-none{ color:#B5BAC2; }
+.rec-cal td.rc-sum{ background:#F7F8FA; min-width:120px; }
+.rec-cal .rc-alert{ color:#C0392B; }
+.rc-chip{ display:inline-block; padding:1px 8px; border-radius:999px; font-size:11px; }
+.rc-chip.rc-done{ background:#E6F5F1; color:var(--accent-2); }
+.rc-chip.rc-open{ background:#FFF1E0; color:#9A5B00; }
+.rec-cal td span{ white-space:nowrap; } .rec-cal th, .rec-cal td{ min-width:52px; }

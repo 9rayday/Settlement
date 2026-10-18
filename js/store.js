@@ -24,8 +24,8 @@ const Store = (function () {
   function keys(prefix) { return Object.keys(data).filter(k => k.indexOf(prefix) === 0).sort(); }
   // 키별 쓰기 권한 (서버 gas/Code.gs storePerm_ 과 같게)
   function permOf(key) {
-    if (/^(netrate:|touver:|holidays|market:|rates:)/.test(key)) return "rates";
-    if (/^(bill:|carry:|genpay:)/.test(key)) return "settle";
+    if (/^(netrate:|touver:|holidays|market:|rates:|recw$|reccfg$)/.test(key)) return "rates";
+    if (/^(bill:|carry:|genpay:|recx:|smp:|recset:)/.test(key)) return "settle";
     return null;
   }
   // 반환: "remote" | "local" | "denied"
