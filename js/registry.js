@@ -74,7 +74,8 @@ const CUSTOMER_FORM = [
   { k: "사용장소명", label: "사용장소명" },
   { k: "소비계약신청번호", label: "소비계약신청번호" },
   { k: "전기사용장소", label: "주소", wide: true },
-  { k: "수요망", label: "수요망", type: "select", options: ["", "송전망", "배전망"] },
+  { k: "수요망", label: "수요망 (배전망이면 망이용요금에 배전요금 추가)", type: "select", options: ["", "송전망", "배전망"] },
+  { k: "접속점", label: "접속점 (배전망: 발전소와 같으면 배전요금만)" },
   { k: "수요지지역", label: "수요지 지역 (송전요금 구분)", type: "select", options: DEMAND_REGIONS, req: true },
   { k: "한전계약전력", label: "한전계약전력 (kW)", type: "kw" },
   { k: "한전고객번호", label: "한전고객번호" },
@@ -108,12 +109,12 @@ const Registry = (function () {
     const m = plants()[name];
     if (!m) return null;
     const grid = gridOf(m["배전연결"]); // 배전망이면 배전이용요금 추가 (저압/고압 요금 구분)
-    return { region: str(m["지역(요금구분)"]), distConnected: grid !== "N", distLow: grid === "L", appNo: str(m["KPX신청번호"]) };
+    return { region: str(m["지역(요금구분)"]), distConnected: grid !== "N", distLow: grid === "L", node: str(m["접속점"]), appNo: str(m["KPX신청번호"]) };
   }
   // 청구서/엔진용 전기사용자 정보
   function toCustomer(c) {
     return { name: str(c["수요기업명"]), ceo: str(c["대표자명"]), bizNo: str(c["사업자등록번호"]), address: str(c["전기사용장소"]),
-      manager: str(c["담당자"]), contact: str(c["연락처"]), email: str(c["이메일"]), demandRegion: str(c["수요지지역"]),
+      manager: str(c["담당자"]), contact: str(c["연락처"]), email: str(c["이메일"]), demandRegion: str(c["수요지지역"]), demandGrid: str(c["수요망"]), demandNode: str(c["접속점"]),
       unitPrice: Number(c["계약단가"]), appNo: str(c["KPX신청번호"]), consumeAppNo: str(c["소비계약신청번호"]), settleMethod: str(c["정산방식"]),
       start: str(c["계약일자"]), end: str(c["계약해지일"]), contractId: custKey(c) };
   }

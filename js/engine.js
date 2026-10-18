@@ -22,7 +22,8 @@
     fundRate: 0.027,                 // 전력산업기반기금
     vatRate: 0.1,
     transLossRate: 0.0157,           // 송전손실률 (망이용요금·부족전력량 산정)
-    totalLossRate: 0.0352,           // 종합손실률 (배전 연결 시)
+    totalLossRate: 0.0352,           // 종합손실률 (송전 발전사 → 배전 사용자)
+    distLossRate: 0.0198,            // 배전손실률 (같은 접속점 배전 발전사 → 배전 사용자)
     genSide: { "비수도권": 1.92, "수도권북": 1.25, "수도권남": 1.20, "제주": 1.90 },
     demandSide: { "수도권": 2.44, "비수도권": 1.42, "제주": 6.95 },
     distribution: 3.05               // 배전연결 발전소 추가 요금 원/kWh
@@ -148,23 +149,39 @@
   };
 
   /* ---------- 2) 망이용요금 (발전소별) ----------
-   * TRUNC(ROUND(공급량)×발전측) + TRUNC(ROUND(공급량)×(1−송전손실률)×수요측) [+ 배전연결: TRUNC(ROUND(공급량)×(1−종합손실률)×3.05)]
+   * KPX 망이용 유형 (js/kpxrates.js NET_TYPES). 배전요금 여부는 전기사용자(수요망)가 정한다 — 발전소가 배전망이어도 사용자가 송전이면 배전요금 없음.
+   *  1·5·6 사용자 송전:                 TRUNC(s×발전측) + TRUNC(s×(1−송전손실률)×수요측)
+   *  2     사용자 배전고압 (접속점 다름): 위 + TRUNC(s×(1−종합손실률)×배전고압)
+   *  3·4   배전 발전사 – 배전 사용자 같은 접속점: TRUNC(s×(1−배전손실률)×배전고압)
+   * s = ROUND(월 공급량). demand: 수요지 지역 문자열 또는 { region, grid: "송전망"|"배전망", node: 접속점 }
    */
-  E.networkFee = function (supplyKwh, plantInfo, demandRegion, rates) {
+  E.networkFee = function (supplyKwh, plantInfo, demand, rates) {
     const s = E.round(supplyKwh);
+    const dem = typeof demand === "string" ? { region: demand } : (demand || {});
+    const pct = x => +(x * 100).toFixed(4) + "%";
+    const userDist = /배전/.test(dem.grid || ""), plantDist = !!plantInfo.distConnected;
+    const dist = rates.distribution, distLoss = rates.distLossRate != null ? rates.distLossRate : E.DEFAULT_RATES.distLossRate;
+    if (userDist && plantDist && plantInfo.node && dem.node && String(plantInfo.node).trim() === String(dem.node).trim()) {
+      return { supplyRounded: s, fee: E.trunc(s * (1 - distLoss) * dist), type: plantInfo.distLow ? 4 : 3,
+        basis: `${s.toLocaleString()} kWh × (1 − ${pct(distLoss)}) × ${dist} 원/kWh` };
+    }
     const g = rates.genSide[plantInfo.region];
     if (g == null) throw new Error("발전소 지역(요금구분)이 올바르지 않습니다: " + plantInfo.region);
-    const dm = rates.demandSide[demandRegion];
-    if (dm == null) throw new Error("수요지 지역이 올바르지 않습니다: " + demandRegion);
+    const dm = rates.demandSide[dem.region];
+    if (dm == null) throw new Error("수요지 지역이 올바르지 않습니다: " + dem.region);
     let fee = E.trunc(s * g) + E.trunc(s * (1 - rates.transLossRate) * dm);
-    if (plantInfo.distConnected) fee += E.trunc(s * (1 - rates.totalLossRate) * (plantInfo.distLow && rates.distributionLow != null ? rates.distributionLow : rates.distribution));
-    return { supplyRounded: s, fee };
+    let basis = `${s.toLocaleString()} kWh × [ ${g} + (1 − ${pct(rates.transLossRate)}) × ${dm} ]`;
+    if (userDist) {
+      fee += E.trunc(s * (1 - rates.totalLossRate) * dist);
+      basis = `${s.toLocaleString()} kWh × [ ${g} + (1 − ${pct(rates.transLossRate)}) × ${dm} + (1 − ${pct(rates.totalLossRate)}) × ${dist} ]`;
+    }
+    return { supplyRounded: s, fee, type: userDist ? 2 : plantDist ? (plantInfo.distLow ? 6 : 5) : 1, basis };
   };
 
   /* ---------- 3) 청구서 (가정산) ----------
    * ctx: {
    *   unitPrice,                    // 계약 전력량 단가 원/kWh
-   *   demandRegion,                 // 수요지 지역
+   *   demandRegion, demandGrid, demandNode, // 수요지 지역 · 수요망(송전망/배전망) · 접속점
    *   plants: {plant: {region, distConnected}},
    *   confirmedSurcharge: {taxable, exempt},   // 전월 확정 부가정산금 (과세/비과세)
    *   prevDiff: {taxable, exempt}               // 전월 오차정산 차액
@@ -180,7 +197,7 @@
     Object.keys(match.supplyByPlant).forEach(p => {
       const info = ctx.plants[p];
       if (!info) throw new Error("발전소 등록 정보가 없습니다: " + p);
-      const r = E.networkFee(match.supplyByPlant[p], info, ctx.demandRegion, rates);
+      const r = E.networkFee(match.supplyByPlant[p], info, { region: ctx.demandRegion, grid: ctx.demandGrid, node: ctx.demandNode }, rates);
       net[p] = r; netTotal += r.fee;
     });
     const fee = E.round(supplyTotal * rates.tradeFee);

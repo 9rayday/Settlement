@@ -45,7 +45,7 @@ function applyNetVersion(rates, v) {
   const etc = v.etc ? { surcharge: v.etc.surcharge, taxableRatio: v.etc.taxable / 100, tradeFee: v.etc.tradeFee, fundRate: v.etc.fund / 100, vatRate: v.etc.vat / 100 } : {};
   return Object.assign({}, rates, etc, {
     genSide: Object.assign({}, v.gen), demandSide: Object.assign({}, v.demand),
-    distribution: v.dist.high, distributionLow: v.dist.low,
+    distribution: v.dist.high, distributionLow: v.dist.low, // 배전요금은 사용자 이용전압(배전고압) 기준
     transLossRate: v.loss.trans / 100, distLossRate: v.loss.dist / 100, totalLossRate: v.loss.total / 100,
     netVersion: v.effective
   });

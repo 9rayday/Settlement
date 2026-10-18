@@ -264,7 +264,7 @@ function runCalc() {
     const P = prepareGroup(err, warn);
     const match = P.match;
     const ctx = {
-      unitPrice: P.customer.unitPrice, priceSplits: safeSplits(Registry.priceSplits(P.app, P.g.month, match.supplyByPlant)), demandRegion: P.customer.demandRegion, plants: P.plants,
+      unitPrice: P.customer.unitPrice, priceSplits: safeSplits(Registry.priceSplits(P.app, P.g.month, match.supplyByPlant)), demandRegion: P.customer.demandRegion, demandGrid: P.customer.demandGrid, demandNode: P.customer.demandNode, plants: P.plants,
       confirmedSurcharge: { taxable: Number($("cs_taxable").value) || 0, exempt: Number($("cs_exempt").value) || 0 },
       prevDiff: { taxable: Number($("pd_taxable").value) || 0, exempt: Number($("pd_exempt").value) || 0 },
       penalty: typeof penaltyDueGroup === "function" ? penaltyDueGroup(P.app, P.g.month) : null
@@ -352,8 +352,8 @@ function invoiceHtml(R) {
       ${exRows.slice(1).join("")}
       <tr class="pay"><th class="section">합계</th><td class="label">당월 청구 계</td><td class="num" colspan="5">${won(inv.grandTotal)}</td></tr></table>
     <table class="doc-table">${DOC_COLS}
-      <tr><th class="section" rowspan="${plantsN.length + 1}">발전소별<br>망이용요금</th><td class="label" colspan="2">발전소</td><td class="label" colspan="2">공급량 (반올림)</td><td class="label" colspan="2">망이용요금</td></tr>
-      ${plantsN.map(p => `<tr><td colspan="2">${esc(p)}</td><td class="num" colspan="2">${inv.netByPlant[p].supplyRounded.toLocaleString()} kWh</td><td class="num" colspan="2">${won(inv.netByPlant[p].fee)}</td></tr>`).join("")}</table>
+      <tr><th class="section" rowspan="${plantsN.length + 1}">발전소별<br>망이용요금</th><td class="label">발전소</td><td class="label">공급량 (반올림)</td><td class="label">망이용요금</td><td class="label" colspan="3">산출근거 (원/kWh)</td></tr>
+      ${plantsN.map(p => `<tr><td>${esc(p)}</td><td class="num">${inv.netByPlant[p].supplyRounded.toLocaleString()} kWh</td><td class="num">${won(inv.netByPlant[p].fee)}</td><td class="basis" colspan="3">= ${esc(inv.netByPlant[p].basis || "")}</td></tr>`).join("")}</table>
     ${buyerTable(R, `${INVOICE_PREFIX}-${R.month}-0001`)}
     ${docSignature(R, "가정산", c)}
   </div>`;
@@ -452,7 +452,7 @@ function runTrueUp() {
     const prov = readProvisional(P.g.month, P.app);
     if (!prov) { out.innerHTML = noticeHtml(["가정산 값(공급량·전력량요금·망이용요금·거래수수료)을 모두 입력하세요."], "bad"); return; }
     const match = P.match;
-    const conf = Engine.invoice(match, { unitPrice: P.customer.unitPrice, priceSplits: safeSplits(Registry.priceSplits(P.app, P.g.month, match.supplyByPlant)), demandRegion: P.customer.demandRegion, plants: P.plants }, P.rates);
+    const conf = Engine.invoice(match, { unitPrice: P.customer.unitPrice, priceSplits: safeSplits(Registry.priceSplits(P.app, P.g.month, match.supplyByPlant)), demandRegion: P.customer.demandRegion, demandGrid: P.customer.demandGrid, demandNode: P.customer.demandNode, plants: P.plants }, P.rates);
     const diff = Engine.trueUpDiff(prov, conf);
     setVal("pd_taxable", diff.taxable); // 비교 결과로 채움 (직접 고친 값은 다시 계산하면 덮어씀)
     billState.result = { mode: "trueup", preview: P.preview, err: err.slice(), app: P.app, month: P.g.month, customer: P.customer, rates: P.rates, match, conf, prov, diff, warn };
