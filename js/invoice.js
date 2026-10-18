@@ -87,6 +87,24 @@ function calcInvoice(plant){
   return { unitPrice, feeRate, supply, energyFee, supplyValue, vat1, subtotal1, fee, vat2, subtotal2, adj, payment, penalty: pen.amount, penaltyLabel: pen.label };
 }
 
+/* ============ 정산 대시보드용 발전사업자 전력대금 기록 (genpay:YYYYMM) ============
+ * 업로드·조정 저장 때마다 그 달 모든 발전소의 정산 요약을 저장한다. 조정값을 아직 안 불러온 발전소는 이전 기록의 조정값을 쓴다.
+ */
+async function saveGenPay(){
+  if(!settleMonth || !plants.length || typeof Store === "undefined") return;
+  const key = `genpay:${settleMonth}`, old = Store.get(key, null) || { plants: {} };
+  const out = {};
+  plants.forEach(p=>{
+    if(!adjustmentsByPlant[p] && old.plants[p] && old.plants[p].adj) adjustmentsByPlant[p] = old.plants[p].adj;
+    const c = calcInvoice(p); if(!c) return;
+    const a = aggByPlant[p];
+    out[p] = { generation: a.generation, supply: c.supply, excess: a.excess, unitPrice: c.unitPrice, energyFee: c.energyFee, vat1: c.vat1, subtotal1: c.subtotal1,
+      fee: c.fee, subtotal2: c.subtotal2, adj: c.adj, penalty: c.penalty, payment: c.payment, appNo: (masterData[p] || {})["KPX신청번호"] || "" };
+  });
+  await Store.set(key, { plants: Object.assign({}, old.plants, out), savedAt: new Date().toISOString() });
+  if(typeof renderDashboard === "function") renderDashboard();
+}
+
 /* ============ Tab 2: 발전소별 확인/조정 ============ */
 function renderPlantAdjustTab(){
   const host = document.getElementById("plantAdjustHost");
@@ -118,6 +136,7 @@ async function handleSaveAdjustments(){
   await fetchMaster();
   statusEl.textContent = result ? "저장 완료 (마스터 정보도 최신으로 갱신됨)" : "저장 실패 (GAS 배포 전이면 로컬에만 반영됩니다)";
   renderInvoicePreview();
+  saveGenPay();
 }
 
 async function handleRefreshMaster(){

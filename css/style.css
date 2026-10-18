@@ -394,3 +394,30 @@ table.perf-years td:nth-child(-n+2), table.perf-years .perf-sub{ white-space:now
 .bill-flow .flow-step small{ font-size:11px; opacity:.85; }
 .bill-flow .flow-arrow{ color:#B5BAC2; }
 .bill-flow input{ height:28px; font-size:12.5px; }
+
+/* 정산 대시보드: 연도 달력 (전기사용자 +, 발전사업자 −, 손익) */
+#page-dash .plus{ color:var(--accent-2); }
+#page-dash .minus{ color:var(--danger); }
+.dash-head{ display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:14px; margin-bottom:14px; }
+.dash-year{ display:flex; align-items:center; gap:10px; font-size:18px; }
+.dash-year .btn{ padding:4px 12px; }
+.dash-sum{ display:flex; flex-wrap:wrap; gap:10px; }
+.dash-sum > div{ display:flex; flex-direction:column; gap:2px; padding:8px 14px; border:1px solid var(--line); border-radius:8px; background:var(--paper); min-width:170px; }
+.dash-sum span{ font-size:12px; color:var(--sub); }
+.dash-sum b{ font-size:16px; }
+.dash-cal{ display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:10px; }
+.dash-month{ text-align:left; background:#fff; border:1px solid var(--line); border-radius:9px; padding:10px 12px; cursor:pointer; font:inherit; color:var(--ink); min-height:104px; }
+.dash-month:hover{ border-color:var(--accent); }
+.dash-month.active{ border:2px solid var(--accent); padding:9px 11px; background:#FFFBF5; }
+.dash-month.empty{ background:var(--paper); color:var(--sub); }
+.dm-title{ font-weight:700; margin-bottom:6px; }
+.dm-row{ display:flex; justify-content:space-between; gap:6px; font-size:12.5px; line-height:1.7; }
+.dm-row span{ color:var(--sub); }
+.dm-pl{ border-top:1px dashed var(--line); margin-top:3px; padding-top:3px; font-weight:700; }
+.dm-none{ font-size:12px; }
+.dash-pl{ font-size:13px; margin-left:8px; }
+.dash-table td.num{ text-align:right; white-space:nowrap; }
+.dash-table tr.total td{ background:#F4F6F9; font-weight:700; }
+@media (max-width:900px){ .dash-cal{ grid-template-columns:repeat(3, minmax(0, 1fr)); } }
+@media (max-width:600px){ .dash-cal{ grid-template-columns:repeat(2, minmax(0, 1fr)); } .dash-sum > div{ min-width:0; flex:1; } }
+.table-wrap{ overflow-x:auto; }

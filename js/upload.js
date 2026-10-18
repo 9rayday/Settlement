@@ -276,4 +276,5 @@ async function syncPerformanceToGas(){
   await logPerformance(settleMonth, rows);
   if(typeof refreshPerformance === "function") await refreshPerformance(); // 계약이행현황·위약금 갱신
   renderInvoicePreview();
+  saveGenPay(); // 정산 대시보드용 발전사업자 전력대금 (js/invoice.js)
 }
