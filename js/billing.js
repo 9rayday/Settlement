@@ -93,7 +93,7 @@ function provisionalFormHtml() {
     <div class="adj-grid">
       ${numField("전월 확정 부가정산금 (과세)", "cs_taxable", 0)}${numField("전월 확정 부가정산금 (비과세)", "cs_exempt", 0)}
       ${numField("전월 차액 (과세)", "pd_taxable", 0)}${numField("전월 차액 (비과세)", "pd_exempt", 0)}
-      ${fieldHtml("납부기한", `<input type="date" id="dueDate">`)}</div>
+      ${fieldHtml("납부기한", `<input type="date" id="dueDate">`)}${fieldHtml("특이사항", `<input id="bill_note">`)}</div>
     <div class="row" style="margin-top:10px"><button class="btn accent" id="calcBtn">가정산서 계산</button></div></div>`;
 }
 
@@ -105,7 +105,7 @@ function trueUpFormHtml() {
       <div class="adj-grid">
         ${numField("확정 부가정산금 (과세)", "cs_taxable", 0)}${numField("확정 부가정산금 (비과세)", "cs_exempt", 0)}
         ${numField("차액 (과세)", "pd_taxable", 0)}${numField("차액 (비과세)", "pd_exempt", 0)}
-        ${fieldHtml("메모", `<input id="tu_note">`)}</div>
+        ${fieldHtml("특이사항", `<input id="tu_note">`)}</div>
       <div class="row" style="margin-top:10px"><button class="btn accent" id="calcBtn">오차정산 계산</button></div></div>`;
 }
 
@@ -233,7 +233,7 @@ function prepareGroup(err, warn) {
   const cust = customer ? Object.assign({}, customer) : { name: `(미등록) ${app}`, bizNo: "", address: "", manager: "", contact: "", demandRegion: "비수도권", unitPrice: 0, appNo: app, contractId: app };
   if (!cust.demandRegion) cust.demandRegion = "비수도권";
   if (!(cust.unitPrice >= 0)) cust.unitPrice = 0;
-  return { app, g, customer: cust, rates, plants, days, match: S.match, priceSplits, preview };
+  return { app, g, customer: cust, rates, plants, days, match: S.match, loss: S.loss, priceSplits, preview };
 }
 const previewNotice = err => `<div class="notice bad"><b>미리보기 — 등록 정보가 부족해 임시값으로 계산했습니다 (저장 불가)</b><br>${err.map(esc).join("<br>")}<br>임시값: 미등록 전기사용자는 신청번호로 표시, 지역 없음 = 비수도권, 단가 없음 = 0원</div>`;
 // 단가가 비어 있는 계약은 0원으로 계산 (미리보기)
@@ -274,90 +274,133 @@ function runCalc() {
       || ctx.prevDiff.taxable !== carry.prevDiff.taxable || ctx.prevDiff.exempt !== carry.prevDiff.exempt))
       warn.push("전월 오차정산 칸이 저장된 오차정산 값과 다릅니다. 직접 고친 값으로 계산했습니다.");
     const inv = Engine.invoice(match, ctx, P.rates);
-    billState.result = { mode: "provisional", preview: P.preview, app: P.app, month: P.g.month, customer: P.customer, rates: P.rates, match, inv, ctx, dueDate: $("dueDate").value };
+    billState.result = { mode: "provisional", preview: P.preview, app: P.app, month: P.g.month, customer: P.customer, rates: P.rates, match, inv, ctx, loss: P.loss, note: $("bill_note").value.trim(), dueDate: $("dueDate").value };
     out.innerHTML = (P.preview ? previewNotice(err) : "") + noticeHtml(warn, "warn") + invoiceHtml(billState.result);
     $("billActions").style.display = "flex";
     $("billSave").disabled = !!P.preview; // 미리보기는 저장 불가
   } catch (e) { out.innerHTML = `<div class="notice bad">계산 오류: ${esc(e.message)}</div>`; }
 }
 
-// 정산서 공통 틀 (발전사업자 정산서와 같은 A4 양식: 로고 · 제목 · 왼쪽 구분 열 + 6칸 · 서명)
-const DOC_COLS = `<colgroup><col><col><col><col><col><col><col></colgroup>`;
-const docField = (label, val) => `<td class="label">${label}</td><td colspan="2">${val}</td>`;
-function customerInfoTable(c, R) {
-  return `<table class="doc-table">${DOC_COLS}
-      <tr><th class="section" rowspan="3">전기사용자<br>정보</th>${docField("사업자명 (대표자명)", esc(c.name) + (c.ceo ? ` (${esc(c.ceo)})` : ""))}${docField("사업자등록번호", esc(c.bizNo || "-"))}</tr>
-      <tr>${docField("전기사용장소", esc(c.address || "-"))}${docField("계약 / 신청번호", esc((c.contractId && c.contractId !== R.app ? c.contractId + " / " : "") + R.app))}</tr>
-      <tr>${docField("담당자", esc(c.manager || "-"))}${docField("연락처", esc(c.contact || "-"))}</tr></table>`;
+// 정산서 공통 (실무 엑셀 양식: 한 페이지 A4 — 로고 · 제목 · 고객정보 · 거래내역 · 청구내역 · 청구정보 · 서명)
+const DOC_COLS = `<colgroup><col style="width:7%"><col style="width:19%"><col><col><col style="width:19%"><col><col></colgroup>`;
+const kwh2 = n => (n == null || isNaN(n)) ? "-" : (Math.abs(n) < 0.005 ? 0 : Number(n)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " kWh";
+const kwh3 = n => (n == null || isNaN(n)) ? "-" : (Math.abs(n) < 0.0005 ? 0 : Number(n)).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 }) + " kWh";
+const pctStr = x => (x == null || isNaN(x)) ? "-" : +(x * 100).toFixed(4) + "%";
+const TYPE_MARK = "①②③④⑤⑥⑦⑧";
+const invPrefix = c => (c && c.invoicePrefix) || INVOICE_PREFIX;
+const docNo = (R, n) => `${invPrefix(R.customer)}-${R.month}-${n}`;
+const ymdKo = ymd => { const d = String(ymd || "").replace(/[^0-9]/g, ""); return d.length >= 8 ? `${d.slice(0, 4)}년 ${d.slice(4, 6)}월 ${d.slice(6, 8)}일` : "-"; };
+const lastDay = m => new Date(Number(m.slice(0, 4)), Number(m.slice(4)), 0).getDate();
+
+function docHead(title, R, no) {
+  return `<div class="doc-header bill-head"><img src="assets/logo.jpg" alt="한화 신한 테라와트아워" class="doc-logo">
+      <div class="bill-title"><h1 class="title">${title}</h1><div class="month">(${R.month.slice(0, 4)}년 ${R.month.slice(4)}월 거래분)</div></div>
+      <div class="bill-no">${no ? `${title.includes("오차") ? "오차 정산서" : "청구서"} 번호: ${esc(no)}` : ""}</div></div>`;
 }
+const docField = (label, val, span) => `<td class="label">${label}</td><td colspan="${span || 2}">${val}</td>`;
+function customerInfoTable(c) {
+  return `<table class="doc-table">${DOC_COLS}
+      <tr><th class="section" rowspan="3">고객<br>정보</th>${docField("사업자명 (대표자명)", esc(c.name) + (c.ceo ? `<br>(${esc(c.ceo)})` : ""))}${docField("사업자등록번호", esc(c.bizNo || "-"))}</tr>
+      <tr>${docField("전기사용장소", esc(c.address || "-"), 5)}</tr>
+      <tr>${docField("담당자", esc(c.manager || "-"))}${docField("연락처", esc(c.contact || "-") + (c.email ? `<br>${esc(c.email)}` : ""))}</tr></table>`;
+}
+// 거래내역 요약 (청구서)
+function tradeSummaryTable(T, loss, note) {
+  const ds = T.deficitSimple, dl = T.deficitLoss;
+  return `<table class="doc-table">${DOC_COLS}
+      <tr><th class="section" rowspan="5">거래<br>내역</th>${docField("전기사용량 계", kwh2(T.usage))}${docField("발전량 계", kwh2(T.gen))}</tr>
+      <tr>${docField("전력손실률", pctStr(loss))}${docField("공급량 계", kwh2(T.supply))}</tr>
+      <tr>${docField("초과발전량 계", kwh2(T.excess))}${docField("부족전력량(단순) 계", kwh2(ds))}</tr>
+      <tr>${docField("부족전력량(전력손실률) 계", kwh2(dl))}${docField("부족전력량 계", kwh2(ds + dl))}</tr>
+      <tr>${docField("특이사항", esc(note || ""), 5)}</tr></table>`;
+}
+// 부하구분별 (청구서 2쪽)
 function usageTable(match, title) {
   const loads = ["경부하", "중간부하", "최대부하"];
-  const cell = b => `<td class="num">${kwhStr(b.usage)}</td><td class="num">${kwhStr(b.supply)}</td><td class="num">${kwhStr(b.deficitSimple)}</td><td class="num">${kwhStr(b.deficitLoss)}</td><td class="num">${kwhStr(b.deficitSimple + b.deficitLoss)}</td>`;
+  const cell = b => `<td class="num">${kwh2(b.usage)}</td><td class="num">${kwh2(b.supply)}</td><td class="num">${kwh2(b.deficitSimple)}</td><td class="num">${kwh2(b.deficitLoss)}</td><td class="num">${kwh2(b.deficitSimple + b.deficitLoss)}</td>`;
   return `<table class="doc-table">${DOC_COLS}
-      <tr><th class="section" rowspan="5">${title}</th><td class="label">구분</td><td class="label">전기사용량</td><td class="label">공급량</td><td class="label">부족전력량<br>(단순)</td><td class="label">부족전력량<br>(전력손실률)</td><td class="label">부족전력량 계</td></tr>
+      <tr><th class="section" rowspan="5">${title}</th><td class="label">구분</td><td class="label">전기사용량</td><td class="label">공급량</td><td class="label">부족전력량(단순)</td><td class="label">부족전력량(전력손실률)</td><td class="label">부족전력량 계</td></tr>
       ${loads.map(l => `<tr><td class="label">${l}</td>${cell(match.byLoad[l] || { usage: 0, supply: 0, deficitSimple: 0, deficitLoss: 0 })}</tr>`).join("")}
       <tr class="total"><td class="label">계</td>${cell(match.totals)}</tr></table>`;
 }
-function buyerTable(R, docNo) {
+function buyerTable(R, no) {
+  const c = R.customer;
   return `<table class="doc-table">${DOC_COLS}
-      <tr><th class="section" rowspan="3">청구<br>정보</th>${docField("사업자명 (대표자명)", esc(BUYER.bizName))}${docField("사업자등록번호", esc(BUYER.bizRegNo))}</tr>
-      <tr>${docField("담당자", esc(BUYER.manager))}${docField("연락처", esc(BUYER.contact))}</tr>
-      <tr>${docField("문서번호", docNo)}${docField("납부기한", esc(R.dueDate || "-"))}</tr></table>`;
+      <tr><th class="section" rowspan="4">청구<br>정보</th>${docField("사업자명 (대표자명)", esc(BUYER.bizName).replace(" (", "<br>("))}${docField("사업자등록번호", esc(BUYER.bizRegNo))}</tr>
+      <tr>${docField("주소", esc(BUYER.address).replace(/\n/g, "<br>"))}${docField("계좌번호", esc((c && c.payAccount) || BUYER.account || "-"))}</tr>
+      <tr>${docField("담당자", esc(BUYER.manager))}${docField("연락처", esc(BUYER.contact).replace(" / ", "<br>"))}</tr>
+      <tr>${docField(no.label, esc(no.value))}${docField("납부기한", R.dueDate ? ymdKo(R.dueDate) : "-")}</tr></table>`;
 }
 function docSignature(R, what, c) {
-  const t = new Date(todayYmd() + "T00:00:00");
-  return `<div class="doc-date">${t.getFullYear()}년 ${String(t.getMonth() + 1).padStart(2, "0")}월 ${String(t.getDate()).padStart(2, "0")}일</div>
+  return `<div class="doc-date">${ymdKo(todayYmd())}</div>
     <div class="doc-signature">
-      <div class="sign-block"><div class="sign-label">위와 같이 ${monthKo(R.month)} 직접PPA 전력거래대금 ${what}을 확인합니다.</div><div class="sign-role">전기사용자</div><div class="sign-name">${esc(c.name)} (인)</div></div>
-      <div class="sign-block"><div class="sign-label">위와 같이 ${monthKo(R.month)} 직접PPA 전력거래대금 ${what}을 제출합니다.</div><div class="sign-role">재생에너지전기공급사업자</div><div class="sign-name">한화신한테라와트아워 주식회사 (인)</div></div>
+      <div class="sign-block"><div class="sign-label">위와 같이 ${monthKo(R.month)} 직접PPA 전력거래대금 ${what}을 확인합니다.</div><div class="sign-role">전기사용자</div><div class="sign-name">${esc(c.name)}</div></div>
+      <div class="sign-block"><div class="sign-label">위와 같이 ${monthKo(R.month)} 직접PPA 전력거래대금 ${what}을 제출합니다.</div><div class="sign-role">재생에너지전기공급사업자</div><div class="sign-name">${esc(BUYER.bizNameLegal)}</div></div>
     </div>`;
 }
 
+/* ---------- 가정산 청구서 ---------- */
+const BILL_COLS = `<colgroup><col style="width:5%"><col style="width:5%"><col style="width:15%"><col style="width:15%"><col style="width:17%"><col></colgroup>`;
 function invoiceHtml(R) {
   const { inv, match, customer: c, rates, ctx } = R;
   const prevM = Number(prevYm(R.month).slice(4)), curM = Number(R.month.slice(4));
-  // 금액 행: 항목 | 금액 | 산출근거(4칸)
-  const row = (l, a, basis, cls) => `<tr${cls ? ` class="${cls}"` : ""}><td class="label">${l}</td><td class="num">${a}</td><td class="basis" colspan="4">${basis || ""}</td></tr>`;
+  const plantsN = Object.keys(inv.netByPlant);
+  // 행: 항목(2칸) | 금액 | 산출근거
+  const row = (l, a, basis, cls) => `<tr${cls ? ` class="${cls}"` : ""}><td class="label" colspan="2">${l}</td><td class="num">${a}</td><td class="basis">${basis || ""}</td></tr>`;
+  const sub = (l, a, basis, cls) => `<td class="label${cls ? " " + cls : ""}">${l}</td><td class="num">${a}</td><td class="basis">${basis || ""}</td>`;
   const energyBasis = inv.energyParts.length > 1
-    ? inv.energyParts.map(x => `${esc(x.id)} ${kwhStr(x.kwh)} × ${x.unitPrice} 원/kWh = ${x.amount.toLocaleString()} 원`).join("<br>")
-    : `공급량 ${kwhStr(inv.supplyTotal)} × ${ctx.unitPrice} 원/kWh`;
+    ? inv.energyParts.map(x => `${esc(x.id)} ${kwh2(x.kwh)} × ${x.unitPrice} 원/kWh`).join("<br>")
+    : `공급량 계 × ${ctx.unitPrice} 원/kWh`;
+  const netRows = 2 + plantsN.length;
+  const plantRows = plantsN.map(p => { const n = inv.netByPlant[p];
+    return `<tr>${sub(`<span class="plant">${esc(p)}</span>`, won(n.fee), `${n.type ? `유형 ${TYPE_MARK[n.type - 1]} ` : ""}= ${esc(n.basis || "")}`)}</tr>`; }).join("");
   const taxRows = [
     row("전력량요금", won(inv.energy), energyBasis),
-    row("송배전용 전기설비<br>이용요금 (망이용요금)", won(inv.netTotal), "발전소별 합계 (아래 상세)"),
-    row("거래수수료", won(inv.fee), `공급량 ${kwhStr(inv.supplyTotal)} × ${rates.tradeFee} 원/kWh`),
-    row(`${prevM}월 확정 부가정산금 (과세)`, won(inv.confirmedSurcharge.taxable), `${prevM}월 오차 정산서`),
-    row("공급가액 (전월 차액 반영 전)", won(inv.supplyBefore), "전력량요금 + 망이용요금 + 거래수수료 + 확정 부가정산금(과세)", "total"),
-    row("전월 차액 (과세)", won(inv.prevDiff.taxable), `${prevM}월 오차 정산서`),
-    row("공급가액 (전월 차액 반영 후)", won(inv.supplyAfter), "", "total"),
-    row("부가가치세 계", won(inv.vatTotal), `전력량 ${inv.vat.energy.toLocaleString()} + 망이용 ${inv.vat.network.toLocaleString()} + 수수료 ${inv.vat.fee.toLocaleString()} + 부가정산금 ${inv.vat.surcharge.toLocaleString()} + 전월차액 ${inv.vat.prevDiff.toLocaleString()}`),
-    row("세금계산서 계", won(inv.taxInvoice), "공급가액 + 부가가치세", "total")
+    `<tr><td class="label" rowspan="${netRows}">송배전용<br>전기설비<br>이용요금<br>(망이용요금)</td>${sub("기본요금", "0 원", "0.00 kW (미적용)")}</tr>`,
+    `<tr class="total">${sub("사용요금 계", won(inv.netTotal), "발전소별 합계")}</tr>`,
+    plantRows,
+    row("거래수수료", won(inv.fee), `공급량 계 × ${rates.tradeFee} 원/kWh`),
+    row(`${prevM}월 확정 부가정산금 (과세)`, won(inv.confirmedSurcharge.taxable), `${prevM}월 직접PPA 전력거래대금 오차 정산서`),
+    row("공급가액 (전월 차액 반영 전)", won(inv.supplyBefore), "전력량요금 + 망이용요금 + 거래수수료 + 확정 부가정산금 (과세)", "total"),
+    row("전월 차액 (과세)", won(inv.prevDiff.taxable), `${prevM}월 직접PPA 전력거래대금 오차 정산서`),
+    row("공급가액 (전월 차액 반영 후)", won(inv.supplyAfter), "공급가액 (전월 차액 반영 전) + 전월 차액 (과세)", "total"),
+    `<tr><td class="label" rowspan="5">항목별<br>부가세</td>${sub("전력량요금", won(inv.vat.energy), "전력량요금 × 10%")}</tr>`,
+    `<tr>${sub("망이용요금", won(inv.vat.network), "망이용요금 × 10%")}</tr>`,
+    `<tr>${sub("거래수수료", won(inv.vat.fee), "거래수수료 × 10%")}</tr>`,
+    `<tr>${sub("부가정산금", won(inv.vat.surcharge), `${prevM}월 확정 부가정산금 (과세) × 10%`)}</tr>`,
+    `<tr>${sub("전월 차액", won(inv.vat.prevDiff), "전월 차액 (과세) × 10%")}</tr>`,
+    row("부가가치세 계", won(inv.vatTotal), "항목별 부가가치세 합계"),
+    row("세금계산서 계", won(inv.taxInvoice), "공급가액 (전월 차액 반영 후) + 부가가치세 계", "total")
   ];
   const exRows = [
-    row(`${prevM}월 확정 부가정산금 (비과세)`, won(inv.confirmedSurcharge.exempt), `${prevM}월 오차 정산서`),
-    row(`${curM}월 예상 부가정산금`, won(inv.expectedSurcharge), `공급량 × ${rates.surcharge} 원/kWh, 익월 확정 후 청구 (청구서 계 미포함, 기금 산정에만 사용)`),
-    row("전력산업기반기금 (비과세)", won(inv.fund), `(전력량요금 + 망이용요금 + 거래수수료 + 예상 부가정산금) × ${(rates.fundRate * 100).toFixed(1)}%, 10원 미만 절사`),
-    row("전월 차액 (비과세)", won(inv.prevDiff.exempt), `${prevM}월 오차 정산서`)
+    row(`${prevM}월 확정 부가정산금 (비과세)`, won(inv.confirmedSurcharge.exempt), `${prevM}월 직접PPA 전력거래대금 오차 정산서`),
+    row(`${curM}월 예상 부가정산금`, `( ${won(inv.expectedSurcharge)} 예상 )`, `공급량 계 × ${rates.surcharge} 원/kWh, 익월 확정 후 청구`),
+    row("전력산업기반기금 (비과세)", won(inv.fund), `( 전력량요금 + 망이용요금 + 거래수수료 + ${curM}월 예상 부가정산금 ) × ${+(rates.fundRate * 100).toFixed(2)}%`),
+    row("전월 차액 (비과세)", won(inv.prevDiff.exempt), `${prevM}월 직접PPA 전력거래대금 오차 정산서`)
   ].concat(inv.penalty ? [row("위약금 차감", won(-inv.penalty), `연간보장공급량 ${esc(inv.penaltyLabel)}`)] : [])
-   .concat([row("청구서 계", won(inv.exemptSubtotal), "확정 부가정산금(비과세) + 기금 + 전월 차액(비과세)", "total")]);
-  const plantsN = Object.keys(inv.netByPlant);
-  return `<div class="doc">
-    <div class="doc-header"><img src="assets/logo.jpg" alt="한화 신한 테라와트아워" class="doc-logo"></div>
-    <h1 class="title">직접PPA 전력거래대금 청구서</h1><div class="month">(${monthKo(R.month)} 가정산)</div>
-    ${customerInfoTable(c, R)}
-    ${usageTable(match, "거래<br>내역")}
-    <table class="doc-table">${DOC_COLS}
-      <tr><th class="section" rowspan="${taxRows.length + 1}">세금<br>계산서</th><td class="label">항목</td><td class="label">금액</td><td class="label" colspan="4">산출근거</td></tr>
-      ${taxRows.join("")}
-      <tr><th class="section" rowspan="${exRows.length}">청구서</th>${exRows[0].replace(/^<tr[^>]*>/, "")}
+   .concat([row("청구서 계", won(inv.exemptSubtotal), `${prevM}월 확정 부가정산금 (비과세) + 전력산업기반기금 + 전월 차액 (비과세)` + (inv.penalty ? " − 위약금" : ""), "total")]);
+  const nTax = 15 + plantsN.length, nEx = exRows.length;
+  const no = docNo(R, "0001");
+  return `<div class="doc bill">
+    ${docHead("직접PPA 전력거래대금 청구서", R, "")}
+    ${customerInfoTable(c)}
+    ${tradeSummaryTable(match.totals, R.loss, R.note)}
+    <table class="doc-table bill-table">${BILL_COLS}
+      <tr><th class="section" colspan="4">구분</th><th class="section">금액</th><th class="section">산출근거</th></tr>
+      <tr><th class="section" rowspan="${nTax + nEx}">청<br>구<br>내<br>역</th><th class="section sub" rowspan="${nTax}">세<br>금<br>계<br>산<br>서</th>${taxRows[0].replace(/^<tr[^>]*>/, "")}
+      ${taxRows.slice(1).join("")}
+      <tr><th class="section sub" rowspan="${nEx}">청<br>구<br>서</th>${exRows[0].replace(/^<tr[^>]*>/, "")}
       ${exRows.slice(1).join("")}
-      <tr class="pay"><th class="section">합계</th><td class="label">당월 청구 계</td><td class="num" colspan="5">${won(inv.grandTotal)}</td></tr></table>
-    <table class="doc-table">${DOC_COLS}
-      <tr><th class="section" rowspan="${plantsN.length + 1}">발전소별<br>망이용요금</th><td class="label">발전소</td><td class="label">공급량 (반올림)</td><td class="label">망이용요금</td><td class="label" colspan="3">산출근거 (원/kWh)</td></tr>
-      ${plantsN.map(p => `<tr><td>${esc(p)}</td><td class="num">${inv.netByPlant[p].supplyRounded.toLocaleString()} kWh</td><td class="num">${won(inv.netByPlant[p].fee)}</td><td class="basis" colspan="3">${inv.netByPlant[p].type ? "유형 " + "①②③④⑤⑥⑦⑧"[inv.netByPlant[p].type - 1] + " " : ""}= ${esc(inv.netByPlant[p].basis || "")}</td></tr>`).join("")}</table>
-    ${buyerTable(R, `${INVOICE_PREFIX}-${R.month}-0001`)}
+      <tr class="pay"><th class="section" colspan="4">당월 청구 계</th><td class="num">${won(inv.grandTotal)}</td><td></td></tr></table>
+    ${buyerTable(R, { label: "청구서 번호", value: no })}
     ${docSignature(R, "가정산", c)}
+  </div>
+  <div class="doc bill page2">
+    ${docHead("직접PPA 전력거래대금 청구서", R, "")}
+    ${usageTable(match, "거래<br>내역")}
   </div>`;
 }
+
 
 // 가정산 스냅샷: 오차정산 때 비교 기준이 된다 (bill:YYYYMM:신청번호)
 async function saveBill() {
@@ -373,7 +416,8 @@ async function saveBill() {
     usage: T.usage, gen: T.gen, excess: T.excess, deficit: T.deficitSimple + T.deficitLoss,
     confirmedSurcharge: inv.confirmedSurcharge, prevDiff: inv.prevDiff,
     expectedSurcharge: inv.expectedSurcharge, fund: inv.fund, taxInvoice: inv.taxInvoice, grandTotal: inv.grandTotal,
-    unitPrice: R.ctx.unitPrice, customerName: R.customer.name, dueDate: R.dueDate || "", savedAt: new Date().toISOString()
+    unitPrice: R.ctx.unitPrice, customerName: R.customer.name, dueDate: R.dueDate || "", note: R.note || "",
+    invFull: R.inv, totals: R.match.totals, loss: R.loss, savedAt: new Date().toISOString()
   }, old && old.paidAt ? { paidAt: old.paidAt, paidAmount: old.paidAmount } : {}));
   $("billSaveStatus").textContent = (where === "remote" ? "발행 완료 (구글시트)" : "이 브라우저에만 저장됨") + " → 대금 수령 후 오차정산서에서 이 가정산서와 비교";
   renderFlow(R.app, R.month);
@@ -429,7 +473,11 @@ function readProvisional(month, app) {
   if (bill && bill.netByPlant) p.netByPlant = bill.netByPlant;
   if (bill && bill.expectedSurcharge != null) p.expectedSurcharge = bill.expectedSurcharge;
   if (bill && bill.supplyByPlant) p.supplyByPlant = bill.supplyByPlant;
-  if (bill) { p.fromBill = true; p.savedAt = bill.savedAt; p.paidAt = bill.paidAt || ""; p.grandTotal = bill.grandTotal; }
+  if (bill) {
+    p.fromBill = true; p.savedAt = bill.savedAt; p.paidAt = bill.paidAt || ""; p.paidAmount = bill.paidAmount; p.grandTotal = bill.grandTotal;
+    p.inv = bill.invFull || null; p.totals = bill.totals || null;
+    ["usage", "gen", "excess", "deficit", "confirmedSurcharge", "prevDiff", "fund", "taxInvoice"].forEach(k => { if (bill[k] != null) p[k] = bill[k]; });
+  }
   return p;
 }
 
@@ -452,10 +500,16 @@ function runTrueUp() {
     const prov = readProvisional(P.g.month, P.app);
     if (!prov) { out.innerHTML = noticeHtml(["가정산 값(공급량·전력량요금·망이용요금·거래수수료)을 모두 입력하세요."], "bad"); return; }
     const match = P.match;
-    const conf = Engine.invoice(match, { unitPrice: P.customer.unitPrice, priceSplits: safeSplits(Registry.priceSplits(P.app, P.g.month, match.supplyByPlant)), demandRegion: P.customer.demandRegion, demandGrid: P.customer.demandGrid, demandNode: P.customer.demandNode, plants: P.plants }, P.rates);
+    const A = prov.inv;
+    const conf = Engine.invoice(match, { unitPrice: P.customer.unitPrice, priceSplits: safeSplits(Registry.priceSplits(P.app, P.g.month, match.supplyByPlant)), demandRegion: P.customer.demandRegion, demandGrid: P.customer.demandGrid, demandNode: P.customer.demandNode, plants: P.plants,
+      confirmedSurcharge: (A && A.confirmedSurcharge) || prov.confirmedSurcharge || { taxable: 0, exempt: 0 },
+      prevDiff: (A && A.prevDiff) || prov.prevDiff || { taxable: 0, exempt: 0 },
+      penalty: A && A.penalty ? { amount: A.penalty, label: A.penaltyLabel } : null }, P.rates);
     const diff = Engine.trueUpDiff(prov, conf);
     setVal("pd_taxable", diff.taxable); // 비교 결과로 채움 (직접 고친 값은 다시 계산하면 덮어씀)
-    billState.result = { mode: "trueup", preview: P.preview, err: err.slice(), app: P.app, month: P.g.month, customer: P.customer, rates: P.rates, match, conf, prov, diff, warn };
+    const aFund = A ? A.fund : prov.fund;
+    if (aFund != null) setVal("pd_exempt", conf.fund - aFund); // 비과세 차액 = 전력산업기반기금 차이
+    billState.result = { mode: "trueup", preview: P.preview, err: err.slice(), app: P.app, month: P.g.month, customer: P.customer, rates: P.rates, loss: P.loss, match, conf, prov, diff, warn };
     renderTrueUpResult();
   } catch (e) { out.innerHTML = `<div class="notice bad">계산 오류: ${esc(e.message)}</div>`; }
 }
@@ -469,57 +523,91 @@ function renderTrueUpResult() {
   return true;
 }
 
+/* ---------- 오차 정산서: 당초(가정산서) · 수령(A) · 정정(B, 확정 재계산) · 차이(B−A) ---------- */
 function trueUpHtml(R) {
-  const { customer: c, prov, conf, diff, match, fields: t, rates } = R;
-  const m = Number(R.month.slice(4)), nm = nextYm(R.month);
-  const vatRate = ratesFor(nm).rates.vatRate, vat = x => Engine.round(x * vatRate);
-  const sign = n => (n > 0 ? "+" : "") + Math.round(n).toLocaleString();
-  // 비교 행: 항목 | 가정산 | 확정 | 차액 | 비고(2칸)
-  const cmp = (l, a, b, d, unit, note) => `<tr><td class="label">${l}</td><td class="num">${a == null ? "-" : Math.round(a).toLocaleString() + unit}</td><td class="num">${Math.round(b).toLocaleString()}${unit}</td><td class="num">${d == null ? "-" : sign(d) + unit}</td><td class="basis" colspan="2">${note || ""}</td></tr>`;
-  const row = (l, a, basis, cls) => `<tr${cls ? ` class="${cls}"` : ""}><td class="label">${l}</td><td class="num">${a}</td><td class="basis" colspan="4">${basis || ""}</td></tr>`;
-  const provSum = prov.energy + prov.netTotal + prov.fee, confSum = conf.energy + conf.netTotal + conf.fee;
-  const taxableSum = t.confirmed.taxable + t.prevDiff.taxable, exemptSum = t.confirmed.exempt + t.prevDiff.exempt;
-  const vatSum = vat(t.confirmed.taxable) + vat(t.prevDiff.taxable);
-  const price = conf.energyParts.length > 1 ? conf.energyParts.map(x => `${esc(x.id)} ${x.unitPrice}`).join(" / ") : c.unitPrice;
-  const surRows = (prov.expectedSurcharge != null ? [row(`${m}월 예상 부가정산금 (가정산)`, won(prov.expectedSurcharge), "가정산 시 기반기금 산정에만 사용 (청구 미포함)")] : []).concat([
-    row(`${m}월 확정 부가정산금`, won(t.confirmedTotal), "KPX 확정 통지"),
-    row("과세분", won(t.confirmed.taxable), `과세 비율 ${t.taxableRatio}`),
-    row("비과세분", won(t.confirmed.exempt), "총액 − 과세분")]);
-  const carryRows = [
-    row(`${m}월 확정 부가정산금 (과세)`, won(t.confirmed.taxable), `부가세 ${won(vat(t.confirmed.taxable))} 별도`),
-    row("전월 차액 (과세)", won(t.prevDiff.taxable), `부가세 ${won(vat(t.prevDiff.taxable))} 별도` + (t.prevDiff.taxable !== diff.taxable ? ` · ※ 비교 결과(${sign(diff.taxable)})와 다르게 입력` : "")),
-    row(`${m}월 확정 부가정산금 (비과세)`, won(t.confirmed.exempt), ""),
-    row("전월 차액 (비과세)", won(t.prevDiff.exempt), ""),
-    row("반영 합계 (부가세 포함)", won(taxableSum + vatSum + exemptSum), `과세 ${won(taxableSum)} + 부가세 ${won(vatSum)} + 비과세 ${won(exemptSum)}`, "pay")];
+  const { customer: c, prov, conf, match, fields: t, rates } = R;
+  const m = Number(R.month.slice(4)), prevM = Number(prevYm(R.month).slice(4)), nm = nextYm(R.month), nmM = Number(nm.slice(4));
+  const A = prov.inv || null, PT = prov.totals || null; // 발행한 가정산서 상세 (예전 기록·직접 입력이면 없음)
+  const aVal = (k, fb) => A && A[k] != null ? A[k] : (prov[k] != null ? prov[k] : fb);
+  const sign = (n, u) => n == null || isNaN(n) ? "-" : (n > 0 ? "+" : n < 0 ? "−" : "") + (u === "kWh" ? Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 }) + " kWh" : Math.abs(Math.round(n)).toLocaleString() + " 원");
+  const won0 = n => n == null || isNaN(n) ? "-" : won(n);
+  // 행: 항목 | 당초 | 수령(A) | 정정(B) | 차이 | 비고  (a: 당초, r: 수령, b: 정정)
+  const line = (l, a, b, opt) => { opt = opt || {}; const kwh = opt.kwh, f = kwh ? kwh3 : won0, r = opt.r !== undefined ? opt.r : a;
+    const d = (b == null || r == null || isNaN(b) || isNaN(r)) ? null : b - r;
+    return `<tr${opt.cls ? ` class="${opt.cls}"` : ""}><td class="label${opt.plant ? " plant-l" : ""}">${l}</td><td class="num">${opt.fa ? opt.fa(a) : f(a)}</td><td class="num">${opt.fa ? opt.fa(r) : f(r)}</td><td class="num">${opt.fa ? opt.fa(b) : f(b)}</td><td class="num">${opt.noDiff ? "-" : sign(d, kwh ? "kWh" : "")}</td><td class="basis">${opt.note || ""}</td></tr>`; };
+  const T = match.totals, aDef = PT ? PT.deficitSimple + PT.deficitLoss : prov.deficit;
+  const tradeRows = [
+    line("전기사용량 계", PT ? PT.usage : prov.usage, T.usage, { kwh: true }),
+    line("발전량 계", PT ? PT.gen : prov.gen, T.gen, { kwh: true, note: prov.fromBill ? "" : "가정산 상세 없음" }),
+    `<tr><td class="label">전력손실률</td><td class="num">${pctStr(R.loss)}</td><td class="num">${pctStr(R.loss)}</td><td class="num">${pctStr(R.loss)}</td><td class="num">-</td><td></td></tr>`,
+    line("공급량 계", aVal("supplyTotal"), conf.supplyTotal, { kwh: true }),
+    line("초과발전량 계", PT ? PT.excess : prov.excess, T.excess, { kwh: true }),
+    line("부족전력량(단순) 계", PT ? PT.deficitSimple : null, T.deficitSimple, { kwh: true }),
+    line("부족전력량(전력손실률) 계", PT ? PT.deficitLoss : null, T.deficitLoss, { kwh: true }),
+    line("부족전력량 계", aDef, T.deficitSimple + T.deficitLoss, { kwh: true }),
+    `<tr><td class="label">특이사항</td><td colspan="5" class="basis">${esc(t.note || "")}</td></tr>`
+  ];
   const plantsN = Object.keys(conf.netByPlant);
-  const first = rows => rows[0].replace(/^<tr[^>]*>/, "");
-  return `<div class="doc">
-    <div class="doc-header"><img src="assets/logo.jpg" alt="한화 신한 테라와트아워" class="doc-logo"></div>
-    <h1 class="title">직접PPA 전력거래대금 오차정산서</h1><div class="month">(${monthKo(R.month)} 확정)</div>
-    ${customerInfoTable(c, R)}
-    ${usageTable(match, "거래<br>내역<br>(확정)")}
-    <table class="doc-table">${DOC_COLS}
-      <tr><th class="section" rowspan="${prov.fromBill ? 7 : 6}">가정산<br>대비<br>차액</th><td class="label">항목</td><td class="label">가정산</td><td class="label">확정</td><td class="label">차액<br>(확정 − 가정산)</td><td class="label" colspan="2">비고</td></tr>
-      ${cmp("공급량", prov.supplyTotal, conf.supplyTotal, diff.supply, " kWh")}
-      ${cmp("전력량요금", prov.energy, conf.energy, diff.energy, " 원", `${price} 원/kWh`)}
-      ${cmp("송배전용 전기설비<br>이용요금", prov.netTotal, conf.netTotal, diff.net, " 원")}
-      ${cmp("거래수수료", prov.fee, conf.fee, diff.fee, " 원", `${rates.tradeFee} 원/kWh`)}
-      <tr class="total"><td class="label">계 (과세)</td><td class="num">${won(provSum)}</td><td class="num">${won(confSum)}</td><td class="num">${sign(diff.taxable)} 원</td><td colspan="2"></td></tr>
-      ${prov.fromBill ? `<tr><td class="label">기준</td><td class="basis" colspan="5">${monthKo(R.month)} 가정산서 (발행 ${fmtDate(prov.savedAt)}${prov.grandTotal != null ? ", 당월 청구 계 " + won(prov.grandTotal) : ""}${prov.paidAt ? ", 대금 수령 " + esc(prov.paidAt) : ""})</td></tr>` : ""}</table>
-    <table class="doc-table">${DOC_COLS}
-      <tr><th class="section" rowspan="${surRows.length}">${m}월<br>부가정산금</th>${first(surRows)}
-      ${surRows.slice(1).join("")}
-      <tr><th class="section" rowspan="${carryRows.length}">${Number(nm.slice(4))}월<br>가정산서<br>반영</th>${first(carryRows)}
-      ${carryRows.slice(1).join("")}</table>
-    <table class="doc-table">${DOC_COLS}
-      <tr><th class="section" rowspan="${plantsN.length + 1}">발전소별<br>망이용요금</th><td class="label">발전소</td><td class="label">가정산 공급량</td><td class="label">확정 공급량</td><td class="label">가정산 요금</td><td class="label">확정 요금</td><td class="label">요금 차액</td></tr>
-      ${plantsN.map(p => { const d = diff.netByPlant[p], ps = prov.supplyByPlant ? prov.supplyByPlant[p] : null;
-        return `<tr><td>${esc(p)}</td><td class="num">${ps == null ? "-" : ps.toLocaleString() + " kWh"}</td><td class="num">${conf.netByPlant[p].supplyRounded.toLocaleString()} kWh</td><td class="num">${d.prov == null ? "-" : won(d.prov)}</td><td class="num">${won(d.conf)}</td><td class="num">${d.diff == null ? "-" : sign(d.diff) + " 원"}</td></tr>`; }).join("")}</table>
-    ${t.note ? `<p class="hint">메모: ${esc(t.note)}</p>` : ""}
-    ${buyerTable(R, `${INVOICE_PREFIX}-${R.month}-T001`)}
-    ${docSignature(R, "오차정산", c)}
+  const aNet = p => A && A.netByPlant && A.netByPlant[p] ? A.netByPlant[p].fee : (prov.netByPlant && prov.netByPlant[p] != null ? prov.netByPlant[p] : null);
+  const cs = (A && A.confirmedSurcharge) || prov.confirmedSurcharge || { taxable: 0, exempt: 0 };
+  const pd = (A && A.prevDiff) || prov.prevDiff || { taxable: 0, exempt: 0 };
+  const av = k => A && A.vat ? A.vat[k] : null;
+  const paid = prov.paidAmount != null ? prov.paidAmount : aVal("grandTotal");
+  const taxRows = [
+    line("전력량요금", aVal("energy"), conf.energy, { note: `${conf.energyParts.length > 1 ? conf.energyParts.map(x => `${esc(x.id)} ${x.unitPrice}`).join(" / ") : c.unitPrice} 원/kWh` }),
+    line("기본요금", 0, 0, { noDiff: true }),
+    line("망이용요금 계", aVal("netTotal"), conf.netTotal, { cls: "total", note: "한전 청구 내역 기준" }),
+    ...plantsN.map(p => { const n = conf.netByPlant[p];
+      return line(`<span class="plant">${esc(p)}</span>`, aNet(p), n.fee, { plant: true, note: `${n.type ? "유형 " + TYPE_MARK[n.type - 1] + " · " : ""}${n.supplyRounded.toLocaleString()} kWh` }); }),
+    line("거래수수료", aVal("fee"), conf.fee),
+    line(`${prevM}월 확정 부가정산금 (과세)`, cs.taxable, conf.confirmedSurcharge.taxable),
+    line("공급가액 (전월 차액 반영 전)", aVal("supplyBefore"), conf.supplyBefore, { cls: "total" }),
+    line("전월 차액 (과세)", pd.taxable, conf.prevDiff.taxable),
+    line("공급가액 (전월 차액 반영 후)", aVal("supplyAfter"), conf.supplyAfter, { cls: "total" }),
+    line("부가세 · 전력량요금", av("energy"), conf.vat.energy),
+    line("부가세 · 망이용요금", av("network"), conf.vat.network),
+    line("부가세 · 거래수수료", av("fee"), conf.vat.fee),
+    line("부가세 · 부가정산금", av("surcharge"), conf.vat.surcharge),
+    line("부가세 · 전월 차액", av("prevDiff"), conf.vat.prevDiff),
+    line("부가가치세 계", aVal("vatTotal"), conf.vatTotal),
+    line("세금계산서 계", aVal("taxInvoice"), conf.taxInvoice, { cls: "total" })
+  ];
+  const exRows = [
+    line(`${prevM}월 확정 부가정산금 (비과세)`, cs.exempt, conf.confirmedSurcharge.exempt),
+    line(`${m}월 예상 부가정산금`, aVal("expectedSurcharge"), conf.expectedSurcharge, { noDiff: true, fa: x => x == null ? "-" : `( ${won(x)} 예상 )`, note: "기반기금 산정용 (청구 미포함)" }),
+    line("전력산업기반기금 (비과세)", aVal("fund"), conf.fund, { note: `${nmM}월 거래분 청구서에 반영` }),
+    line("전월 차액 (비과세)", pd.exempt, conf.prevDiff.exempt)
+  ].concat(conf.penalty || (A && A.penalty) ? [line("위약금 차감", A ? -A.penalty : null, -conf.penalty)] : [])
+   .concat([line("청구서 계", aVal("exemptSubtotal"), conf.exemptSubtotal, { cls: "total" })]);
+  const no = docNo(R, "0002");
+  const vatRate = rates.vatRate, csVat = Engine.round(t.confirmed.taxable * vatRate);
+  const ratio = t.taxableRatio;
+  return `<div class="doc bill">
+    ${docHead("직접PPA 전력거래대금 오차 정산서", R, no)}
+    <table class="doc-table tu-table">${TU_COLS}
+      <tr><th class="section" colspan="2">구분</th><th class="section">당초</th><th class="section">수령 (A)</th><th class="section">정정 (B)</th><th class="section">차이 (B−A)</th><th class="section">비고</th></tr>
+      <tr><th class="section" rowspan="${tradeRows.length}">거래<br>내역</th>${tradeRows[0].replace(/^<tr[^>]*>/, "")}
+      ${tradeRows.slice(1).join("")}
+    </table>
+    <table class="doc-table tu-table">${TU_COLS}
+      <tr><th class="section" rowspan="${taxRows.length}">세<br>금<br>계<br>산<br>서</th>${taxRows[0].replace(/^<tr[^>]*>/, "")}
+      ${taxRows.slice(1).join("")}
+      <tr><th class="section" rowspan="${exRows.length}">청<br>구<br>서</th>${exRows[0].replace(/^<tr[^>]*>/, "")}
+      ${exRows.slice(1).join("")}
+      ${line("당월 청구 계", aVal("grandTotal"), conf.grandTotal, { cls: "pay", r: paid, note: prov.paidAt ? `수령 ${esc(prov.paidAt)}` : "" }).replace("<tr class=\"pay\"><td class=\"label\">", "<tr class=\"pay\"><th class=\"section\" colspan=\"2\">").replace("당월 청구 계</td>", "당월 청구 계</th>")}
+    </table>
+    <table class="doc-table tu-table">${CS_COLS}
+      <tr><th class="section" rowspan="4">${m}월<br>확정<br>부가<br>정산금</th><td class="label">구분</td><td class="label">정산기간</td><td class="label">구성비</td><td class="label">공급량</td><td class="label">공급가액</td><td class="label">부가세</td><td class="label">계</td></tr>
+      <tr><td class="label">과세</td><td rowspan="3">${R.month.slice(0, 4)}년 ${String(m).padStart(2, "0")}월<br>1~${lastDay(R.month)}일</td><td>${pctStr(ratio)}</td><td rowspan="3">${kwh3(conf.supplyTotal)}</td><td class="num">${won(t.confirmed.taxable)}</td><td class="num">${won(csVat)}</td><td class="num">${won(t.confirmed.taxable + csVat)}</td></tr>
+      <tr><td class="label">비과세</td><td>${pctStr(1 - ratio)}</td><td class="num">${won(t.confirmed.exempt)}</td><td class="num">0 원</td><td class="num">${won(t.confirmed.exempt)}</td></tr>
+      <tr class="total"><td class="label">계</td><td>100%</td><td class="num">${won(t.confirmedTotal)}</td><td class="num">${won(csVat)}</td><td class="num">${won(t.confirmedTotal + csVat)}</td></tr>
+    </table>
+    <p class="doc-note">${nmM}월 거래분 청구서 반영 — 전월 차액 (과세) ${sign(t.prevDiff.taxable)} · 전월 차액 (비과세) ${sign(t.prevDiff.exempt)} · ${m}월 확정 부가정산금 과세 ${won(t.confirmed.taxable)} / 비과세 ${won(t.confirmed.exempt)}</p>
+    ${docSignature(R, "오차", c)}
   </div>`;
 }
+const TU_COLS = `<colgroup><col style="width:5%"><col style="width:21%"><col><col><col><col><col style="width:15%"></colgroup>`;
+const CS_COLS = `<colgroup><col style="width:5%"><col style="width:9%"><col style="width:15%"><col style="width:9%"><col style="width:16%"><col><col><col></colgroup>`;
 
 async function saveTrueUp() {
   const R = billState.result; if (!R || R.mode !== "trueup" || R.preview) return;

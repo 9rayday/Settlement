@@ -19,6 +19,7 @@ const BUYER = {
   address: "서울특별시 중구 삼일대로 363 1107호\n(장교동, 장교빌딩)",
   manager: "홍인성 프로",
   contact: "02-318-2309 / insunghong@hanwha.com",
+  account: "", // 기본 입금계좌 (전기사용자별 입금계좌가 우선)
   invoicePrefix: "300025"
 };
 
