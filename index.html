@@ -117,11 +117,12 @@
           </div>
         </div>
       </div>
+      <a class="side-link" data-page="page-admin-users"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M17 11.5l1.6 1.6 3-3.2"/></svg><span>권한관리</span></a>
     </nav>
   </aside>
 
 <main class="content">
-  <div class="page-head"><div class="page-crumb" id="pageCrumb"></div><h1 class="page-title" id="pageTitle"></h1></div>
+  <div class="page-head"><div class="page-crumb" id="pageCrumb"></div><h1 class="page-title" id="pageTitle"></h1><span id="pageRo" class="page-ro" hidden></span></div>
 
   <!-- 계약관리 > 계약이행현황 (추후) -->
   <div class="page" id="page-cust-perf"><div id="perfCustPage"></div></div>
@@ -207,6 +208,7 @@
   <div class="page" id="page-rate-kpx"><div id="tab4"></div></div>
   <div class="page" id="page-rate-tou"><div id="touPage"></div></div>
   <div class="page" id="page-rate-market"><div id="marketPage"></div></div>
+  <div class="page" id="page-admin-users"><div id="usersPage"></div></div>
 
   <!-- 업로드 카드: 하나만 두고 정산 페이지를 열 때 그 페이지의 .upload-slot 으로 옮긴다 (js/nav.js) -->
   <div id="uploadHolder" hidden>
@@ -265,6 +267,7 @@
 <script src="js/invoice.js"></script>
 <script src="js/billing.js"></script>
 <script src="js/dashboard.js"></script>
+<script src="js/users.js"></script>
 <script src="js/tariff.js"></script>
 <script src="js/kpxrates.js"></script>
 <script src="js/market.js"></script>

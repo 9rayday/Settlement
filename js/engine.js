@@ -61,6 +61,7 @@
     const supplyByPlant = {}, genByPlant = {}, excessByPlant = {};
     const byLoad = {};
     const tot = { usage: 0, gen: 0, supply: 0, supplyHourly: 0, excess: 0, deficitSimple: 0, deficitLoss: 0 };
+    const byHour = Array.from({ length: 24 }, () => ({ usage: 0, supply: 0, excess: 0, deficitSimple: 0, deficitLoss: 0 })); // 시간대별 월 합계 (청구서 그래프)
     days.forEach(d => {
       for (let h = 0; h < 24; h++) {
         const gen = {};
@@ -70,6 +71,7 @@
         const lc = d.load[h];
         const b = byLoad[lc] || (byLoad[lc] = { usage: 0, supply: 0, deficitSimple: 0, deficitLoss: 0 });
         b.usage += m.usage; b.supply += m.supplyTotal; b.deficitSimple += m.deficitSimple; b.deficitLoss += m.deficitLoss;
+        const bh = byHour[h]; bh.usage += m.usage; bh.supply += m.supplyTotal; bh.excess += m.excessTotal; bh.deficitSimple += m.deficitSimple; bh.deficitLoss += m.deficitLoss;
         Object.keys(gen).forEach(p => {
           supplyByPlant[p] = (supplyByPlant[p] || 0) + m.supply[p];
           excessByPlant[p] = (excessByPlant[p] || 0) + m.excess[p];
@@ -83,7 +85,7 @@
     r3(supplyByPlant); r3(excessByPlant); r3(genByPlant);
     tot.supply = E.round(Object.values(supplyByPlant).reduce((s, v) => s + v, 0), 3);
     tot.excess = E.round(Object.values(excessByPlant).reduce((s, v) => s + v, 0), 3);
-    return { supplyByPlant, genByPlant, excessByPlant, byLoad, totals: tot };
+    return { supplyByPlant, genByPlant, excessByPlant, byLoad, byHour, totals: tot };
   };
 
   /* 월간균등정산: 발전기별 K = ROUND(월발전량합 / 월시간수, 6) MWh, 마지막 시간이 잔차 흡수 (합 = 월발전량)

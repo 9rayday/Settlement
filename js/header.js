@@ -88,7 +88,9 @@ function renderAlerts() {
 /* ----- 로그아웃 ----- */
 function logout(msg) {
   try {
-    sessionStorage.removeItem(AUTH_KEY); sessionStorage.removeItem(USER_KEY);
+    const tok = sessionStorage.getItem(TOKEN_KEY);
+    if (tok && typeof GAS_WEBAPP_URL === "string" && GAS_WEBAPP_URL) navigator.sendBeacon && navigator.sendBeacon(GAS_WEBAPP_URL, new Blob([JSON.stringify({ action: "logout", token: tok })], { type: "text/plain" }));
+    [AUTH_KEY, USER_KEY, TOKEN_KEY, ROLE_KEY, PERMS_KEY].forEach(k => sessionStorage.removeItem(k));
     if (msg) sessionStorage.setItem(LOGOUT_MSG_KEY, msg);
   } catch (e) { /* 저장 불가 환경 */ }
   location.reload(); // 화면 상태(업로드 데이터 등)를 모두 비운다
@@ -100,7 +102,7 @@ function resetIdle() {
 
 function initHeader() {
   let name = ""; try { name = sessionStorage.getItem(USER_KEY) || ""; } catch (e) { /* 무시 */ }
-  document.getElementById("hdrUser").textContent = name ? `${name}님` : "";
+  document.getElementById("hdrUser").textContent = name ? `${name}님 · ${userRole()}` : "";
   if (TEST_TODAY) { const t = document.getElementById("testToday"); t.hidden = false; t.textContent = `테스트 날짜 ${TEST_TODAY}`; }
   document.getElementById("logoutBtn").addEventListener("click", () => logout());
   const bell = document.getElementById("bellBtn"), panel = document.getElementById("bellPanel");

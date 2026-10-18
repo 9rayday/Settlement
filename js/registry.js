@@ -64,6 +64,9 @@ const CUSTOMER_FORM = [
   { k: "계약단가", label: "계약단가 (원/kWh)", type: "number", req: true },
   { k: "입금계좌", label: "입금계좌 (청구서 계좌번호)", placeholder: "예: 기업은행 001-983767-04-015" },
   { k: "청구서번호", label: "청구서 번호 앞자리", placeholder: "200005" },
+  { k: "청구서송부기한", label: "가정산 청구서 송부 (익월 N영업일)", type: "number", placeholder: "8" },
+  { k: "납부일", label: "대금 납부일 (매월 N일)", type: "number", placeholder: "27" },
+  { k: "오차확인기한", label: "오차 확인 (청구서 수령 후 N영업일)", type: "number", placeholder: "5" },
   { k: "계약기간", label: "계약기간 (년)", type: "number" },
   { k: "계약일자", label: "계약시작일", type: "date" },
   { k: "계약해지일", label: "계약해지일 (자동 계산)", type: "date", calc: true },
@@ -117,7 +120,7 @@ const Registry = (function () {
   function toCustomer(c) {
     return { name: str(c["수요기업명"]), ceo: str(c["대표자명"]), bizNo: str(c["사업자등록번호"]), address: str(c["전기사용장소"]),
       manager: str(c["담당자"]), contact: str(c["연락처"]), email: str(c["이메일"]), demandRegion: str(c["수요지지역"]), demandGrid: str(c["수요망"]), demandNode: str(c["접속점"]),
-      unitPrice: Number(c["계약단가"]), appNo: str(c["KPX신청번호"]), consumeAppNo: str(c["소비계약신청번호"]), settleMethod: str(c["정산방식"]), payAccount: str(c["입금계좌"]), invoicePrefix: str(c["청구서번호"]),
+      unitPrice: Number(c["계약단가"]), appNo: str(c["KPX신청번호"]), consumeAppNo: str(c["소비계약신청번호"]), settleMethod: str(c["정산방식"]), payAccount: str(c["입금계좌"]), invoicePrefix: str(c["청구서번호"]), sendDays: str(c["청구서송부기한"]), payDay: str(c["납부일"]), checkDays: str(c["오차확인기한"]),
       start: str(c["계약일자"]), end: str(c["계약해지일"]), contractId: custKey(c) };
   }
   // 계약 키 = 계약ID (예전 행은 KPX신청번호). 같은 신청번호에 계약이 여러 건일 수 있다.

@@ -395,10 +395,7 @@ function invoiceHtml(R) {
     ${buyerTable(R, { label: "청구서 번호", value: no })}
     ${docSignature(R, "가정산", c)}
   </div>
-  <div class="doc bill page2">
-    ${docHead("직접PPA 전력거래대금 청구서", R, "")}
-    ${usageTable(match, "거래<br>내역")}
-  </div>`;
+  ${invoicePage2(R)}`;
 }
 
 
@@ -521,6 +518,75 @@ function renderTrueUpResult() {
   $("billActions").style.display = "flex";
   $("billSave").disabled = !!R.preview; // 미리보기는 저장 불가
   return true;
+}
+
+/* ---------- 청구서 2쪽: 부하별 거래내역 · 시간대별 누계 그래프 · 연간보장공급량 · 계약 안내 ---------- */
+// 시간대별(1~24시) 월 누계 누적 영역 그래프 (SVG, 인쇄 가능)
+function hourlyChartSvg(byHour) {
+  if (!byHour) return "";
+  const layers = [["supply", "공급량", "#D5EFCF"], ["deficitSimple", "부족전력량 (단순)", "#BFD7EE"], ["deficitLoss", "부족전력량 (전력손실률)", "#8DB4E2"], ["excess", "초과발전량", "#F8CBAD"]];
+  const W = 720, H = 230, L = 64, Rm = 10, Tm = 10, Bm = 26;
+  const cum = byHour.map(b => { let acc = 0; return layers.map(([k]) => (acc += Math.max(0, b[k] || 0))); });
+  const max = Math.max(1, ...cum.map(c => c[c.length - 1]));
+  const step = Math.pow(10, Math.floor(Math.log10(max / 5))), nice = [1, 2, 2.5, 5, 10].map(x => x * step).find(x => max / x <= 6) || step * 10;
+  const top = Math.ceil(max / nice) * nice;
+  const x = i => L + (W - L - Rm) * i / 23, y = v => Tm + (H - Tm - Bm) * (1 - v / top);
+  let svg = "";
+  for (let v = 0; v <= top + 1e-9; v += nice) svg += `<line x1="${L}" x2="${W - Rm}" y1="${y(v)}" y2="${y(v)}" stroke="#E3E6EA"/><text x="${L - 6}" y="${y(v) + 3}" text-anchor="end">${Math.round(v).toLocaleString()}</text>`;
+  layers.forEach((ly, li) => {
+    const upper = cum.map((c, i) => `${x(i)},${y(c[li])}`), lower = cum.map((c, i) => `${x(i)},${y(li ? c[li - 1] : 0)}`).reverse();
+    svg += `<polygon points="${upper.concat(lower).join(" ")}" fill="${ly[2]}" stroke="none"/>`;
+  });
+  for (let i = 0; i < 24; i++) svg += `<text x="${x(i)}" y="${H - Bm + 14}" text-anchor="middle">${i + 1}</text>`;
+  const legend = layers.map(([, n, c]) => `<span><i style="background:${c}"></i>${n}</span>`).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" class="hour-chart" xmlns="http://www.w3.org/2000/svg">${svg}</svg><div class="chart-legend">${legend}</div>`;
+}
+
+// 연간보장공급량: 계약관리 이행현황과 같은 계산 (시트 월별실적 기준), 정산월까지의 실적만
+function guaranteeRows(app, month) {
+  if (typeof contractOf !== "function" || typeof yearSchedule !== "function" || typeof perfByPlant !== "function") return [];
+  const byPlant = {}; Object.entries(perfByPlant()).forEach(([p, ms]) => { byPlant[p] = {}; Object.entries(ms).forEach(([ym, v]) => { if (ym <= month) byPlant[p][ym] = v; }); });
+  const yy = ymd => `'${ymd.slice(2, 4)}.${ymd.slice(5, 7)}.`;
+  const out = [];
+  Registry.contractsOfApp(app).forEach(raw => {
+    const key = Registry.custKey(raw), c = contractOf("cust", key), ys = yearSchedule(c, byPlant);
+    if (!ys) return;
+    const multi = Registry.contractsOfApp(app).length > 1;
+    ys.forEach(y => {
+      const started = y.s.slice(0, 7).replace("-", "") <= month;
+      const lastYm = started ? (month < y.e.slice(0, 7).replace("-", "") ? month : y.e.slice(0, 7).replace("-", "")) : "";
+      out.push({ label: `${multi ? esc(key) + " " : ""}${y.n}회차<br><small>(${yy(y.s)} ~ ${yy(y.e)})</small>`, guar: y.guar,
+        actual: started ? y.actual : null, short: y.state === "ended" ? y.short : null,
+        note: started ? `${yy(y.s)}~'${lastYm.slice(2, 4)}.${lastYm.slice(4)}. 누계` : "" });
+    });
+  });
+  return out;
+}
+function guaranteeTable(app, month) {
+  const rows = guaranteeRows(app, month);
+  const body = rows.length ? rows.map(r => `<tr><td class="label">${r.label}</td><td class="num">${kwh2(r.guar)}</td><td class="num">${r.actual == null ? "-" : kwh2(r.actual)}</td><td class="num">${r.short ? kwh2(r.short) : "-"}</td><td class="num">${r.short ? kwh2(r.short) : "-"}</td><td class="basis">${r.note}</td></tr>`).join("")
+    : `<tr><td colspan="6" class="basis">계약 정보(계약일자·계약기간·연간보장공급량)가 없어 표시할 수 없습니다.</td></tr>`;
+  return `<table class="doc-table">${DOC_COLS}
+      <tr><th class="section" rowspan="${Math.max(rows.length, 1) + 1}">연간<br>보장<br>공급량</th><td class="label">구분</td><td class="label">예상 공급량</td><td class="label">실제 공급량 누계</td><td class="label">미달 공급량</td><td class="label">미달 구매량</td><td class="label">비고</td></tr>
+      ${body}</table>`;
+}
+function contractNotes(c) {
+  const send = c.sendDays || 8, pay = c.payDay || 27, check = c.checkDays || 5;
+  return `<div class="bill-notes">
+    <p>. 재생에너지 전기공급사업자는 거래가 종료된 익월 [${esc(send)}]영업일 이내에 전기사용자에게 해당 월 발생한 전력거래 대금 및 전력량을 가정산하여 명시한 청구서를 송부합니다.</p>
+    <p>. 전기사용자는 가정산 청구서를 수령한 후 [2]영업일 이내에 검토하여 재생에너지 전기공급사업자에게 세금계산서발행을 요청하고, 요청을 받은 재생에너지 전기공급사업자는 세금계산서를 발행합니다.</p>
+    <p>. 전기사용자는 세금계산서를 수령한 후 매월 [${esc(pay)}]일까지 재생에너지 전기공급사업자가 지정한 은행 계좌로 전력거래대금을 지급합니다. 단, 매월 ${esc(pay)}일이 공휴일일 경우 다음 영업일에 지급합니다.</p>
+    <p>. 재생에너지 전기공급사업자는 한국전력공사, 한국전력거래소 등 관계 기관의 개별 청구서 수령 후 [${esc(check)}]영업일 이내에 가정산과의 오차를 확인하여 그 내역을 전기사용자에게 송부합니다.</p>
+    <p>. 당사자가 본 계약에 따른 전력거래대금 계산상 착오가 있음을 발견하거나 기타 추가 정산할 사항이 있는 경우 추가 정산을 요청하는 당사자는 전력거래대금 지급일이 속한달의 말일까지 상대방 당사자에게 재정산을 요청하여야 하고, 당사자들은 본 항에 따른 다시 정산된 금액을 해당 금액이 발생한 월의 익월에 재정산합니다.</p></div>`;
+}
+function invoicePage2(R) {
+  return `<div class="doc bill page2">
+    ${docHead("직접PPA 전력거래대금 청구서", R, "")}
+    ${usageTable(R.match, "거래<br>내역")}
+    <table class="doc-table">${DOC_COLS}<tr><th class="section">당월<br>시간대별<br>사용량<br>누계</th><td colspan="6" class="chart-cell">${hourlyChartSvg(R.match.byHour)}</td></tr></table>
+    ${guaranteeTable(R.app, R.month)}
+    ${contractNotes(R.customer)}
+  </div>`;
 }
 
 /* ---------- 오차 정산서: 당초(가정산서) · 수령(A) · 정정(B, 확정 재계산) · 차이(B−A) ---------- */

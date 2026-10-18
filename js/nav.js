@@ -14,8 +14,12 @@ const PAGES = {
   "page-settle-gen":  { group: "settle", crumb: ["정산관리", "정산"], title: "발전사업자 정산" },
   "page-rate-kpx":    { group: "settle", crumb: ["정산관리", "정산", "정산요율관리"], title: "KPX 요율 관리" },
   "page-rate-tou":    { group: "settle", crumb: ["정산관리", "정산", "정산요율관리"], title: "시간대별 요금제 관리" },
-  "page-rate-market": { group: "settle", crumb: ["정산관리", "정산", "정산요율관리"], title: "SMP · REC 가격" }
+  "page-rate-market": { group: "settle", crumb: ["정산관리", "정산", "정산요율관리"], title: "SMP · REC 가격" },
+  "page-admin-users": { group: "settle", crumb: ["정산관리"], title: "권한관리", need: "admin" }
 };
+// 페이지별 수정 권한 (없으면 "조회 전용" 표시, 실제 저장은 서버가 막는다)
+const PAGE_EDIT = { "page-cust-perf": "contract", "page-gen-perf": "contract", "page-reg-cust": "contract", "page-reg-plant": "contract", "page-reg-group": "contract",
+  "page-settle-cust": "settle", "page-settle-gen": "settle", "page-rate-kpx": "rates", "page-rate-tou": "rates", "page-rate-market": "rates" };
 const DEFAULT_PAGE = "page-settle-cust";
 const NAV_KEY = "settlement.page";
 
@@ -27,8 +31,11 @@ function setSideGroup(group) {
 const pageFromHash = () => "page-" + location.hash.replace(/^#/, "");
 
 function showPage(id) {
-  if (!PAGES[id]) id = DEFAULT_PAGE;
+  if (!PAGES[id] || (PAGES[id].need && typeof can === "function" && !can(PAGES[id].need))) id = DEFAULT_PAGE;
   const meta = PAGES[id];
+  const ro = PAGE_EDIT[id] && typeof can === "function" && !can(PAGE_EDIT[id]);
+  const roEl = document.getElementById("pageRo");
+  if (roEl) { roEl.hidden = !ro; roEl.textContent = ro ? `조회 전용 · ${PERM_LABEL[PAGE_EDIT[id]]} 권한 없음` : ""; }
   document.querySelectorAll(".page").forEach(p => p.classList.toggle("active", p.id === id));
   document.querySelectorAll(".side-link").forEach(a => a.classList.toggle("active", a.dataset.page === id));
   setSideGroup(meta.group);
@@ -41,12 +48,17 @@ function showPage(id) {
   if (slot) slot.appendChild(document.getElementById("uploadCard"));
   document.getElementById("uploadCard").dataset.ctx = id === "page-settle-gen" ? "gen" : "cust"; // 발전사업자 정산은 정산 구분 숨김
   if (id === "page-dash" && typeof renderDashboard === "function") renderDashboard(); // 정산 대시보드 (js/dashboard.js)
+  if (id === "page-admin-users" && typeof renderUsersPage === "function") renderUsersPage(); // 권한관리 (js/users.js)
   try { localStorage.setItem(NAV_KEY, id); } catch (e) { /* 저장 불가 환경 */ }
   document.body.classList.remove("side-shown");
 }
 
 function initNav() {
-  document.querySelectorAll(".side-link").forEach(a => { a.href = "#" + a.dataset.page.replace(/^page-/, ""); });
+  document.querySelectorAll(".side-link").forEach(a => {
+    a.href = "#" + a.dataset.page.replace(/^page-/, "");
+    const need = PAGES[a.dataset.page] && PAGES[a.dataset.page].need;
+    if (need && typeof can === "function" && !can(need)) a.hidden = true; // 권한 없는 메뉴 숨김
+  });
   document.querySelectorAll(".side-toggle button").forEach(b => b.addEventListener("click", () => setSideGroup(b.dataset.group)));
   document.querySelectorAll(".side-folder-btn").forEach(b => b.addEventListener("click", () => b.parentElement.classList.toggle("open")));
   document.getElementById("sideOpenBtn").addEventListener("click", () => document.body.classList.toggle("side-shown"));

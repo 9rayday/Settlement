@@ -34,7 +34,7 @@ const SHEET_CUSTOMERS = "전기사용자 정보";
 const ADJUSTMENTS_HEADERS = ["정산월","발전소명","전월차액","전월미지급액","기타정산","저장일시"];
 const PERFORMANCE_HEADERS = ["정산월","발전소명","발전량","공급량","초과발전량","기록일시"];
 const STORE_HEADERS = ["키","값","저장일시"];
-const ADMIN_HEADERS = ["아이디","비밀번호","이름","등록일시","실패횟수","잠금시점비밀번호"];
+const ADMIN_HEADERS = ["아이디","비밀번호","이름","권한","실패횟수","잠금","최근로그인","등록일시"];
 const DASHBOARD_YEARS = 20;
 const DEFAULT_GUARANTEE_HOURS = 3.4; // 발전보장시간이 비어있을 때 기본값
 
@@ -114,6 +114,7 @@ function jsonOut_(obj) {
 function doGet(e) {
   try {
     const action = e.parameter.action;
+    session_(e.parameter.token); // 모든 조회는 로그인 필요
     if (action === "getMaster") return jsonOut_({ ok: true, data: getMaster_() });
     if (action === "getAdjustments") return jsonOut_({ ok: true, data: getAdjustments_(e.parameter.month, e.parameter.plant) });
     if (action === "getPerformanceHistory") return jsonOut_({ ok: true, data: getPerformanceHistory_(e.parameter.plant) });
@@ -132,6 +133,17 @@ function doPost(e) {
   try {
     const body = JSON.parse(e.postData.contents);
     const action = body.action;
+    if (action === "login") return jsonOut_({ ok: true, data: login_(body) });
+    if (action === "logout") return jsonOut_({ ok: true, data: logout_(body.token) });
+    const s = session_(body.token);
+    if (action === "me") return jsonOut_({ ok: true, data: { id: s.id, role: s.role || "조회", perms: s.perms } });
+    if (action === "listUsers") { need_(s, "admin"); return jsonOut_({ ok: true, data: listUsers_() }); }
+    if (action === "saveUser") { need_(s, "admin"); return jsonOut_({ ok: true, data: saveUser_(body, s) }); }
+    if (action === "unlockUser") { need_(s, "admin"); return jsonOut_({ ok: true, data: unlockUser_(body) }); }
+    if (action === "deleteUser") { need_(s, "admin"); return jsonOut_({ ok: true, data: deleteUser_(body, s) }); }
+    if (["saveAdjustments", "logPerformance"].indexOf(action) >= 0) need_(s, "settle");
+    if (["savePlant", "deletePlant", "saveCustomer", "deleteCustomer"].indexOf(action) >= 0) need_(s, "contract");
+    if (action === "saveStore") { const p = storePerm_(body.key); if (p) need_(s, p); else if (!s.perms.length) throw new Error("권한이 없습니다. (조회 전용 계정)"); }
     if (action === "saveAdjustments") return jsonOut_({ ok: true, data: saveAdjustments_(body) });
     if (action === "logPerformance") return jsonOut_({ ok: true, data: logPerformance_(body) });
     if (action === "saveStore") return jsonOut_({ ok: true, data: saveStore_(body) });
@@ -139,7 +151,6 @@ function doPost(e) {
     if (action === "deletePlant") return jsonOut_({ ok: true, data: deleteRegistryRow_(getSheet_(SHEET_MASTER), "발전소명", body.key) });
     if (action === "saveCustomer") return jsonOut_({ ok: true, data: upsertRegistryRow_(getSheet_(SHEET_CUSTOMERS), CUSTOMER_FIELDS, "계약ID", body.record, body.originalKey, "KPX신청번호") });
     if (action === "deleteCustomer") return jsonOut_({ ok: true, data: deleteRegistryRow_(getSheet_(SHEET_CUSTOMERS), "계약ID", body.key, "KPX신청번호") });
-    if (action === "login") return jsonOut_({ ok: true, data: login_(body) });
     return jsonOut_({ ok: false, error: "unknown action: " + action });
   } catch (err) {
     return jsonOut_({ ok: false, error: String(err) });
@@ -165,7 +176,7 @@ const MASTER_FIELDS = ["발전소명","사업자명(대표자명)","사업자등
   "연간보장공급량","연간효율감소","위약금유형","위약금단가","위약금처리방식","해지위약금","계약ID","계약상태"];
 const CUSTOMER_FIELDS = ["계약ID","수요기업명","대표자명","사업자등록번호","전기사용장소","담당자","연락처","이메일","수요지지역","계약단가","KPX신청번호","소비계약신청번호","계약일자","계약해지일",
   "정산방식","계약기간","연장가능여부","연장통보기한","연장통보마감일","비고",
-  "사용장소명","수요망","한전계약전력","한전고객번호","계약용량","연간보장시간","연간보장공급량","연간효율감소","위약금유형","위약금단가","위약금처리방식","해지위약금","계약상태","접속점","입금계좌","청구서번호"];
+  "사용장소명","수요망","한전계약전력","한전고객번호","계약용량","연간보장시간","연간보장공급량","연간효율감소","위약금유형","위약금단가","위약금처리방식","해지위약금","계약상태","접속점","입금계좌","청구서번호","청구서송부기한","납부일","오차확인기한"];
 // 앞자리 0·하이픈이 숫자/날짜로 바뀌지 않도록 텍스트 서식으로 저장할 컬럼
 const TEXT_FIELDS = ["청구서번호","입금계좌","계약ID","사업자등록번호","계좌번호","연락처","담당자","KPX신청번호","소비계약신청번호","발전기ID","한전고객번호"];
 
@@ -618,46 +629,143 @@ function backfillYearlyGrid() {
   Object.keys(master).forEach(plant => ensurePlantBlock_(sheet, plant, master[plant]));
 }
 
-/* ============ 로그인 (구글시트 "관리자" 탭 대조) ============
- * 가벼운 화면 진입 잠금이다 — 웹앱이 ANYONE_ANONYMOUS로 배포되어 있어 URL을 아는 사람은
- * 로그인 여부와 무관하게 doGet/doPost를 직접 호출할 수 있다. 진짜 보안 경계가 아님에 유의.
- * 계정은 "관리자" 탭에 아이디/비밀번호를 평문으로 직접 입력해서 관리한다(별도 함수 실행 불필요).
- *
- * 5회 이상 비밀번호 오류 시 잠금: "관리자" 탭에 "실패횟수"/"잠금시점비밀번호" 두 컬럼을 추가로
- * 두면 동작한다(없으면 잠금 기능만 조용히 비활성화, 로그인 자체는 그대로 동작).
- * 담당자가 "비밀번호" 컬럼 값을 바꾸면, 잠긴 시점에 저장해둔 비밀번호와 달라지므로
- * 다음 로그인 시도부터 자동으로 잠금이 풀린다(별도 초기화 조작 불필요).
+/* ============ 로그인 · 계정 · 권한 (구글시트 "관리자" 탭) ============
+ * 권한: 관리자(전체 + 계정관리) / 정산담당자(정산 발행·대금 수령·발전사업자 정산) / 실무담당자(계약 등록·수정). 빈칸 = 조회만.
+ *   시트 "권한" 칸을 직접 고치거나, 웹의 [정산관리 > 권한관리]에서 관리자가 바꾼다. MASTER_ADMIN_ID 는 항상 관리자.
+ * 비밀번호: 시트에 평문으로 넣어도 되고(첫 로그인 때 해시로 바뀜), 웹에서 바꾸면 해시로 저장된다.
+ * 잠금: 5회 틀리면 "잠금" = Y. 관리자가 웹에서 [잠금 해제]하거나 시트에서 잠금·실패횟수 칸을 비우면 풀린다.
+ * 세션: 로그인하면 토큰(6시간, 사용할 때마다 연장)을 주고, 모든 요청은 토큰과 권한을 서버에서 확인한다.
  */
-function login_(body) {
-  const id = String(body.id || "").trim();
-  const pw = String(body.pw || "");
-  if (!id || !pw) throw new Error("아이디/비밀번호를 입력하세요.");
+const MASTER_ADMIN_ID = "9rayday";
+const ROLE_PERMS = { "관리자": ["admin", "rates", "contract", "settle"], "정산담당자": ["settle"], "실무담당자": ["contract"] };
+const AUTH_COLS = ["아이디", "비밀번호", "이름", "권한", "실패횟수", "잠금", "최근로그인", "등록일시"];
+const SESSION_TTL = 21600; // 초 (CacheService 최대 6시간)
+const MAX_FAIL = 5;
+
+function hex_(bytes) { return bytes.map(b => ((b + 256) % 256).toString(16).padStart(2, "0")).join(""); }
+function hashPw_(pw, salt) {
+  salt = salt || Utilities.getUuid().replace(/-/g, "").slice(0, 16);
+  return "sha256:" + salt + ":" + hex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, salt + ":" + pw, Utilities.Charset.UTF_8));
+}
+function checkPw_(stored, pw) {
+  stored = String(stored == null ? "" : stored);
+  if (stored.indexOf("sha256:") === 0) return hashPw_(pw, stored.split(":")[1]) === stored;
+  return stored !== "" && stored === pw;
+}
+function roleOf_(row) {
+  if (String(row["아이디"]).trim() === MASTER_ADMIN_ID) return "관리자";
+  const r = String(row["권한"] || "").trim();
+  return ROLE_PERMS[r] ? r : "";
+}
+// 관리자 탭 + 필요한 칸 보장 (없는 칸은 오른쪽에 추가)
+function authSheet_() {
   const sheet = getSheet_(SHEET_ADMIN);
-  const rows = sheetToObjects_(sheet);
-  const found = rows.find(r => String(r["아이디"]).trim() === id);
-  if (!found) throw new Error("등록되지 않은 아이디입니다.");
+  const lastCol = Math.max(1, sheet.getLastColumn());
+  const header = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(String);
+  const missing = AUTH_COLS.filter(c => header.indexOf(c) < 0);
+  if (missing.length) sheet.getRange(1, header.filter(Boolean).length + 1, 1, missing.length).setValues([missing]).setFontWeight("bold");
+  const h = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
+  const col = name => h.indexOf(name) + 1;
+  return { sheet, col, rows: sheetToObjects_(sheet) };
+}
+function setCell_(A, row, name, v) { const c = A.col(name); if (c) A.sheet.getRange(row, c).setValue(v); }
 
-  const header = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  const failCol = header.indexOf("실패횟수") + 1;
-  const lockPwCol = header.indexOf("잠금시점비밀번호") + 1;
-  const currentPw = String(found["비밀번호"]);
-  const failCount = Number(found["실패횟수"]) || 0;
-  const lockedAtPw = found["잠금시점비밀번호"] || "";
-
-  if (failCol && lockPwCol && failCount >= 5 && lockedAtPw === currentPw) {
-    throw new Error("비밀번호를 5회 이상 틀려 잠겼습니다. 담당자에게 문의해 비밀번호를 변경해주세요.");
-  }
-
-  if (currentPw !== pw) {
-    if (failCol) {
-      const newFailCount = failCount + 1;
-      sheet.getRange(found._row, failCol).setValue(newFailCount);
-      if (newFailCount >= 5 && lockPwCol) sheet.getRange(found._row, lockPwCol).setValue(currentPw);
+function login_(body) {
+  const id = String(body.id || "").trim(), pw = String(body.pw || "");
+  if (!id || !pw) throw new Error("아이디/비밀번호를 입력하세요.");
+  const lock = LockService.getScriptLock(); lock.waitLock(10000);
+  try {
+    const A = authSheet_();
+    const found = A.rows.find(r => String(r["아이디"]).trim() === id);
+    if (!found) throw new Error("아이디 또는 비밀번호가 올바르지 않습니다.");
+    const fails = Number(found["실패횟수"]) || 0;
+    if (String(found["잠금"]).trim().toUpperCase() === "Y" || fails >= MAX_FAIL)
+      throw new Error(`비밀번호를 ${MAX_FAIL}회 이상 틀려 잠긴 계정입니다. 관리자에게 잠금 해제를 요청하세요.`);
+    if (!checkPw_(found["비밀번호"], pw)) {
+      const n = fails + 1;
+      setCell_(A, found._row, "실패횟수", n);
+      if (n >= MAX_FAIL) { setCell_(A, found._row, "잠금", "Y"); throw new Error(`비밀번호를 ${MAX_FAIL}회 틀려 계정이 잠겼습니다. 관리자에게 잠금 해제를 요청하세요.`); }
+      throw new Error(`아이디 또는 비밀번호가 올바르지 않습니다. (${n}/${MAX_FAIL})`);
     }
-    throw new Error("비밀번호가 일치하지 않습니다.");
-  }
+    setCell_(A, found._row, "실패횟수", 0);
+    setCell_(A, found._row, "잠금", "");
+    setCell_(A, found._row, "최근로그인", Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm"));
+    if (String(found["비밀번호"]).indexOf("sha256:") !== 0) setCell_(A, found._row, "비밀번호", hashPw_(pw)); // 평문 → 해시
+    const role = roleOf_(found);
+    if (id === MASTER_ADMIN_ID && String(found["권한"]).trim() !== "관리자") setCell_(A, found._row, "권한", "관리자");
+    const token = Utilities.getUuid();
+    CacheService.getScriptCache().put("tok:" + token, JSON.stringify({ id, role }), SESSION_TTL);
+    return { name: found["이름"] || id, id, role: role || "조회", perms: ROLE_PERMS[role] || [], token };
+  } finally { lock.releaseLock(); }
+}
+function logout_(token) { if (token) CacheService.getScriptCache().remove("tok:" + token); return true; }
 
-  if (failCol) sheet.getRange(found._row, failCol).setValue(0);
-  if (lockPwCol) sheet.getRange(found._row, lockPwCol).setValue("");
-  return { name: found["이름"] || id };
+// 토큰 확인 (없거나 만료 → AUTH 오류, 화면은 로그인으로 돌아간다)
+function session_(token) {
+  const cache = CacheService.getScriptCache();
+  const raw = token ? cache.get("tok:" + token) : null;
+  if (!raw) throw new Error("AUTH: 로그인이 필요합니다. 다시 로그인하세요.");
+  cache.put("tok:" + token, raw, SESSION_TTL); // 사용할 때마다 연장
+  const s = JSON.parse(raw);
+  s.perms = ROLE_PERMS[s.role] || [];
+  return s;
+}
+function need_(s, perm) {
+  if (s.perms.indexOf(perm) < 0) throw new Error(`권한이 없습니다. (${({ admin: "계정 관리", rates: "요율 관리", contract: "계약 등록·수정", settle: "정산" })[perm] || perm} 권한 필요)`);
+}
+// 앱데이터 키별 쓰기 권한
+function storePerm_(key) {
+  key = String(key || "");
+  if (/^(netrate:|touver:|holidays|market:|rates:)/.test(key)) return "rates";
+  if (/^(bill:|carry:|genpay:)/.test(key)) return "settle";
+  return null; // 그 밖의 키는 쓰기 권한이 하나라도 있으면 허용
+}
+
+/* ---- 계정 관리 (관리자) ---- */
+function listUsers_() {
+  return authSheet_().rows.map(r => ({ id: String(r["아이디"]).trim(), name: r["이름"] || "", role: roleOf_(r) || "", fails: Number(r["실패횟수"]) || 0,
+    locked: String(r["잠금"]).trim().toUpperCase() === "Y" || (Number(r["실패횟수"]) || 0) >= MAX_FAIL, lastLogin: r["최근로그인"] ? String(r["최근로그인"]) : "",
+    master: String(r["아이디"]).trim() === MASTER_ADMIN_ID })).filter(u => u.id);
+}
+function saveUser_(body, s) {
+  const u = body.user || {}, id = String(u.id || "").trim();
+  if (!/^[A-Za-z0-9_.@-]{3,40}$/.test(id)) throw new Error("아이디는 영문·숫자 3~40자로 입력하세요.");
+  if (u.role && !ROLE_PERMS[u.role]) throw new Error("권한 값이 올바르지 않습니다: " + u.role);
+  if (id === MASTER_ADMIN_ID && u.role && u.role !== "관리자") throw new Error("마스터 관리자의 권한은 바꿀 수 없습니다.");
+  const lock = LockService.getScriptLock(); lock.waitLock(10000);
+  try {
+    const A = authSheet_();
+    let found = A.rows.find(r => String(r["아이디"]).trim() === id);
+    if (body.isNew && found) throw new Error("이미 있는 아이디입니다: " + id);
+    if (!found) {
+      if (!u.password) throw new Error("새 계정은 초기 비밀번호가 필요합니다.");
+      const row = A.sheet.getLastRow() + 1;
+      setCell_(A, row, "아이디", id);
+      setCell_(A, row, "등록일시", Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm"));
+      found = { _row: row };
+    }
+    if (u.name != null) setCell_(A, found._row, "이름", String(u.name));
+    if (u.role != null) setCell_(A, found._row, "권한", id === MASTER_ADMIN_ID ? "관리자" : u.role);
+    if (u.password) {
+      if (String(u.password).length < 6) throw new Error("비밀번호는 6자 이상으로 입력하세요.");
+      setCell_(A, found._row, "비밀번호", hashPw_(String(u.password)));
+      setCell_(A, found._row, "실패횟수", 0); setCell_(A, found._row, "잠금", "");
+    }
+    return listUsers_();
+  } finally { lock.releaseLock(); }
+}
+function unlockUser_(body) {
+  const A = authSheet_(), found = A.rows.find(r => String(r["아이디"]).trim() === String(body.id || "").trim());
+  if (!found) throw new Error("계정을 찾을 수 없습니다.");
+  setCell_(A, found._row, "실패횟수", 0); setCell_(A, found._row, "잠금", "");
+  return listUsers_();
+}
+function deleteUser_(body, s) {
+  const id = String(body.id || "").trim();
+  if (id === MASTER_ADMIN_ID) throw new Error("마스터 관리자 계정은 삭제할 수 없습니다.");
+  if (id === s.id) throw new Error("자기 계정은 삭제할 수 없습니다.");
+  const A = authSheet_(), found = A.rows.find(r => String(r["아이디"]).trim() === id);
+  if (!found) throw new Error("계정을 찾을 수 없습니다.");
+  A.sheet.deleteRow(found._row);
+  return listUsers_();
 }

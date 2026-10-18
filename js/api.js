@@ -2,6 +2,14 @@
 // GAS_WEBAPP_URL이 비어있으면(js/config.js) 배포 전 상태이므로 경고만 남기고 조용히 실패한다.
 // -> 로컬 상태만으로 나머지 기능(업로드/집계/미리보기/개별 다운로드)은 계속 동작한다.
 
+// 로그인 토큰 (js/auth.js 가 저장). 서버가 "AUTH:" 오류를 주면 세션 만료 → 로그인 화면으로
+const authToken_ = () => { try { return sessionStorage.getItem("settlement_token") || ""; } catch (e) { return ""; } };
+function authFailed_(msg){
+  if(!/AUTH:/.test(String(msg || ""))) return false;
+  if(typeof logout === "function") logout("로그인 세션이 만료되었습니다. 다시 로그인하세요.");
+  return true;
+}
+
 function gasConfigured_(){
   return typeof GAS_WEBAPP_URL === "string" && GAS_WEBAPP_URL.trim() !== "";
 }
@@ -13,11 +21,12 @@ async function gasGet(action, params){
   }
   const url = new URL(GAS_WEBAPP_URL);
   url.searchParams.set("action", action);
+  url.searchParams.set("token", authToken_());
   Object.entries(params||{}).forEach(([k,v])=> url.searchParams.set(k, v));
   try{
     const res = await fetch(url.toString());
     const json = await res.json();
-    if(!json.ok) throw new Error(json.error || "unknown GAS error");
+    if(!json.ok){ authFailed_(json.error); throw new Error(json.error || "unknown GAS error"); }
     return json.data;
   }catch(err){
     console.error(`[api] ${action} 실패:`, err);
@@ -36,10 +45,10 @@ async function gasPost(action, body){
     const res = await fetch(GAS_WEBAPP_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({ action, ...body })
+      body: JSON.stringify({ action, token: authToken_(), ...body })
     });
     const json = await res.json();
-    if(!json.ok) throw new Error(json.error || "unknown GAS error");
+    if(!json.ok){ authFailed_(json.error); throw new Error(json.error || "unknown GAS error"); }
     return json.data;
   }catch(err){
     console.error(`[api] ${action} 실패:`, err);
@@ -90,10 +99,10 @@ async function gasCall(action, body){
     const res = await fetch(GAS_WEBAPP_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({ action, ...body })
+      body: JSON.stringify({ action, token: authToken_(), ...body })
     });
     const json = await res.json();
-    if(!json.ok) return { ok:false, error: String(json.error || "저장 실패").replace(/^Error:\s*/, "") };
+    if(!json.ok){ authFailed_(json.error); return { ok:false, error: String(json.error || "저장 실패").replace(/^Error:\s*/, "") }; }
     return { ok:true, data: json.data };
   }catch(err){
     return { ok:false, error:"서버에 연결할 수 없습니다." };

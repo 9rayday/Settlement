@@ -22,8 +22,16 @@ const Store = (function () {
     try { return JSON.parse(data[key]); } catch (e) { return fallback; }
   }
   function keys(prefix) { return Object.keys(data).filter(k => k.indexOf(prefix) === 0).sort(); }
-  // 반환: "remote" | "local"
+  // 키별 쓰기 권한 (서버 gas/Code.gs storePerm_ 과 같게)
+  function permOf(key) {
+    if (/^(netrate:|touver:|holidays|market:|rates:)/.test(key)) return "rates";
+    if (/^(bill:|carry:|genpay:)/.test(key)) return "settle";
+    return null;
+  }
+  // 반환: "remote" | "local" | "denied"
   async function set(key, value) {
+    const p = permOf(key);
+    if (typeof requirePerm === "function" && p && !requirePerm(p)) return "denied";
     data[key] = JSON.stringify(value); writeLocal();
     const r = await gasPost("saveStore", { key, value: data[key] });
     return r ? "remote" : "local";
