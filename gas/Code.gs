@@ -198,12 +198,16 @@ function getMaster_() {
     let key = out["발전소명"] ? String(out["발전소명"]).trim() : "";
     if (!key) return;
     out._row = r._row;
-    if (count[key] > 1) { out._dup = count[key]; if (seen[key]) key = dupKey_(key, r._row); seen[out["발전소명"]] = true; }
+    // 같은 발전소명이 여러 행(용량·전기사용자가 다른 별개 발전소)이면 두 번째부터 "이름 (신청번호)" 로 구분해 각 행 정보를 그대로 쓴다
+    if (count[key] > 1 && seen[key]) {
+      const tag = String(out["KPX신청번호"] || out["계약ID"] || "").trim();
+      key = tag && !byPlant[key + " (" + tag + ")"] ? key + " (" + tag + ")" : key + " (행 " + r._row + ")";
+    }
+    seen[out["발전소명"]] = true;
     byPlant[key] = out;
   });
   return byPlant;
 }
-const dupKey_ = (name, row) => name + " (행 " + row + ")";
 const stripDupKey_ = k => String(k || "").trim().replace(/ \(행 \d+\)$/, "");
 
 /* ============ 등록 정보 (탭0: 발전소 / 전기사용자) ============ */
@@ -236,11 +240,19 @@ function upsertRegistryRow_(sheet, fields, keyField, record, originalKey, legacy
     const keyCol = colOf(keyField) + 1, lastRow = sheet.getLastRow();
     const keys = lastRow > 1 ? sheet.getRange(2, keyCol, lastRow - 1, 1).getValues().map(r => String(r[0]).trim()) : [];
     const rowOf = k => { const i = keys.indexOf(k); return i < 0 ? -1 : i + 2; };
-    const orig = stripDupKey_(originalKey);
-    const oRow = Number(originalRow) || 0;
-    let row = oRow >= 2 && oRow <= lastRow && keys[oRow - 2] === orig ? oRow : (orig ? rowOf(orig) : -1); // 같은 이름이 여러 행이면 행 번호로 정확히
-    const clash = keys.findIndex((k, i) => k === key && i + 2 !== row);
-    if (clash >= 0 && key !== orig) throw new Error("이미 등록된 " + keyField + "입니다: " + key + " (행 " + (clash + 2) + "). 발전소마다 KPX 발전기명으로 다르게 입력하세요.");
+    const origRaw = String(originalKey || "").trim(), oRow = Number(originalRow) || 0;
+    // 같은 이름이 여러 행이면 행 번호로 정확히 (목록 키는 "이름 (신청번호)" 일 수 있음)
+    let row = oRow >= 2 && oRow <= lastRow && (keys[oRow - 2] === origRaw || origRaw.indexOf(keys[oRow - 2] + " (") === 0) ? oRow : (origRaw ? rowOf(stripDupKey_(origRaw)) : -1);
+    const orig = row > 0 ? keys[row - 2] : stripDupKey_(origRaw);
+    // 같은 이름은 허용하되(별개 발전소), 같은 신청번호·계약ID까지 같으면 중복
+    const groupCols = ["KPX신청번호", "계약ID"].map(f => colOf(f)).filter(c => c >= 0);
+    const tagOf = vals => groupCols.map(c => String(vals[c] == null ? "" : vals[c]).trim()).join("|");
+    const newTag = groupCols.map(c => { const f = header[c]; const v = record[fields.find(x => normalizeKey_(x) === normalizeKey_(f))]; return String(v == null ? "" : v).trim(); });
+    if (key !== orig) {
+      const all = lastRow > 1 ? sheet.getRange(2, 1, lastRow - 1, header.length).getValues() : [];
+      const clash = all.findIndex((vals, i) => String(vals[keyCol - 1]).trim() === key && i + 2 !== row && (keyField !== "발전소명" || tagOf(vals) === newTag.join("|")));
+      if (clash >= 0) throw new Error("이미 등록된 " + keyField + "입니다: " + key + " (행 " + (clash + 2) + ")" + (keyField === "발전소명" ? ". 같은 이름이면 계약(신청번호)을 다르게 연결하세요." : ""));
+    }
     if (row < 0 && orig && legacyKeyField && colOf(legacyKeyField) >= 0 && lastRow > 1) {
       const legacy = sheet.getRange(2, colOf(legacyKeyField) + 1, lastRow - 1, 1).getValues().map(r => String(r[0]).trim());
       const i = legacy.findIndex((v, j) => v === orig && !keys[j]);
@@ -261,8 +273,9 @@ function deleteRegistryRow_(sheet, keyField, key, legacyKeyField, rowNo) {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
-    const k = stripDupKey_(key), rows = sheetToObjects_(sheet), n = Number(rowNo) || 0;
-    const found = (n ? rows.find(r => r._row === n && String(pickField_(r, keyField) || "").trim() === k) : null)
+    const k0 = String(key || "").trim(), rows = sheetToObjects_(sheet), n = Number(rowNo) || 0;
+    const nameOf = r => String(pickField_(r, keyField) || "").trim(), k = stripDupKey_(k0);
+    const found = (n ? rows.find(r => r._row === n && (nameOf(r) === k0 || k0.indexOf(nameOf(r) + " (") === 0)) : null)
       || rows.find(r => String(pickField_(r, keyField) || "").trim() === k)
       || (legacyKeyField ? rows.find(r => !String(pickField_(r, keyField) || "").trim() && String(pickField_(r, legacyKeyField) || "").trim() === k) : null);
     if (!found) throw new Error("삭제할 항목을 찾지 못했습니다: " + key);

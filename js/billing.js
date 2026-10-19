@@ -254,12 +254,12 @@ function prepareGroup(err, warn) {
   const priceSplits = Registry.priceSplits(app, g.month); // 그 달 유효 계약이 여러 건이면 전력량요금을 계약별 단가로
   if (priceSplits && priceSplits.some(x => !(x.unitPrice > 0))) err.push(`계약단가 없음: ${priceSplits.filter(x => !(x.unitPrice > 0)).map(x => x.id).join(", ")}`);
   if (!customer) err.push(`전기사용자 미등록: ${app}`);
-  const unreg = Object.keys(g.plants).filter(p => { const i = Registry.plantInfo(p); return !i || !i.region; });
+  const unreg = Object.keys(g.plants).filter(p => { const i = Registry.plantInfo(p, app); return !i || !i.region; });
   if (unreg.length) err.push("발전소 미등록·지역 없음: " + unreg.join(", "));
   const { rates, version } = ratesFor(g.month);
   if (!version) warn.push(`KPX 요율 버전 없음 (${g.month}) — 기본값 적용`);
   const plants = {}; Object.keys(g.plants).forEach(p => {
-    const i = Registry.plantInfo(p);
+    const i = Registry.plantInfo(p, app);
     plants[p] = i && i.region ? i : Object.assign({ distConnected: false, distLow: false }, i || {}, { region: "비수도권", tempRegion: true }); // 미리보기용 임시값
   });
   const S = settleGroup(g, billState.ami, rates);

@@ -241,7 +241,7 @@ async function buildInvoiceHtml(plant){
       <tr><th class="section" rowspan="3">발전<br>사업자<br>정보</th>
         ${field("사업자명 (대표자명)", m["사업자명(대표자명)"] || todo)}${field("사업자등록번호", m["사업자등록번호"] || todo)}</tr>
       <tr>${field("사업자 주소", m["사업자주소"] || todo)}${field("계좌번호", m["계좌번호"] || todo)}</tr>
-      <tr>${field("발전소명", plant)}${field("연락처", [m["담당자"], m["연락처"]].filter(Boolean).join("<br>") || todo)}</tr>
+      <tr>${field("발전소명", m["발전소명"] || plant)}${field("연락처", [m["담당자"], m["연락처"]].filter(Boolean).join("<br>") || todo)}</tr>
     </table>
     <table class="doc-table">${DOC_COLS}
       <tr><th class="section" rowspan="5">전력<br>거래<br>내역</th>${field("총 전기사용량", kwh(siteTotals.usage))}${field("총 발전량", kwh(siteTotals.generation))}</tr>

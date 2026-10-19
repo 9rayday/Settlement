@@ -165,6 +165,7 @@ function buildColMap(rows){
  * 신청번호가 없는 행만 KPX 파일 값을 그대로 쓴다.
  */
 const dateKeyOf = v => { const d = String(v == null ? "" : v).replace(/[^0-9]/g, ""); return `${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}`; };
+const keyOf = (name, app) => (typeof Registry !== "undefined" && Registry.plantKeyFor) ? Registry.plantKeyFor(name, app) : name;
 function aggregate(rows){
   aggByPlant = {}; plants = [];
   siteTotals = {usage:0, generation:0, supply:0, excess:0, deficit:0, lossRatePct:null};
@@ -173,14 +174,15 @@ function aggregate(rows){
   const rowIdx = {};
   rows.forEach(r=>{
     const rawPlant = colMap.plant ? r[colMap.plant] : null;
-    const plant = rawPlant!=null ? String(rawPlant).trim() : null;
-    if(!plant) return;
+    const name = rawPlant!=null ? String(rawPlant).trim() : null;
+    if(!name) return;
+    const app = colMap.appNo ? String(r[colMap.appNo] || "").trim() : "";
+    const plant = keyOf(name, app); // 발전소 행 키 (같은 이름의 별개 발전소는 신청번호로 구분)
     if(!aggByPlant[plant]){ aggByPlant[plant] = {generation:0, supply:0, excess:0}; plants.push(plant); raw[plant] = {supply:0, excess:0}; }
     const gen = num(r[colMap.gen])*1000;
     aggByPlant[plant].generation += gen; siteTotals.generation += gen;
     raw[plant].supply += num(r[colMap.supply])*1000; raw[plant].excess += num(r[colMap.excess])*1000;
-    const app = colMap.appNo ? String(r[colMap.appNo] || "").trim() : "";
-    const k = [app, plant, dateKeyOf(r[colMap.date]), Math.round(num(r[colMap.hour]))].join("|");
+    const k = [app, name, dateKeyOf(r[colMap.date]), Math.round(num(r[colMap.hour]))].join("|");
     (rowIdx[k] || (rowIdx[k] = [])).push(r);
     if(!settleMonth && r[colMap.date]){
       const d = String(r[colMap.date]).replace(/[^0-9]/g,"");
@@ -213,9 +215,10 @@ function aggregate(rows){
       });
     });
     const M = R.match;
-    Object.keys(M.supplyByPlant).forEach(p=>{
+    Object.keys(M.supplyByPlant).forEach(n=>{
+      const p = keyOf(n, app);
       if(!aggByPlant[p]) return;
-      aggByPlant[p].supply += M.supplyByPlant[p]; aggByPlant[p].excess += M.excessByPlant[p]; covered.add(p);
+      aggByPlant[p].supply += M.supplyByPlant[n]; aggByPlant[p].excess += M.excessByPlant[n]; covered.add(p);
     });
     siteTotals.usage += M.totals.usage;
     siteTotals.deficit += Math.max(0, M.totals.deficitSimple + M.totals.deficitLoss);

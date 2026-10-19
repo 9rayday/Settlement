@@ -153,7 +153,7 @@ function recExcessIndex() { // { plantNorm: { name, app, months: {YYYYMM: [[d,h,
   Store.keys("recx:").forEach(k => { // "-"(파일, 신청번호 없음) 키가 먼저, 신청번호(오차정산서) 키가 뒤 → 같은 시간은 오차정산서 값
     const parts = k.split(":"), ym = parts[1], app = parts.slice(2).join(":"), noApp = app.charAt(0) === "-", data = Store.get(k, {}) || {};
     Object.keys(data).forEach(name => {
-      const n = REC.norm(name), e = idx[n] || (idx[n] = { name, app: noApp ? "" : app, months: {} });
+      const n = REC.norm(name) + (noApp ? "" : "@" + app), e = idx[n] || (idx[n] = { name, app: noApp ? "" : app, months: {} });
       if (!noApp && !e.app) e.app = app;
       const mm = e._m || (e._m = {}), byH = mm[ym] || (mm[ym] = {});
       data[name].forEach(r => { byH[r[0] + "|" + r[1]] = r; });
@@ -167,7 +167,11 @@ function recExcessIndex() { // { plantNorm: { name, app, months: {YYYYMM: [[d,h,
   });
   return idx;
 }
-function recMaster(name) { const n = REC.norm(name), all = (typeof Registry !== "undefined" && Registry.plants) ? Registry.plants() : {}; const k = Object.keys(all).find(x => REC.norm(x) === n); return k ? all[k] : null; }
+function recMaster(name, app) {
+  const all = (typeof Registry !== "undefined" && Registry.plants) ? Registry.plants() : {};
+  if (app && Registry.plantKeyFor) { const k = Registry.plantKeyFor(name, app); if (all[k] && REC.norm(all[k]["발전소명"] || k) === REC.norm(name)) return all[k]; }
+  const n = REC.norm(name), k = Object.keys(all).find(x => REC.norm((all[x] && all[x]["발전소명"]) || x) === n); return k ? all[k] : null;
+}
 const recCustomer = app => app && typeof Registry !== "undefined" ? Registry.customerByApp(app) : null;
 // 기본계약가 = 저장값 → 전기사용자 계약단가 × 1000
 function recBaseContract(app) {
@@ -176,7 +180,7 @@ function recBaseContract(app) {
 }
 // 발전소별: 가중치 · 계약가(빈칸 = 기본계약가) · 수수료 단가(= 전기사용자 계약단가 − 발전사업자 계약단가, 원/kWh)
 function recPlantCfg(name, app) {
-  const w = recW()[REC.norm(name)] || {}, m = recMaster(name), base = recBaseContract(app);
+  const w = recW()[REC.norm(name)] || {}, m = recMaster(name, app), base = recBaseContract(app);
   const regW = m && Number(m["REC가중치"]) > 0 ? Number(m["REC가중치"]) : null;
   const genUnit = m && Number(m["계약단가"]) > 0 ? Number(m["계약단가"]) : null;
   const feeRate = genUnit != null && base.price > 0 ? Math.round((base.price / 1000 - genUnit) * 10000) / 10000 : null;

@@ -110,9 +110,17 @@ const Registry = (function () {
   const plants = () => masterData || {};
   const rawCustomers = () => customers;
 
-  // 정산 엔진용 발전소 정보
-  function plantInfo(name) {
-    const m = plants()[name];
+  // KPX 발전기명 + 신청번호 → 발전소 행 키. 같은 이름의 별개 발전소는 연결된 신청번호(계약)로 구분한다
+  function plantKeyFor(name, app) {
+    const all = plants(), n = str(name), a = str(app);
+    if (all[n] && (!a || str(all[n]["KPX신청번호"]) === a)) return n;
+    const cands = Object.keys(all).filter(k => str(all[k]["발전소명"]) === n);
+    if (!cands.length) return n;
+    return cands.find(k => a && (str(all[k]["KPX신청번호"]) === a || contractsOfApp(a).some(c => custKey(c) === str(all[k]["계약ID"])))) || (all[n] ? n : cands[0]);
+  }
+  // 정산 엔진용 발전소 정보 (app 을 주면 같은 이름 중 그 신청번호에 연결된 행)
+  function plantInfo(name, app) {
+    const m = plants()[plantKeyFor(name, app)];
     if (!m) return null;
     const grid = gridOf(m["배전연결"]); // 배전망이면 배전이용요금 추가 (저압/고압 요금 구분)
     return { region: str(m["지역(요금구분)"]), distConnected: grid !== "N", distLow: grid === "L", node: str(m["접속점"]), appNo: str(m["KPX신청번호"]) };
@@ -140,7 +148,7 @@ const Registry = (function () {
     const total = supplyByPlant ? Object.values(supplyByPlant).reduce((t, v) => t + (v || 0), 0) : 0;
     if (total > 0) {
       const byC = {}; act.forEach(c => { byC[custKey(c)] = 0; }); let unmapped = 0;
-      Object.entries(supplyByPlant).forEach(([p, v]) => { const k = plantContract(p); if (k in byC) byC[k] += v || 0; else unmapped += v || 0; });
+      Object.entries(supplyByPlant).forEach(([p, v]) => { const k = plantContract(plantKeyFor(p, app)); if (k in byC) byC[k] += v || 0; else unmapped += v || 0; });
       return act.map(c => ({ id: custKey(c), unitPrice: Number(c["계약단가"]), share: (byC[custKey(c)] + unmapped * capShare(c)) / total }));
     }
     return act.map(c => ({ id: custKey(c), unitPrice: Number(c["계약단가"]), share: capShare(c) }));
@@ -176,7 +184,7 @@ const Registry = (function () {
     if (r.ok) await load();
     return r;
   }
-  return { load, plants, rawCustomers, plantInfo, customerByApp, customerByKey, contractsOfApp, custKey, groups, priceSplits, plantsOfGroup, plantContract, plantsOfContract, save, remove, isLoaded: () => loaded };
+  return { load, plants, rawCustomers, plantInfo, plantKeyFor, customerByApp, customerByKey, contractsOfApp, custKey, groups, priceSplits, plantsOfGroup, plantContract, plantsOfContract, save, remove, isLoaded: () => loaded };
 })();
 
 /* ---------- 화면: 정산관리 > 계약관리 (전기사용자 / 발전사업자 / 그룹화) ---------- */
@@ -366,7 +374,7 @@ function renderPlantPage() {
       <div class="reg-head"><h2>전력공급계약</h2><button class="btn secondary" id="regAddPlant">+ 발전소 추가</button></div>
       <div class="grid-wrap"><table class="grid reg-table"><tr><th>발전소명</th><th>사업자명</th><th>지역</th><th>배전</th><th>그룹 (전기사용자)</th><th>계약용량(kW)</th><th>매입단가</th><th>계약일자</th></tr>
         ${pg.items.map(p => { const m = plants[p], app = rStr(m["KPX신청번호"]);
-          return `<tr class="reg-row${regState.openPlant === p ? " active" : ""}" data-plant="${rEsc(p)}"><td><b>${rEsc(p)}</b>${m._dup ? ' <span class="tag bad">이름 중복</span>' : ""}</td><td>${rEsc(m["사업자명(대표자명)"])}</td>
+          return `<tr class="reg-row${regState.openPlant === p ? " active" : ""}" data-plant="${rEsc(p)}"><td><b>${rEsc(m["발전소명"] || p)}</b></td><td>${rEsc(m["사업자명(대표자명)"])}</td>
             <td>${m["지역(요금구분)"] ? rEsc(m["지역(요금구분)"]) : '<span class="tag bad">미지정</span>'}</td><td>${GRID_LABEL[gridOf(m["배전연결"])]}</td>
             <td>${app ? `${rEsc(Registry.plantContract(p) || groupLabel(app) || "계약 미등록")} <span class="hint" style="margin:0">${rEsc(app)}</span>` : '<span class="hint" style="margin:0">미연결</span>'}</td>
             <td class="num">${rEsc(fmtKw(m["계약용량"]))}</td><td class="num">${rEsc(m["계약단가"])}</td><td>${rEsc(m["계약일자"])}</td></tr>`; }).join("")}</table></div>${pagerHtml("plant", pg.page, pg.pages)}
@@ -427,7 +435,7 @@ function renderGroupMain() {
         <td class="num">${rEsc(x["계약단가"])}</td><td>${rEsc(x["계약일자"] || "-")} ~ ${rEsc(x["계약해지일"] || "")}</td></tr>`).join("")}</table></div>
     <h3 class="sub">소속 발전소 (${members.length})</h3>
     <div class="grid-wrap"><table class="grid"><tr><th>발전소</th><th>계약</th><th>사업자명</th><th>지역</th><th>배전</th><th>계약용량(kW)</th><th></th></tr>
-      ${members.length ? members.map(p => { const m = all[p], pk = Registry.plantContract(p); return `<tr><td><b>${rEsc(p)}</b>${m._dup ? ' <span class="tag bad">이름 중복</span>' : ""}</td>
+      ${members.length ? members.map(p => { const m = all[p], pk = Registry.plantContract(p); return `<tr><td><b>${rEsc(m["발전소명"] || p)}</b></td>
         <td><select class="grp-contract" data-plant="${rEsc(p)}"><option value="">미지정</option>${contracts.map(x => { const k = Registry.custKey(x); return `<option value="${rEsc(k)}"${k === pk ? " selected" : ""}>${rEsc(k)}</option>`; }).join("")}</select></td>
         <td>${rEsc(m["사업자명(대표자명)"])}</td>
         <td>${m["지역(요금구분)"] ? rEsc(m["지역(요금구분)"]) : '<span class="tag bad">미지정</span>'}</td><td>${GRID_LABEL[gridOf(m["배전연결"])]}</td>
