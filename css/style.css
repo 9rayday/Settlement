@@ -617,3 +617,4 @@ td.empty{ text-align:center; }
 .smp-table th, .smp-table td{ padding:1px 1px; }
 .smp-table input{ min-width:44px; width:44px; padding:3px 2px; font-size:11px; letter-spacing:-0.2px; text-align:right; border-color:#E3E7EC; }
 .smp-table th:first-child{ position:sticky; left:0; z-index:1; background:#EEF1F5; }
+.reg-head{ margin-bottom:12px; }
