@@ -148,8 +148,8 @@ function doPost(e) {
     if (action === "saveAdjustments") return jsonOut_({ ok: true, data: saveAdjustments_(body) });
     if (action === "logPerformance") return jsonOut_({ ok: true, data: logPerformance_(body) });
     if (action === "saveStore") return jsonOut_({ ok: true, data: saveStore_(body) });
-    if (action === "savePlant") return jsonOut_({ ok: true, data: upsertRegistryRow_(getSheet_(SHEET_MASTER), MASTER_FIELDS, "발전소명", body.record, body.originalKey) });
-    if (action === "deletePlant") return jsonOut_({ ok: true, data: deleteRegistryRow_(getSheet_(SHEET_MASTER), "발전소명", body.key) });
+    if (action === "savePlant") return jsonOut_({ ok: true, data: upsertRegistryRow_(getSheet_(SHEET_MASTER), MASTER_FIELDS, "발전소명", body.record, body.originalKey, null, body.originalRow) });
+    if (action === "deletePlant") return jsonOut_({ ok: true, data: deleteRegistryRow_(getSheet_(SHEET_MASTER), "발전소명", body.key, null, body.row) });
     if (action === "saveCustomer") return jsonOut_({ ok: true, data: upsertRegistryRow_(getSheet_(SHEET_CUSTOMERS), CUSTOMER_FIELDS, "계약ID", body.record, body.originalKey, "KPX신청번호") });
     if (action === "deleteCustomer") return jsonOut_({ ok: true, data: deleteRegistryRow_(getSheet_(SHEET_CUSTOMERS), "계약ID", body.key, "KPX신청번호") });
     return jsonOut_({ ok: false, error: "unknown action: " + action });
@@ -190,15 +190,21 @@ function formatDateField_(v) {
 
 function getMaster_() {
   const rows = sheetToObjects_(getSheet_(SHEET_MASTER));
-  const byPlant = {};
+  const byPlant = {}, count = {}, seen = {};
+  rows.forEach(r => { const k = String(pickField_(r, "발전소명") || "").trim(); if (k) count[k] = (count[k] || 0) + 1; });
   rows.forEach(r => {
     const out = {};
     MASTER_FIELDS.forEach(f => out[f] = formatDateField_(pickField_(r, f)));
-    const key = out["발전소명"] ? String(out["발전소명"]).trim() : "";
-    if (key) byPlant[key] = out;
+    let key = out["발전소명"] ? String(out["발전소명"]).trim() : "";
+    if (!key) return;
+    out._row = r._row;
+    if (count[key] > 1) { out._dup = count[key]; if (seen[key]) key = dupKey_(key, r._row); seen[out["발전소명"]] = true; }
+    byPlant[key] = out;
   });
   return byPlant;
 }
+const dupKey_ = (name, row) => name + " (행 " + row + ")";
+const stripDupKey_ = k => String(k || "").trim().replace(/ \(행 \d+\)$/, "");
 
 /* ============ 등록 정보 (탭0: 발전소 / 전기사용자) ============ */
 function getCustomers_() {
@@ -212,7 +218,7 @@ function getCustomers_() {
 // 한 행 저장(upsert). 헤더는 공백/괄호를 무시하고 매칭하고, 없는 컬럼은 맨 끝에 추가한다.
 // 시트에 수기로 만든 다른 컬럼 값은 건드리지 않는다. originalKey 가 있으면 그 행을 수정(키 변경 포함), 없으면 새로 추가.
 // legacyKeyField: 키 칸이 비어 있는 예전 행은 이 칸 값으로 찾는다 (전기사용자: 계약ID 도입 전 KPX신청번호로 저장된 행)
-function upsertRegistryRow_(sheet, fields, keyField, record, originalKey, legacyKeyField) {
+function upsertRegistryRow_(sheet, fields, keyField, record, originalKey, legacyKeyField, originalRow) {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
@@ -230,9 +236,11 @@ function upsertRegistryRow_(sheet, fields, keyField, record, originalKey, legacy
     const keyCol = colOf(keyField) + 1, lastRow = sheet.getLastRow();
     const keys = lastRow > 1 ? sheet.getRange(2, keyCol, lastRow - 1, 1).getValues().map(r => String(r[0]).trim()) : [];
     const rowOf = k => { const i = keys.indexOf(k); return i < 0 ? -1 : i + 2; };
-    const orig = String(originalKey || "").trim();
-    if (rowOf(key) > 0 && key !== orig) throw new Error("이미 등록된 " + keyField + "입니다: " + key);
-    let row = orig ? rowOf(orig) : -1;
+    const orig = stripDupKey_(originalKey);
+    const oRow = Number(originalRow) || 0;
+    let row = oRow >= 2 && oRow <= lastRow && keys[oRow - 2] === orig ? oRow : (orig ? rowOf(orig) : -1); // 같은 이름이 여러 행이면 행 번호로 정확히
+    const clash = keys.findIndex((k, i) => k === key && i + 2 !== row);
+    if (clash >= 0 && key !== orig) throw new Error("이미 등록된 " + keyField + "입니다: " + key + " (행 " + (clash + 2) + "). 발전소마다 KPX 발전기명으로 다르게 입력하세요.");
     if (row < 0 && orig && legacyKeyField && colOf(legacyKeyField) >= 0 && lastRow > 1) {
       const legacy = sheet.getRange(2, colOf(legacyKeyField) + 1, lastRow - 1, 1).getValues().map(r => String(r[0]).trim());
       const i = legacy.findIndex((v, j) => v === orig && !keys[j]);
@@ -249,12 +257,13 @@ function upsertRegistryRow_(sheet, fields, keyField, record, originalKey, legacy
   }
 }
 
-function deleteRegistryRow_(sheet, keyField, key, legacyKeyField) {
+function deleteRegistryRow_(sheet, keyField, key, legacyKeyField, rowNo) {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
-    const k = String(key || "").trim(), rows = sheetToObjects_(sheet);
-    const found = rows.find(r => String(pickField_(r, keyField) || "").trim() === k)
+    const k = stripDupKey_(key), rows = sheetToObjects_(sheet), n = Number(rowNo) || 0;
+    const found = (n ? rows.find(r => r._row === n && String(pickField_(r, keyField) || "").trim() === k) : null)
+      || rows.find(r => String(pickField_(r, keyField) || "").trim() === k)
       || (legacyKeyField ? rows.find(r => !String(pickField_(r, keyField) || "").trim() && String(pickField_(r, legacyKeyField) || "").trim() === k) : null);
     if (!found) throw new Error("삭제할 항목을 찾지 못했습니다: " + key);
     sheet.deleteRow(found._row);

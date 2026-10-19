@@ -165,12 +165,14 @@ const Registry = (function () {
   const plantsOfContract = key => Object.keys(plants()).filter(p => plantContract(p) === str(key));
 
   async function save(kind, record, originalKey) {
-    const r = await gasCall(kind === "plant" ? "savePlant" : "saveCustomer", { record, originalKey });
+    const originalRow = kind === "plant" && originalKey && plants()[originalKey] ? plants()[originalKey]._row : undefined; // 같은 이름 여러 행 구분
+    const r = await gasCall(kind === "plant" ? "savePlant" : "saveCustomer", { record, originalKey, originalRow });
     if (r.ok) await load();
     return r;
   }
   async function remove(kind, key) {
-    const r = await gasCall(kind === "plant" ? "deletePlant" : "deleteCustomer", { key });
+    const row = kind === "plant" && plants()[key] ? plants()[key]._row : undefined;
+    const r = await gasCall(kind === "plant" ? "deletePlant" : "deleteCustomer", { key, row });
     if (r.ok) await load();
     return r;
   }
@@ -364,7 +366,7 @@ function renderPlantPage() {
       <div class="reg-head"><h2>전력공급계약</h2><button class="btn secondary" id="regAddPlant">+ 발전소 추가</button></div>
       <div class="grid-wrap"><table class="grid reg-table"><tr><th>발전소명</th><th>사업자명</th><th>지역</th><th>배전</th><th>그룹 (전기사용자)</th><th>계약용량(kW)</th><th>매입단가</th><th>계약일자</th></tr>
         ${pg.items.map(p => { const m = plants[p], app = rStr(m["KPX신청번호"]);
-          return `<tr class="reg-row${regState.openPlant === p ? " active" : ""}" data-plant="${rEsc(p)}"><td><b>${rEsc(p)}</b></td><td>${rEsc(m["사업자명(대표자명)"])}</td>
+          return `<tr class="reg-row${regState.openPlant === p ? " active" : ""}" data-plant="${rEsc(p)}"><td><b>${rEsc(p)}</b>${m._dup ? ' <span class="tag bad">이름 중복</span>' : ""}</td><td>${rEsc(m["사업자명(대표자명)"])}</td>
             <td>${m["지역(요금구분)"] ? rEsc(m["지역(요금구분)"]) : '<span class="tag bad">미지정</span>'}</td><td>${GRID_LABEL[gridOf(m["배전연결"])]}</td>
             <td>${app ? `${rEsc(Registry.plantContract(p) || groupLabel(app) || "계약 미등록")} <span class="hint" style="margin:0">${rEsc(app)}</span>` : '<span class="hint" style="margin:0">미연결</span>'}</td>
             <td class="num">${rEsc(fmtKw(m["계약용량"]))}</td><td class="num">${rEsc(m["계약단가"])}</td><td>${rEsc(m["계약일자"])}</td></tr>`; }).join("")}</table></div>${pagerHtml("plant", pg.page, pg.pages)}
@@ -425,7 +427,7 @@ function renderGroupMain() {
         <td class="num">${rEsc(x["계약단가"])}</td><td>${rEsc(x["계약일자"] || "-")} ~ ${rEsc(x["계약해지일"] || "")}</td></tr>`).join("")}</table></div>
     <h3 class="sub">소속 발전소 (${members.length})</h3>
     <div class="grid-wrap"><table class="grid"><tr><th>발전소</th><th>계약</th><th>사업자명</th><th>지역</th><th>배전</th><th>계약용량(kW)</th><th></th></tr>
-      ${members.length ? members.map(p => { const m = all[p], pk = Registry.plantContract(p); return `<tr><td><b>${rEsc(p)}</b></td>
+      ${members.length ? members.map(p => { const m = all[p], pk = Registry.plantContract(p); return `<tr><td><b>${rEsc(p)}</b>${m._dup ? ' <span class="tag bad">이름 중복</span>' : ""}</td>
         <td><select class="grp-contract" data-plant="${rEsc(p)}"><option value="">미지정</option>${contracts.map(x => { const k = Registry.custKey(x); return `<option value="${rEsc(k)}"${k === pk ? " selected" : ""}>${rEsc(k)}</option>`; }).join("")}</select></td>
         <td>${rEsc(m["사업자명(대표자명)"])}</td>
         <td>${m["지역(요금구분)"] ? rEsc(m["지역(요금구분)"]) : '<span class="tag bad">미지정</span>'}</td><td>${GRID_LABEL[gridOf(m["배전연결"])]}</td>
