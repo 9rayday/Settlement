@@ -76,7 +76,7 @@ function renderMarketPage() {
         const nums = row.filter(x => x !== null && x !== "" && x !== undefined).map(Number).filter(x => !isNaN(x)), av = nums.length === 24 ? nums.reduce((a, b) => a + b, 0) / 24 : null;
         return `<tr><th>${d}</th>${Array.from({ length: 24 }, (_, h) => `<td><input type="text" inputmode="decimal" class="smp-in" data-d="${d}" data-h="${h}" value="${row[h] == null || row[h] === "" ? "" : row[h]}"></td>`).join("")}<td class="num">${fmt(av)}</td></tr>`; }).join("")}
     </table></div></div>`;
-  document.getElementById("mktYear").onchange = e => { mktState.year = e.target.value; mktState.month = ""; renderMarketPage(); };
+  document.getElementById("mktYear").onchange = async e => { mktState.year = e.target.value; mktState.month = ""; await Store.ensureYear(Number(mktState.year)); renderMarketPage(); };
   document.getElementById("mktSave").onclick = saveMarket;
   document.getElementById("smpMonth").onchange = e => { mktState.month = e.target.value; renderMarketPage(); };
   host.querySelectorAll(".mkt-m").forEach(a => a.onclick = e => { e.preventDefault(); mktState.month = a.dataset.ym; renderMarketPage(); });

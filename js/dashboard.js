@@ -22,7 +22,8 @@ function dashMonth(ym) {
 }
 
 function dashYears() {
-  const ys = new Set([Number(todayYmd().slice(0, 4))]);
+  const cur = Number(todayYmd().slice(0, 4)), ys = new Set([cur]);
+  for (let y = cur - 5; y < cur; y++) ys.add(y); // 서버에만 있는 지난 연도도 고를 수 있게
   Store.keys("bill:").concat(Store.keys("genpay:")).forEach(k => { const m = /:(\d{4})\d{2}/.exec(k); if (m) ys.add(Number(m[1])); });
   return Array.from(ys).sort();
 }
@@ -61,7 +62,7 @@ function renderDashboard() {
     </div>
     ${dashState.view === "year" ? dashYearHtml(y, months, data) : `<div id="dashDetail">${dashState.month ? dashDetailHtml(dashState.month) : ""}</div>`}`;
   host.querySelectorAll(".dash-tabs button").forEach(b => b.onclick = () => { dashState.view = b.dataset.v; renderDashboard(); });
-  document.getElementById("dashPrev").onclick = () => { const i = years.indexOf(y); if (i > 0) { dashState.year = years[i - 1]; dashState.month = null; renderDashboard(); } };
+  document.getElementById("dashPrev").onclick = async () => { const i = years.indexOf(y); if (i > 0) { dashState.year = years[i - 1]; dashState.month = null; await Store.ensureYear(dashState.year); renderDashboard(); } };
   document.getElementById("dashNext").onclick = () => { const i = years.indexOf(y); if (i < years.length - 1) { dashState.year = years[i + 1]; dashState.month = null; renderDashboard(); } };
   host.querySelectorAll(".dash-month").forEach(b => b.onclick = () => {
     dashState.month = b.dataset.ym;
