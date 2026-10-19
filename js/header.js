@@ -4,12 +4,12 @@ const USER_KEY = "settlement_user";
 const LOGOUT_MSG_KEY = "settlement_logout_msg";
 let _idleTimer = null;
 
-/* ----- 정산월 (YYYYMM) ----- */
-function getHeaderMonth() { const v = document.getElementById("monthPicker").value; return v ? v.replace("-", "") : ""; }
+/* ----- 정산월 (YYYYMM): 헤더 선택칸은 없앰 — 데이터를 올리면 그 달로 자동 설정 ----- */
+let headerMonth = "";
+function getHeaderMonth() { return headerMonth; }
 function setHeaderMonth(ym, fromUser) {
-  const el = document.getElementById("monthPicker");
   if (!/^\d{6}$/.test(ym || "")) return;
-  el.value = `${ym.slice(0, 4)}-${ym.slice(4)}`;
+  headerMonth = ym;
   // 그룹화 월별 집계 등 월을 쓰는 화면에 반영
   if (typeof regState !== "undefined" && regState.month !== ym) { regState.month = ym; if (fromUser && typeof renderGroupPage === "function") renderGroupPage(); }
 }
@@ -125,9 +125,7 @@ function initHeader() {
   const bell = document.getElementById("bellBtn"), panel = document.getElementById("bellPanel");
   bell.addEventListener("click", e => { e.stopPropagation(); renderAlerts(); panel.hidden = !panel.hidden; });
   document.addEventListener("click", e => { if (!panel.hidden && e.target.isConnected && !panel.contains(e.target)) panel.hidden = true; }); // 목록 안에서 확인을 눌러 다시 그려져도 닫히지 않게
-  const picker = document.getElementById("monthPicker");
-  if (!picker.value) { const d = new Date(); d.setMonth(d.getMonth() - 1); setHeaderMonth(`${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}`); }
-  picker.addEventListener("change", () => setHeaderMonth(getHeaderMonth(), true));
+  if (!headerMonth) { const d = new Date(); d.setMonth(d.getMonth() - 1); setHeaderMonth(`${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}`); }
   ["mousemove", "mousedown", "keydown", "wheel", "touchstart", "scroll"].forEach(ev => window.addEventListener(ev, resetIdle, { passive: true }));
   resetIdle();
   renderAlerts(); // 등록 정보를 불러온 뒤에는 registry.js 가 다시 부른다
