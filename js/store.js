@@ -9,6 +9,13 @@ const Store = (function () {
   let remoteOk = false;
   let loadedFrom = null; // 서버에서 받은 정산 데이터의 시작 월 (YYYYMM)
 
+  // 키의 기준 월 (서버 gas/Code.gs storeYm_ 와 같게): 정산 데이터만, 설정 키는 null
+  function keyYm(key) {
+    let m = /^(?:bill|carry|recx):(\d{6})/.exec(key) || /^(?:genpay|smp):(\d{6})/.exec(key);
+    if (m) return m[1];
+    m = /^recset:.*:\d{6}-(\d{6})$/.exec(key);
+    return m ? m[1] : null;
+  }
   function readLocal() { try { return JSON.parse(localStorage.getItem(LS) || "{}"); } catch (e) { return {}; } }
   function writeLocal() { try { localStorage.setItem(LS, JSON.stringify(data)); } catch (e) { /* 저장 불가 환경 */ } }
 
@@ -17,7 +24,11 @@ const Store = (function () {
     const since = String(new Date().getFullYear() - 1) + "01";
     const remote = await gasGet("getStoreAll", { since }); // 실패 시 null
     remoteOk = remote !== null;
-    if (remote) { Object.keys(remote).forEach(k => { data[k] = remote[k]; }); writeLocal(); loadedFrom = since; }
+    if (remote) {
+      // 서버에서 지운 정산 데이터가 이 브라우저 캐시에 남아 다시 보이지 않도록, 받은 범위 안의 키는 서버 값으로 맞춘다
+      Object.keys(data).forEach(k => { const ym = keyYm(k); if (!(k in remote) && (ym == null || ym >= since)) delete data[k]; });
+      Object.keys(remote).forEach(k => { data[k] = remote[k]; }); writeLocal(); loadedFrom = since;
+    }
     return remoteOk;
   }
   // 그 연도(YYYY) 데이터가 아직 없으면 서버에서 받는다. 받았으면 true

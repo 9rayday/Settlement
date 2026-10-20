@@ -517,7 +517,30 @@ function installEditTrigger_() {
   }
 }
 
-// 편집기에서 수동 실행: 테스트 데이터를 모두 지운다 (헤더 행은 남김). 관리자(로그인) 탭은 건드리지 않는다.
+// 편집기에서 수동 실행: 정산 테스트 결과만 지운다 — 발전소·전기사용자 등록, 계정, 요율·설정은 남긴다.
+// 삭제: 앱데이터의 가정산서(bill)·오차정산 이월(carry)·발전대금(genpay)·초과발전량(recx)·REC 정산(recset), 앱데이터_보관,
+//       월별실적로그, 월별정산조정, 실적그리드 → 대시보드는 빈 실적으로 다시 계산
+// 유지: KPX 요율(netrate), 시간대별 요금제(touver)·휴일, SMP·REC 가격(market·smp), 청구일 설정(billcfg), REC 가중치(recw)
+function resetTestData() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const isResult = k => /^(bill|carry|genpay|recx|recset):/.test(String(k));
+  const main = getSheet_(SHEET_STORE), last = main.getLastRow();
+  let removed = 0;
+  if (last > 1) {
+    const rows = main.getRange(2, 1, last - 1, 3).getValues(), keep = rows.filter(r => r[0] !== "" && !isResult(r[0]));
+    removed = rows.length - keep.length;
+    main.getRange(2, 1, last - 1, 3).clearContent();
+    if (keep.length) main.getRange(2, 1, keep.length, 3).setValues(keep);
+  }
+  const arch = ss.getSheetByName(SHEET_STORE_ARCHIVE);
+  if (arch && arch.getLastRow() > 1) { removed += arch.getLastRow() - 1; arch.deleteRows(2, arch.getLastRow() - 1); }
+  [SHEET_PERFORMANCE, SHEET_ADJUSTMENTS].forEach(name => { const sh = getSheet_(name), n = sh.getLastRow(); if (n > 1) sh.deleteRows(2, n - 1); });
+  const grid = ss.getSheetByName(SHEET_YEARLY_GRID); if (grid) { grid.getRange(1, 1, Math.max(1, grid.getLastRow()), Math.max(1, grid.getLastColumn())).breakApart(); grid.clear(); }
+  rebuildDashboard_();
+  return "정산 테스트 데이터 " + removed + "건 삭제 (발전소·전기사용자·요율·설정은 유지)";
+}
+
+// 편집기에서 수동 실행: 모든 데이터를 지운다 (발전소·전기사용자 등록까지). 헤더 행·관리자(로그인) 탭은 남김.
 // 대상: 발전소 사업자 정보, 전기사용자 정보, 월별실적로그, 월별정산조정, 앱데이터, 실적그리드, 대시보드
 function resetAllData() {
   const ss = SpreadsheetApp.openById(SHEET_ID);
