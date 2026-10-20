@@ -84,7 +84,7 @@
   };
 
   /* ---------- KPX 직접전력거래량 (sheet_to_json 행 배열) ----------
-   * 반환: { groups: { 신청번호: { month, plants:{발전기명:{id,gen:{date:[24] kWh}}}, usageMwh:{date:[24]} , consumeAppNos:Set } } }
+   * 반환: { groups: { 소비계약신청번호(없으면 신청번호): { month, plants:{발전기명:{id,gen:{date:[24] kWh}}}, usageMwh:{date:[24]} , consumeAppNos:Set } } }
    * 발전량(MWh) → kWh ×1000. 시간 0~23.
    */
   const toNum = v => { const n = parseFloat(String(v == null ? "" : v).replace(/,/g, "")); return isNaN(n) ? 0 : n; };
@@ -98,7 +98,7 @@
   P.parseKpxRows = function (rows) {
     const groups = {}; const warnings = [];
     rows.forEach(r => {
-      const app = String(r["신청번호"] || "").trim();
+      const app = String(r["소비계약신청번호"] || r["신청번호"] || "").trim(); // 그룹 = 소비계약신청번호
       const plant = String(r["발전기명"] || "").trim();
       if (!app || !plant) return;
       const date = dateKey(r["거래일자"]); const h = Math.round(toNum(r["시간"]));

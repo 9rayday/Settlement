@@ -176,7 +176,7 @@ function aggregate(rows){
     const rawPlant = colMap.plant ? r[colMap.plant] : null;
     const name = rawPlant!=null ? String(rawPlant).trim() : null;
     if(!name) return;
-    const app = colMap.appNo ? String(r[colMap.appNo] || "").trim() : "";
+    const app = String((colMap.consumeAppNo && r[colMap.consumeAppNo]) || (colMap.appNo && r[colMap.appNo]) || "").trim(); // 그룹 = 소비계약신청번호
     const plant = keyOf(name, app); // 발전소 행 키 (같은 이름의 별개 발전소는 신청번호로 구분)
     if(!aggByPlant[plant]){ aggByPlant[plant] = {generation:0, supply:0, excess:0}; plants.push(plant); raw[plant] = {supply:0, excess:0}; }
     const gen = num(r[colMap.gen])*1000;

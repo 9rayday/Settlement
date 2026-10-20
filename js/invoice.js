@@ -132,7 +132,7 @@ async function saveGenPay(){
     const c = calcInvoice(p); if(!c) return;
     const a = aggByPlant[p];
     out[p] = { generation: a.generation, supply: c.supply, excess: a.excess, unitPrice: c.unitPrice, energyFee: c.energyFee, vat1: c.vat1, subtotal1: c.subtotal1,
-      fee: c.fee, subtotal2: c.subtotal2, adj: c.adj, penalty: c.penalty, payment: c.payment, appNo: (masterData[p] || {})["KPX신청번호"] || "" };
+      fee: c.fee, subtotal2: c.subtotal2, adj: c.adj, penalty: c.penalty, payment: c.payment, appNo: Registry.plantGroup(masterData[p]) };
   });
   await Store.set(key, { plants: Object.assign({}, old.plants, out), savedAt: new Date().toISOString() });
   if(typeof renderDashboard === "function") renderDashboard();

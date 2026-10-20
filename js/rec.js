@@ -73,7 +73,7 @@ function recParseWorkbook(wb) {
     for (let hi = 0; hi < Math.min(rows.length, 15); hi++) {
       const hdr = rows[hi].map(x => String(x).replace(/\s/g, ""));
       const cDate = hdr.findIndex(x => x === "거래일자"), cHour = hdr.findIndex(x => x === "시간"), cPlant = hdr.findIndex(x => x === "발전기명");
-      const cEx = hdr.findIndex(x => /^초과전력량/.test(x)), cApp = hdr.findIndex(x => x === "신청번호");
+      const cEx = hdr.findIndex(x => /^초과전력량/.test(x)), cApp = hdr.indexOf("소비계약신청번호") >= 0 ? hdr.indexOf("소비계약신청번호") : hdr.findIndex(x => x === "신청번호");
       if (cDate >= 0 && cHour >= 0 && cPlant >= 0 && cEx >= 0) { // 초과전력량 (KPX 파일 · Back Data)
         if (hdr.some(x => /REC환산|누적REC/.test(x))) return; // 정산 엑셀의 발전소별 계산 시트는 Back Data 와 같은 값이라 건너뜀
         for (let r = hi + 1; r < rows.length; r++) {
@@ -163,7 +163,7 @@ function recExcessIndex() { // { plantNorm: { name, app, months: {YYYYMM: [[d,h,
   Object.entries(idx).forEach(([n, e]) => {
     Object.keys(e._m).forEach(ym => { e.months[ym] = Object.values(e._m[ym]); }); delete e._m;
     if (w[n] && w[n].app) e.app = String(w[n].app).trim();
-    else if (!e.app) { const m = recMaster(e.name); if (m) e.app = String(m["KPX신청번호"] || "").trim(); }
+    else if (!e.app) { const m = recMaster(e.name); if (m) e.app = Registry.plantGroup(m); }
   });
   return idx;
 }

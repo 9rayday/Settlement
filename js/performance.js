@@ -40,7 +40,7 @@ function contractOf(kind, key) {
   const start = rStr(raw["계약일자"]), end = rStr(raw["계약해지일"]);
   let years = Math.round(num(raw["계약기간"]) || 0);
   if (!years && YMD.test(start) && YMD.test(end)) years = Math.max(1, Math.round(ymdDays(start, end) / 365.25));
-  const app = kind === "gen" ? "" : rStr(raw["KPX신청번호"]);
+  const app = kind === "gen" ? "" : Registry.groupOf(raw);
   const endOf = r => rStr(r["계약해지일"]) || (YMD.test(rStr(r["계약일자"])) && Number(r["계약기간"]) > 0 ? addMonthsYmd(rStr(r["계약일자"]), 12 * Math.round(Number(r["계약기간"])), -1) : "");
   // 같은 신청번호의 다른 계약과 그룹 실적을 나눌 비율 (그 달에 유효한 계약들의 계약용량 비율)
   let shareOf = () => 1;

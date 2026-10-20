@@ -27,7 +27,7 @@ const PLANT_FORM = [
   { k: "접속점", label: "접속점" },
   { k: "한전고객번호", label: "한전고객번호" },
   { k: "지역(요금구분)", label: "지역 (송전요금)", type: "select", options: GEN_REGIONS, req: true },
-  { k: "계약ID", label: "PPA 계약 (계약ID)", type: "contract" }, // 저장 시 KPX신청번호는 계약에서 자동으로
+  { k: "계약ID", label: "PPA 계약 (계약ID)", type: "contract" }, // 저장 시 그룹(소비계약신청번호)은 계약에서 자동으로 (시트 KPX신청번호 칸에 기록)
   { section: "계약정보" },
   { k: "정산방식", label: "정산방식", type: "select", options: ["", "실시간 정산", "월간균등 정산"] },
   { k: "계약단가", label: "계약단가 (원/kWh)", type: "number" },
@@ -60,7 +60,7 @@ const CUSTOMER_FORM = [
   { k: "연락처", label: "전화번호" },
   { section: "계약정보" },
   { k: "계약ID", label: "계약ID", req: true, placeholder: "예: 삼성D_5년" },
-  { k: "KPX신청번호", label: "KPX 신청번호 (그룹)", req: true, placeholder: "26-PR00000" },
+  { k: "소비계약신청번호", label: "소비계약신청번호 (그룹)", req: true, placeholder: "26-UR00000" },
   { k: "정산방식", label: "정산방식", type: "select", options: ["", "실시간 정산", "월간균등 정산"] },
   { k: "계약단가", label: "계약단가 (원/kWh)", type: "number", req: true },
   { k: "입금계좌", label: "입금계좌", placeholder: "예: 기업은행 001-983767-04-015" },
@@ -78,7 +78,6 @@ const CUSTOMER_FORM = [
   { k: "비고", label: "비고", type: "textarea", full: true },
   { section: "전기사용장소" },
   { k: "사용장소명", label: "사용장소명" },
-  { k: "소비계약신청번호", label: "소비계약신청번호" },
   { k: "전기사용장소", label: "주소", wide: true },
   { k: "수요망", label: "수요망", type: "select", options: ["", "송전망", "배전망"] },
   { k: "접속점", label: "접속점" },
@@ -113,30 +112,41 @@ const Registry = (function () {
   // KPX 발전기명 + 신청번호 → 발전소 행 키. 같은 이름의 별개 발전소는 연결된 신청번호(계약)로 구분한다
   function plantKeyFor(name, app) {
     const all = plants(), n = str(name), a = str(app);
-    if (all[n] && (!a || str(all[n]["KPX신청번호"]) === a)) return n;
+    if (all[n] && (!a || plantGroup(all[n]) === a)) return n;
     const cands = Object.keys(all).filter(k => str(all[k]["발전소명"]) === n);
     if (!cands.length) return n;
-    return cands.find(k => a && (str(all[k]["KPX신청번호"]) === a || contractsOfApp(a).some(c => custKey(c) === str(all[k]["계약ID"])))) || (all[n] ? n : cands[0]);
+    return cands.find(k => a && plantGroup(all[k]) === a) || (all[n] ? n : cands[0]);
   }
   // 정산 엔진용 발전소 정보 (app 을 주면 같은 이름 중 그 신청번호에 연결된 행)
   function plantInfo(name, app) {
     const m = plants()[plantKeyFor(name, app)];
     if (!m) return null;
     const grid = gridOf(m["배전연결"]); // 배전망이면 배전이용요금 추가 (저압/고압 요금 구분)
-    return { region: str(m["지역(요금구분)"]), distConnected: grid !== "N", distLow: grid === "L", node: str(m["접속점"]), appNo: str(m["KPX신청번호"]) };
+    return { region: str(m["지역(요금구분)"]), distConnected: grid !== "N", distLow: grid === "L", node: str(m["접속점"]), appNo: plantGroup(m) };
   }
   // 청구서/엔진용 전기사용자 정보
   function toCustomer(c) {
     return { name: str(c["수요기업명"]), ceo: str(c["대표자명"]), bizNo: str(c["사업자등록번호"]), address: str(c["전기사용장소"]),
       manager: str(c["담당자"]), contact: str(c["연락처"]), email: str(c["이메일"]), demandRegion: str(c["수요지지역"]), demandGrid: str(c["수요망"]), demandNode: str(c["접속점"]),
-      unitPrice: Number(c["계약단가"]), appNo: str(c["KPX신청번호"]), consumeAppNo: str(c["소비계약신청번호"]), settleMethod: str(c["정산방식"]), payAccount: str(c["입금계좌"]), invoicePrefix: str(c["청구서번호"]), sendDays: str(c["청구서송부기한"]), payDay: str(c["납부일"]), checkDays: str(c["오차확인기한"]),
+      unitPrice: Number(c["계약단가"]), appNo: groupOf(c), consumeAppNo: str(c["소비계약신청번호"]), settleMethod: str(c["정산방식"]), payAccount: str(c["입금계좌"]), invoicePrefix: str(c["청구서번호"]), sendDays: str(c["청구서송부기한"]), payDay: str(c["납부일"]), checkDays: str(c["오차확인기한"]),
       start: str(c["계약일자"]), end: str(c["계약해지일"]), contractId: custKey(c) };
   }
-  // 계약 키 = 계약ID (예전 행은 KPX신청번호). 같은 신청번호에 계약이 여러 건일 수 있다.
-  const custKey = c => str(c["계약ID"]) || str(c["KPX신청번호"]);
-  const contractsOfApp = app => customers.filter(x => str(x["KPX신청번호"]) === str(app));
+  // 그룹 = 전기사용자의 소비계약신청번호 (예전 행은 KPX신청번호). 같은 그룹에 계약이 여러 건일 수 있다.
+  const groupOf = c => c ? (str(c["소비계약신청번호"]) || str(c["KPX신청번호"])) : "";
+  // 계약 키 = 계약ID (예전 행은 소비계약신청번호·KPX신청번호)
+  const custKey = c => str(c["계약ID"]) || groupOf(c);
+  const contractsOfApp = app => customers.filter(x => groupOf(x) === str(app) || (str(app) && str(x["KPX신청번호"]) === str(app)));
   const customerByKey = key => customers.find(x => custKey(x) === str(key)) || null;
-  function groups() { const out = []; customers.forEach(c => { const a = str(c["KPX신청번호"]); if (a && !out.includes(a)) out.push(a); }); return out; }
+  function groups() { const out = []; customers.forEach(c => { const a = groupOf(c); if (a && !out.includes(a)) out.push(a); }); return out; }
+  // 발전소의 그룹: 연결된 계약의 소비계약신청번호 (계약 없으면 시트에 기록된 값, 예전 KPX신청번호면 그 전기사용자의 그룹으로)
+  function plantGroup(m) {
+    if (!m) return "";
+    const k = str(m["계약ID"]), c = k ? customerByKey(k) : null;
+    if (c) return groupOf(c);
+    const stored = str(m["KPX신청번호"]); if (!stored) return "";
+    const byLegacy = customers.find(x => groupOf(x) === stored || str(x["KPX신청번호"]) === stored);
+    return byLegacy ? groupOf(byLegacy) : stored;
+  }
   // 그 달(YYYYMM)에 유효한 계약과 계약용량 비율 → 정산서 전력량요금을 계약별 단가로 나눌 때 사용
   // supplyByPlant 가 있으면 각 계약에 매핑된 발전소 공급량 비율, 매핑 안 된 발전소 공급량은 계약용량 비율로 나눈다
   function priceSplits(app, month, supplyByPlant) {
@@ -163,12 +173,12 @@ const Registry = (function () {
     }
     return toCustomer(pick);
   }
-  function plantsOfGroup(app) { return Object.keys(plants()).filter(p => str(plants()[p]["KPX신청번호"]) === str(app)); }
+  function plantsOfGroup(app) { return Object.keys(plants()).filter(p => plantGroup(plants()[p]) === str(app)); }
   // 발전소가 매핑된 계약: 계약ID 칸, 없으면 신청번호 그룹에 계약이 1건일 때 그 계약
   function plantContract(name) {
     const m = plants()[name]; if (!m) return "";
     const k = str(m["계약ID"]); if (k && customerByKey(k)) return k;
-    const list = contractsOfApp(str(m["KPX신청번호"])); return list.length === 1 ? custKey(list[0]) : "";
+    const list = contractsOfApp(plantGroup(m)); return list.length === 1 ? custKey(list[0]) : "";
   }
   const plantsOfContract = key => Object.keys(plants()).filter(p => plantContract(p) === str(key));
 
@@ -184,7 +194,7 @@ const Registry = (function () {
     if (r.ok) await load();
     return r;
   }
-  return { load, plants, rawCustomers, plantInfo, plantKeyFor, customerByApp, customerByKey, contractsOfApp, custKey, groups, priceSplits, plantsOfGroup, plantContract, plantsOfContract, save, remove, isLoaded: () => loaded };
+  return { load, plants, rawCustomers, plantInfo, plantKeyFor, groupOf, plantGroup, customerByApp, customerByKey, contractsOfApp, custKey, groups, priceSplits, plantsOfGroup, plantContract, plantsOfContract, save, remove, isLoaded: () => loaded };
 })();
 
 /* ---------- 화면: 정산관리 > 계약관리 (전기사용자 / 발전사업자 / 그룹화) ---------- */
@@ -229,7 +239,7 @@ function regFormHtml(form, rec, prefix) {
     if (f.type === "select") input = `<select ${attrs}>${f.options.map(o => { const [val, lab] = Array.isArray(o) ? o : [o, o];
         return `<option value="${rEsc(val)}"${val === v ? " selected" : ""}>${rEsc(lab || "선택")}</option>`; }).join("")}</select>`;
     else if (f.type === "contract") input = `<select ${attrs}><option value="">미연결</option>${Registry.rawCustomers().map(c => { const k = Registry.custKey(c);
-        return `<option value="${rEsc(k)}"${k === v ? " selected" : ""}>${rEsc(k)} · ${rEsc(c["수요기업명"])} · ${rEsc(c["KPX신청번호"])}</option>`; }).join("")}
+        return `<option value="${rEsc(k)}"${k === v ? " selected" : ""}>${rEsc(k)} · ${rEsc(c["수요기업명"])} · ${rEsc(Registry.groupOf(c))}</option>`; }).join("")}
         ${v && !Registry.customerByKey(v) ? `<option value="${rEsc(v)}" selected>${rEsc(v)} (계약 미등록)</option>` : ""}</select>`;
     else if (f.type === "group") input = `<select ${attrs}><option value="">미연결</option>${Registry.groups().map(app =>
         `<option value="${rEsc(app)}"${app === v ? " selected" : ""}>${rEsc(app)} · ${rEsc(groupLabel(app))}</option>`).join("")}
@@ -314,7 +324,7 @@ function markActive(selector, attr, value) {
 function custCardsHtml(activeKey, cls, custs) {
   if (!custs.length) return `<div class="hint">등록된 계약이 없습니다.</div>`;
   return custs.map(c => {
-    const key = Registry.custKey(c), app = rStr(c["KPX신청번호"]);
+    const key = Registry.custKey(c), app = Registry.groupOf(c);
     return `<button class="reg-card ${cls}${activeKey === key ? " active" : ""}" data-key="${rEsc(key)}">
       <div class="reg-card-title">${rEsc(c["수요기업명"])}</div><div class="reg-card-sub">${rEsc(key)}${key !== app ? ` · ${rEsc(app)}` : ""}</div>
       <div class="reg-card-meta"><span>${rEsc(c["수요지지역"] || "-")}</span><span>${rEsc(c["계약단가"] === "" ? "-" : c["계약단가"])} 원/kWh</span><span>${c["계약용량"] === "" || c["계약용량"] == null ? "-" : fmtKw(c["계약용량"]) + " kW"}</span></div></button>`;
@@ -346,7 +356,7 @@ function openCustomer(key, keepScroll) {
   regState.openCust = key; markActive(".cust-card", "key", key);
   const found = key ? Registry.customerByKey(key) : null;
   const raw = Object.assign({}, found || { "수요지지역": "비수도권" });
-  const isNew = !found, app = rStr(raw["KPX신청번호"]);
+  const isNew = !found, app = Registry.groupOf(raw);
   if (!isNew && !rStr(raw["계약ID"])) raw["계약ID"] = key; // 예전 행: 신청번호를 계약ID 로
   const gcap = !isNew ? contractCapacity(key) : 0; // 이 계약에 매핑된 발전소 설비용량 합
   if (gcap > 0) raw["계약용량"] = gcap;
@@ -373,7 +383,7 @@ function renderPlantPage() {
   host.innerHTML = `${loadFailNotice()}<div class="card">
       <div class="reg-head"><h2>전력공급계약</h2><button class="btn secondary" id="regAddPlant">+ 발전소 추가</button></div>
       <div class="grid-wrap"><table class="grid reg-table"><tr><th>발전소명</th><th>사업자명</th><th>지역</th><th>배전</th><th>그룹 (전기사용자)</th><th>계약용량(kW)</th><th>매입단가</th><th>계약일자</th></tr>
-        ${pg.items.map(p => { const m = plants[p], app = rStr(m["KPX신청번호"]);
+        ${pg.items.map(p => { const m = plants[p], app = Registry.plantGroup(m);
           return `<tr class="reg-row${regState.openPlant === p ? " active" : ""}" data-plant="${rEsc(p)}"><td><b>${rEsc(m["발전소명"] || p)}</b></td><td>${rEsc(m["사업자명(대표자명)"])}</td>
             <td>${m["지역(요금구분)"] ? rEsc(m["지역(요금구분)"]) : '<span class="tag bad">미지정</span>'}</td><td>${GRID_LABEL[gridOf(m["배전연결"])]}</td>
             <td>${app ? `${rEsc(Registry.plantContract(p) || groupLabel(app) || "계약 미등록")} <span class="hint" style="margin:0">${rEsc(app)}</span>` : '<span class="hint" style="margin:0">미연결</span>'}</td>
@@ -408,7 +418,7 @@ function openPlant(name, keepScroll) {
 function renderGroupPage() {
   const host = r$("regGroupPage"); if (!host) return;
   const apps = Registry.groups(), all = Registry.plants();
-  const unlinked = Object.keys(all).filter(p => { const a = rStr(all[p]["KPX신청번호"]); return !a || !apps.includes(a); });
+  const unlinked = Object.keys(all).filter(p => { const a = Registry.plantGroup(all[p]); return !a || !apps.includes(a); });
   if ((regState.openGroup === null || !apps.includes(regState.openGroup)) && apps.length) regState.openGroup = apps[0];
   const pg = pageSlice("group", apps);
   host.innerHTML = `${loadFailNotice()}<div class="group-layout">
@@ -441,7 +451,7 @@ function renderGroupMain() {
         <td>${m["지역(요금구분)"] ? rEsc(m["지역(요금구분)"]) : '<span class="tag bad">미지정</span>'}</td><td>${GRID_LABEL[gridOf(m["배전연결"])]}</td>
         <td class="num">${rEsc(fmtKw(m["계약용량"]))}</td><td style="text-align:center"><button class="btn secondary small grp-remove" data-plant="${rEsc(p)}">제외</button></td></tr>`; }).join("")
         : `<tr><td colspan="7" class="empty">없음</td></tr>`}</table></div>
-    <div class="row" style="margin-top:10px"><select id="grpAddSel" style="min-width:300px">${others.map(p => { const a = rStr(all[p]["KPX신청번호"]);
+    <div class="row" style="margin-top:10px"><select id="grpAddSel" style="min-width:300px">${others.map(p => { const a = Registry.plantGroup(all[p]);
         return `<option value="${rEsc(p)}">${rEsc(p)}${a ? ` (현재: ${rEsc(groupLabel(a) || a)})` : " (미연결)"}</option>`; }).join("")}</select>
       <select id="grpAddContract" style="min-width:180px">${contracts.map(x => `<option value="${rEsc(Registry.custKey(x))}">${rEsc(Registry.custKey(x))}</option>`).join("")}</select>
       <button class="btn accent" id="grpAddBtn"${others.length ? "" : " disabled"}>계약에 추가</button><span id="grpStatus" class="status warn" style="background:none"></span></div>
@@ -452,7 +462,7 @@ function renderGroupMain() {
   host.querySelectorAll(".grp-remove").forEach(b => b.onclick = () => setPlantContract(b.dataset.plant, ""));
   host.querySelectorAll(".grp-contract").forEach(sel => sel.onchange = () => setPlantContract(sel.dataset.plant, sel.value, app));
   r$("grpAddBtn").onclick = () => {
-    const p = r$("grpAddSel").value, k = r$("grpAddContract").value, cur = rStr(all[p]["KPX신청번호"]);
+    const p = r$("grpAddSel").value, k = r$("grpAddContract").value, cur = Registry.plantGroup(all[p]);
     if (cur && cur !== app && !confirm(`${p} 은(는) 지금 ${groupLabel(cur) || cur} 그룹입니다. ${k} 계약으로 옮길까요?`)) return;
     setPlantContract(p, k);
   };
@@ -466,7 +476,7 @@ async function setPlantContract(plant, key, keepApp) {
   const st = r$("grpStatus"); st.textContent = "저장 중..."; st.className = "status warn";
   const oldContract = plantContractOf(plant);
   const cc = key ? Registry.customerByKey(key) : null;
-  const app = cc ? rStr(cc["KPX신청번호"]) : (keepApp || "");
+  const app = cc ? Registry.groupOf(cc) : (keepApp || "");
   const r = await Registry.save("plant", { "발전소명": plant, "계약ID": key, "KPX신청번호": app }, plant);
   if (!r.ok) { st.textContent = "저장 실패: " + r.error; st.className = "status bad"; return; }
   await syncContractTotals([oldContract, key]); // 계약용량·연간보장공급량 자동 갱신
@@ -531,7 +541,7 @@ async function saveRegistry(kind, formId, form, originalKey, statusId) {
   }
   else { const gc = originalKey ? contractCapacity(originalKey) : 0; if (gc > 0) rec["계약용량"] = gc; rec["연간보장공급량"] = guaranteeOf(rec["계약용량"], hoursPerDay(rec["연간보장시간"]) * 365); }
   const oldContract = kind === "plant" ? plantContractOf(originalKey) : "";
-  if (kind === "plant") { const cc = rec["계약ID"] ? Registry.customerByKey(rec["계약ID"]) : null; rec["KPX신청번호"] = cc ? rStr(cc["KPX신청번호"]) : ""; }
+  if (kind === "plant") { const cc = rec["계약ID"] ? Registry.customerByKey(rec["계약ID"]) : null; rec["KPX신청번호"] = cc ? Registry.groupOf(cc) : ""; } // 시트 칸 이름은 그대로, 값은 그룹(소비계약신청번호)
   st.textContent = "저장 중..."; st.className = "status warn";
   const r = await Registry.save(kind, rec, originalKey);
   if (!r.ok) { st.textContent = "저장 실패: " + r.error; st.className = "status bad"; return; }

@@ -216,7 +216,7 @@ function getCustomers_() {
     const out = {};
     CUSTOMER_FIELDS.forEach(f => out[f] = formatDateField_(pickField_(r, f)));
     return out;
-  }).filter(c => String(c["계약ID"] || "").trim() || String(c["KPX신청번호"] || "").trim() || String(c["수요기업명"] || "").trim());
+  }).filter(c => String(c["계약ID"] || "").trim() || String(c["소비계약신청번호"] || "").trim() || String(c["KPX신청번호"] || "").trim() || String(c["수요기업명"] || "").trim());
 }
 
 // 한 행 저장(upsert). 헤더는 공백/괄호를 무시하고 매칭하고, 없는 컬럼은 맨 끝에 추가한다.
