@@ -132,16 +132,19 @@ function calcInvoice(plant){
   return { unitPrice, feeRate, supply, energyFee, supplyValue, vat1, subtotal1, fee, vat2, subtotal2, adj, payment, penalty: pen.amount, penaltyLabel: pen.label };
 }
 
-/* ============ 정산서 번호: <접두>-<정산월>-<일련번호 4자리> ============
- * 정산월마다 0001부터, 그 달 발전소 순서대로 매긴다. 한 번 발전대금 계산(genpay 저장)한 발전소는 번호가 고정되고,
- * 나중에 추가된 발전소는 그 달 마지막 번호 다음을 받는다 (다시 계산해도 번호가 바뀌지 않음).
+/* ============ 정산서 번호: <접두>-<정산월>-<그룹 신청번호>-<그룹 안 일련번호 2자리> ============
+ * 예) 300025-202609-26-PR00001-01. 그룹(소비계약신청번호, 없으면 "미지정")마다 01부터, 그 달 발전소 순서대로 매긴다.
+ * 한 번 발전대금 계산(genpay 저장)한 발전소는 번호가 고정되고, 나중에 추가된 발전소는 그 그룹 마지막 번호 다음을 받는다.
  */
 function genDocNo(plant){
-  const fmt = n => `${BUYER.invoicePrefix}-${settleMonth}-${String(n).padStart(4,"0")}`;
+  const grp = p => (typeof Registry !== "undefined" && Registry.plantGroup(masterData[p] || {})) || "미지정";
+  const g = grp(plant), head = `${BUYER.invoicePrefix}-${settleMonth}-${g}-`;
+  const fmt = n => head + String(n).padStart(2, "0");
   const old = (typeof Store !== "undefined" && settleMonth && (Store.get(`genpay:${settleMonth}`, null) || {}).plants) || {};
-  if(old[plant] && old[plant].docNo) return old[plant].docNo;
-  let next = Object.values(old).reduce((mx, x) => Math.max(mx, x && x.docNo ? Number(String(x.docNo).split("-").pop()) || 0 : 0), 0);
-  for(const p of plants){ if(old[p] && old[p].docNo) continue; next++; if(p === plant) return fmt(next); }
+  const kept = p => old[p] && old[p].docNo && String(old[p].docNo).indexOf(`${BUYER.invoicePrefix}-${settleMonth}-${grp(p)}-`) === 0; // 예전 형식 번호는 무시
+  if(kept(plant)) return old[plant].docNo;
+  let next = Object.keys(old).reduce((mx, p) => kept(p) && grp(p) === g ? Math.max(mx, Number(String(old[p].docNo).split("-").pop()) || 0) : mx, 0);
+  for(const p of plants){ if(grp(p) !== g || kept(p)) continue; next++; if(p === plant) return fmt(next); }
   return fmt(next + 1);
 }
 
