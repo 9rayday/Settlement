@@ -36,15 +36,27 @@ async function genCalculate(){
   if(typeof requirePerm === "function" && !requirePerm("settle")) return;
   const btn = document.getElementById("genCalcBtn"), st = document.getElementById("genCalcStatus");
   btn.disabled = true; st.textContent = "계산 중...";
+  const label = `${settleMonth.slice(0,4)}.${settleMonth.slice(4)} 계산 완료`;
   try{
+    // 금액은 이 브라우저에서 바로 계산 → 결과·정산서를 먼저 보여 주고, 시트 저장은 뒤에서
     genCalcDone = true;
-    await syncPerformanceToGas(); // 월별실적로그·실적그리드 기록, 계약이행현황 갱신, 발전대금 저장(genpay)
-    renderGenResult();
+    mergeLocalPerf(); // 이번 달 실적을 계약이행현황·연간보장공급량에 바로 반영
+    renderGenResult(); renderInvoicePreview();
     ["exportBtn","pdfBtn","exportAllBtn"].forEach(id => { document.getElementById(id).disabled = false; });
     document.getElementById("genPick").style.display = "flex";
-    st.textContent = `${settleMonth.slice(0,4)}.${settleMonth.slice(4)} 계산 완료`;
+    st.textContent = label + " · 시트 저장 중...";
+    await syncPerformanceToGas(); // 월별실적로그·실적그리드 기록, 계약이행현황 갱신, 발전대금 저장(genpay)
+    st.textContent = label + " · 저장됨";
   }catch(e){ st.textContent = "오류: " + e.message; }
   btn.disabled = false;
+}
+// 이번 달 업로드 실적을 화면 실적(perfState)에 넣는다 (서버 실적과 같은 규칙: 실적 = max(발전량, 공급량))
+function mergeLocalPerf(){
+  if(typeof perfState === "undefined" || !perfState.loaded) return;
+  const mine = new Set(plants);
+  perfState.rows = (perfState.rows || []).filter(r => !(r.month === settleMonth && mine.has(r.plant)))
+    .concat(plants.map(p => { const a = aggByPlant[p], total = Math.max(a.generation || 0, a.supply || 0);
+      return { month: settleMonth, plant: p, supply: Math.min(a.supply || 0, total), generation: total }; }));
 }
 function renderGenResult(){
   const host = document.getElementById("genResult"); if(!host) return;
@@ -120,6 +132,19 @@ function calcInvoice(plant){
   return { unitPrice, feeRate, supply, energyFee, supplyValue, vat1, subtotal1, fee, vat2, subtotal2, adj, payment, penalty: pen.amount, penaltyLabel: pen.label };
 }
 
+/* ============ 정산서 번호: <접두>-<정산월>-<일련번호 4자리> ============
+ * 정산월마다 0001부터, 그 달 발전소 순서대로 매긴다. 한 번 발전대금 계산(genpay 저장)한 발전소는 번호가 고정되고,
+ * 나중에 추가된 발전소는 그 달 마지막 번호 다음을 받는다 (다시 계산해도 번호가 바뀌지 않음).
+ */
+function genDocNo(plant){
+  const fmt = n => `${BUYER.invoicePrefix}-${settleMonth}-${String(n).padStart(4,"0")}`;
+  const old = (typeof Store !== "undefined" && settleMonth && (Store.get(`genpay:${settleMonth}`, null) || {}).plants) || {};
+  if(old[plant] && old[plant].docNo) return old[plant].docNo;
+  let next = Object.values(old).reduce((mx, x) => Math.max(mx, x && x.docNo ? Number(String(x.docNo).split("-").pop()) || 0 : 0), 0);
+  for(const p of plants){ if(old[p] && old[p].docNo) continue; next++; if(p === plant) return fmt(next); }
+  return fmt(next + 1);
+}
+
 /* ============ 정산 대시보드용 발전사업자 전력대금 기록 (genpay:YYYYMM) ============
  * 업로드·조정 저장 때마다 그 달 모든 발전소의 정산 요약을 저장한다. 조정값을 아직 안 불러온 발전소는 이전 기록의 조정값을 쓴다.
  */
@@ -131,7 +156,7 @@ async function saveGenPay(){
     if(!adjustmentsByPlant[p] && old.plants[p] && old.plants[p].adj) adjustmentsByPlant[p] = old.plants[p].adj;
     const c = calcInvoice(p); if(!c) return;
     const a = aggByPlant[p];
-    out[p] = { generation: a.generation, supply: c.supply, excess: a.excess, unitPrice: c.unitPrice, energyFee: c.energyFee, vat1: c.vat1, subtotal1: c.subtotal1,
+    out[p] = { docNo: genDocNo(p), generation: a.generation, supply: c.supply, excess: a.excess, unitPrice: c.unitPrice, energyFee: c.energyFee, vat1: c.vat1, subtotal1: c.subtotal1,
       fee: c.fee, subtotal2: c.subtotal2, adj: c.adj, penalty: c.penalty, payment: c.payment, appNo: Registry.plantGroup(masterData[p]) };
   });
   await Store.set(key, { plants: Object.assign({}, old.plants, out), savedAt: new Date().toISOString() });
@@ -210,7 +235,7 @@ async function buildInvoiceHtml(plant){
   const todayLabel = `${t.getFullYear()}년 ${String(t.getMonth()+1).padStart(2,"0")}월 ${String(t.getDate()).padStart(2,"0")}일`;
   const todo = "입력 예정";
   const field = (label, val, span) => `<td class="label">${label}</td><td colspan="${span||2}"${val===todo?' class="editable"':''}>${val}</td>`;
-  const docNo = `${BUYER.invoicePrefix}-${settleMonth}-0001`;
+  const docNo = genDocNo(plant);
   // 연간보장공급량: 계약기간 안에서 진행 중인 회차 + 2회차까지만 (최소 3회차) — 20회차를 모두 넣으면 A4를 넘는다
   const years = Math.min(20, Math.round(Number(m["계약기간"])) || 20);
   const startYm = parseYm(m["계약일자"]), curYm = parseYm(settleMonth);

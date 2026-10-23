@@ -320,7 +320,7 @@ async function buildInvoiceSheet(workbook, ws, plant, meta, grid){
   xLabel(ws,29,3,"주소"); merge2(29,4,8); xValue(ws,29,4, BUYER.address);
   xLabel(ws,30,3,"담당자"); merge2(30,4,5); xValue(ws,30,4, BUYER.manager);
   xLabel(ws,30,6,"연락처"); merge2(30,7,8); xValue(ws,30,7, BUYER.contact);
-  xLabel(ws,31,3,"정산서번호"); merge2(31,4,5); xValue(ws,31,4, `${BUYER.invoicePrefix}-${settleMonth}-0001`);
+  xLabel(ws,31,3,"정산서번호"); merge2(31,4,5); xValue(ws,31,4, genDocNo(plant));
   xLabel(ws,31,6,"납부기한"); merge2(31,7,8); xValue(ws,31,7,"계산서 발행 후 5영업일 내");
   // K31: 계약용량(kW) 백업값 — test.xlsx 원본과 동일한 위치.
   ws.getCell(31,11).value = Number(m["계약용량"]) || 0;
