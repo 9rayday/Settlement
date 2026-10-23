@@ -464,8 +464,7 @@ function renderGroupMain() {
         <td>${m["지역(요금구분)"] ? rEsc(m["지역(요금구분)"]) : '<span class="tag bad">미지정</span>'}</td><td>${GRID_LABEL[gridOf(m["배전연결"])]}</td>
         <td class="num">${rEsc(fmtKw(m["계약용량"]))}</td><td style="text-align:center"><button class="btn secondary small grp-remove" data-plant="${rEsc(p)}">제외</button></td></tr>`; }).join("")
         : `<tr><td colspan="7" class="empty">없음</td></tr>`}</table></div>
-    <div class="row" style="margin-top:10px"><input type="search" id="grpAddQ" class="reg-search" placeholder="미연결 발전소 검색" style="width:180px">
-      <select id="grpAddSel" style="min-width:300px">${others.map(p => { const m = all[p];
+    <div class="row" style="margin-top:10px"><select id="grpAddSel" style="min-width:300px">${others.map(p => { const m = all[p];
         return `<option value="${rEsc(p)}">${rEsc(m["발전소명"] || p)} · ${rEsc(m["사업자명(대표자명)"] || m["사업자명"] || "-")} · ${rEsc(fmtKw(m["계약용량"]))} kW</option>`; }).join("") || '<option value="">미연결 발전소 없음</option>'}</select>
       <select id="grpAddContract" style="min-width:180px">${contracts.map(x => `<option value="${rEsc(Registry.custKey(x))}">${rEsc(Registry.custKey(x))}</option>`).join("")}</select>
       <button class="btn accent" id="grpAddBtn"${others.length ? "" : " disabled"}>계약에 추가</button><span id="grpStatus" class="status warn" style="background:none"></span></div>
@@ -475,11 +474,6 @@ function renderGroupMain() {
       <div id="regAgg"><div class="hint">불러오는 중...</div></div></div>`;
   host.querySelectorAll(".grp-remove").forEach(b => b.onclick = () => setPlantContract(b.dataset.plant, ""));
   host.querySelectorAll(".grp-contract").forEach(sel => sel.onchange = () => setPlantContract(sel.dataset.plant, sel.value, app));
-  r$("grpAddQ").oninput = e => { // 미연결 발전소 목록 거르기
-    const q = e.target.value, sel = r$("grpAddSel"); let first = null;
-    [...sel.options].forEach(o => { const show = regMatch(q, [o.textContent]); o.hidden = !show; if (show && !first) first = o; });
-    if (first) sel.value = first.value;
-  };
   r$("grpAddBtn").onclick = () => {
     const p = r$("grpAddSel").value, k = r$("grpAddContract").value, cur = Registry.plantGroup(all[p]);
     if (cur && cur !== app && !confirm(`${p} 은(는) 지금 ${groupLabel(cur) || cur} 그룹입니다. ${k} 계약으로 옮길까요?`)) return;
