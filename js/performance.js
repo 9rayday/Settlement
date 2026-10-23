@@ -11,7 +11,8 @@ const PERF_ALERT_DAYS = 30;
 const perfState = { rows: null, loaded: false, open: { cust: null, gen: null }, year: { cust: "", gen: "" } }; // year: "" = 진행 중 연차, "1"~"20"
 
 async function loadPerformance() {
-  const r = await gasGet("getPerformanceAll");
+  const pre = typeof bootPart === "function" ? await bootPart("performance") : null; // 로그인 직후 한 번에 받은 값
+  const r = pre || await gasGet("getPerformanceAll");
   perfState.rows = r || []; perfState.loaded = r !== null;
 }
 async function refreshPerformance() { await loadPerformance(); renderPerfPages(); if (typeof renderAlerts === "function") renderAlerts(); }

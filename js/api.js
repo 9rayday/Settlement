@@ -56,6 +56,22 @@ async function gasPost(action, body){
   }
 }
 
+// 로그인 직후 발전소·전기사용자·앱데이터·실적을 한 번에 (서버 왕복 4번 → 1번). 예전 서버면 null → 각자 따로 받음
+const BOOT_SINCE = String(new Date().getFullYear() - 1) + "01";
+let _bootPromise = null;
+function bootData(){
+  if(!_bootPromise) _bootPromise = gasGet("bootstrap", { since: BOOT_SINCE });
+  return _bootPromise;
+}
+// 처음 한 번만 bootstrap 결과를 쓰고, 이후(저장 후 다시 받기 등)는 각자 요청
+const _bootUsed = {};
+async function bootPart(name){
+  if(_bootUsed[name]) return null;
+  _bootUsed[name] = true;
+  const b = await bootData();
+  return b && b[name] !== undefined ? b[name] : null;
+}
+
 async function fetchMaster(){
   const data = await gasGet("getMaster");
   masterData = data || {};
@@ -67,7 +83,15 @@ async function fetchPerformanceHistory(plant){
   return data || [];
 }
 
+// 연차별 월 실적 {연차: [12달 실적 합계]} — 이미 받은 실적(계약이행현황 perfState)으로 바로 계산, 없으면 서버
 async function fetchYearlyGrid(plant){
+  if(typeof perfState !== "undefined" && perfState.loaded && masterData && masterData[plant]){
+    const ym = parseYm(masterData[plant]["계약일자"]); if(!ym) return {};
+    const byM = {}; (perfState.rows || []).forEach(r => { if(r.plant === plant) byM[r.month] = r.generation; });
+    const out = {};
+    for(let k = 0; k < 20; k++) out[String(k + 1)] = Array.from({ length: 12 }, (_, pos) => { const t = ym.y * 12 + ym.m - 1 + k * 12 + pos, key = `${Math.floor(t / 12)}${String(t % 12 + 1).padStart(2, "0")}`; return key in byM ? byM[key] : null; });
+    return out;
+  }
   const data = await gasGet("getYearlyGrid", { plant });
   return data || {};
 }

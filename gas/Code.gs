@@ -122,6 +122,7 @@ function doGet(e) {
     if (action === "getStoreRange") return jsonOut_({ ok: true, data: getStoreRange_(e.parameter.from, e.parameter.to) });
     if (action === "getCustomers") return jsonOut_({ ok: true, data: getCustomers_() });
     if (action === "getPerformanceAll") return jsonOut_({ ok: true, data: getPerformanceAll_() });
+    if (action === "bootstrap") return jsonOut_({ ok: true, data: { master: getMaster_(), customers: getCustomers_(), store: getStoreAll_(e.parameter.since), performance: getPerformanceAll_() } });
     if (action === "getPerformanceMonth") return jsonOut_({ ok: true, data: getPerformanceMonth_(e.parameter.month) });
     if (action === "getYearlyGrid") return jsonOut_({ ok: true, data: getYearlyGrid_(e.parameter.plant) });
     return jsonOut_({ ok: false, error: "unknown action: " + action });
@@ -188,7 +189,13 @@ function formatDateField_(v) {
   return v;
 }
 
+let _masterMemo = null, _actMemo = null;
+function clearMemo_() { _masterMemo = null; _actMemo = null; }
 function getMaster_() {
+  if (_masterMemo) return _masterMemo;
+  return (_masterMemo = readMaster_());
+}
+function readMaster_() {
   const rows = sheetToObjects_(getSheet_(SHEET_MASTER));
   const byPlant = {}, count = {}, seen = {};
   rows.forEach(r => { const k = String(pickField_(r, "발전소명") || "").trim(); if (k) count[k] = (count[k] || 0) + 1; });
@@ -223,6 +230,7 @@ function getCustomers_() {
 // 시트에 수기로 만든 다른 컬럼 값은 건드리지 않는다. originalKey 가 있으면 그 행을 수정(키 변경 포함), 없으면 새로 추가.
 // legacyKeyField: 키 칸이 비어 있는 예전 행은 이 칸 값으로 찾는다 (전기사용자: 계약ID 도입 전 KPX신청번호로 저장된 행)
 function upsertRegistryRow_(sheet, fields, keyField, record, originalKey, legacyKeyField, originalRow) {
+  clearMemo_();
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
@@ -271,6 +279,7 @@ function upsertRegistryRow_(sheet, fields, keyField, record, originalKey, legacy
 }
 
 function deleteRegistryRow_(sheet, keyField, key, legacyKeyField, rowNo) {
+  clearMemo_();
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
@@ -361,8 +370,9 @@ function logPerformance_(body) {
   if (firstChanged < all.length) sheet.getRange(2 + firstChanged, 1, all.length - firstChanged, 6).setValues(all.slice(firstChanged));
   if (appended.length) sheet.getRange(2 + all.length, 1, appended.length, 6).setValues(appended);
   refreshGrid_(month, updates); // 실적그리드: 이 달만 새 값, 시트에서 고친 다른 달은 유지
+  _actMemo = null;
   const cumulative = rebuildDashboard_();
-  return { logged: Object.keys(updates).length, cumulative: cumulative };
+  return { logged: Object.keys(updates).length, cumulative: cumulative, performance: getPerformanceAll_() };
 }
 
 /* ============ 앱데이터 (수요기업 청구 모듈: 월별 요율/발전소/계약/이월값을 JSON 으로 저장) ============
@@ -650,6 +660,7 @@ function mergeActuals_(grid, log) {
 
 // 전체 다시 쓰기 (예전 형식 이전 · refillYearlyGrid). 한 번에 쓰고 서식도 몇 번의 호출로 끝낸다.
 function writeGridFull_(sheet, master, data) {
+  _actMemo = null;
   const plants = Object.keys(master).filter(p => data[p]).concat(Object.keys(data).filter(p => !master[p]).sort());
   const months = Array.from(new Set(plants.reduce((a, p) => a.concat(Object.keys(data[p])), []))).sort();
   const header = ["발전소", "구분"].concat(months.map(gridMonthLabel_));
@@ -673,6 +684,7 @@ function writeGridFull_(sheet, master, data) {
 
 // 업로드한 달(updates: {발전소: {gen, supply}})의 열만 쓴다 — 발전소 수와 상관없이 몇 번의 호출
 function refreshGrid_(month, updates) {
+  _actMemo = null;
   const sheet = getYearlyGridSheet_();
   if (!isMonthGrid_(sheet)) { // 비어 있거나 예전 형식 → 새 형식으로 한 번 전체 작성
     const master = getMaster_(), data = mergeActuals_(readGrid_(sheet, master), readLog_());
@@ -714,6 +726,10 @@ function refreshGrid_(month, updates) {
 
 // 웹·대시보드용 실적: {발전소: {YYYYMM: {supply, total}}}  (total = 발전량 = 공급량 + 초과발전량)
 function monthlyActuals_() {
+  if (_actMemo) return _actMemo;
+  return (_actMemo = readActuals_());
+}
+function readActuals_() {
   const data = mergeActuals_(readGrid_(getYearlyGridSheet_(), getMaster_()), readLog_());
   const out = {};
   Object.keys(data).forEach(p => Object.keys(data[p]).forEach(ym => {

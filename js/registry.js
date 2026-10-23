@@ -101,6 +101,8 @@ const Registry = (function () {
   const str = v => String(v == null ? "" : v).trim();
 
   async function load() {
+    const preM = typeof bootPart === "function" ? await bootPart("master") : null, preC = preM ? await bootPart("customers") : null;
+    if (preM && preC) { masterData = preM; customers = preC; loaded = true; return true; } // 로그인 직후 한 번에 받은 값
     const [, c] = await Promise.all([fetchMaster(), gasGet("getCustomers")]); // fetchMaster 가 masterData 를 채운다
     customers = c || [];
     loaded = c !== null;
@@ -525,10 +527,15 @@ async function renderGroupAgg(app) {
     Object.keys(g.plants).forEach(p => { const gen = sum(g.plants[p].gen), sup = sum(g.plants[p].kpxSupply); rows[p] = { generation: gen, supply: sup, excess: gen - sup }; });
     source = `업로드한 KPX 파일 (${typeof getSettleMode === "function" && getSettleMode() === "trueup" ? "오차정산" : "가정산"})`;
   } else {
-    host.innerHTML = `<div class="hint">불러오는 중...</div>`;
-    const perf = await gasGet("getPerformanceMonth", { month });
-    if (regState.openGroup !== app || regState.month !== month) return; // 그새 다른 계약/월을 고름
-    if (perf === null) { host.innerHTML = `<div class="notice warn">월별 실적을 불러오지 못했습니다. (Apps Script 재배포 필요할 수 있음)</div>`; return; }
+    let perf = null;
+    if (typeof perfState !== "undefined" && perfState.loaded) { // 계약이행현황용으로 받아 둔 월별 실적
+      perf = {}; (perfState.rows || []).forEach(r => { if (r.month === month) perf[r.plant] = { generation: r.generation, supply: r.supply, excess: r.generation - r.supply }; });
+    } else {
+      host.innerHTML = `<div class="hint">불러오는 중...</div>`;
+      perf = await gasGet("getPerformanceMonth", { month });
+      if (regState.openGroup !== app || regState.month !== month) return; // 그새 다른 계약/월을 고름
+    }
+    if (perf === null) { host.innerHTML = `<div class="notice warn">월별 실적을 불러오지 못했습니다.</div>`; return; }
     registered.forEach(p => { if (perf[p]) rows[p] = perf[p]; });
     source = "월별실적로그 (가정산 업로드 시 기록)";
   }

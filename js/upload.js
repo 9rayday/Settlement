@@ -273,8 +273,12 @@ function refreshPlantSelect(){
 async function syncPerformanceToGas(){
   if(!plants.length || !settleMonth) return;
   const rows = plants.map(p=> ({ plant: p, generation: aggByPlant[p].generation, supply: aggByPlant[p].supply, excess: aggByPlant[p].excess }));
-  await logPerformance(settleMonth, rows);
-  if(typeof refreshPerformance === "function") await refreshPerformance(); // 계약이행현황·위약금 갱신
+  const res = await logPerformance(settleMonth, rows);
+  if(res && Array.isArray(res.performance) && typeof perfState !== "undefined"){ // 저장 결과에 실적 전체가 오면 그대로 (다시 요청하지 않음)
+    perfState.rows = res.performance; perfState.loaded = true;
+    if(typeof renderPerfPages === "function") renderPerfPages();
+    if(typeof renderAlerts === "function") renderAlerts();
+  } else if(typeof refreshPerformance === "function") await refreshPerformance(); // 계약이행현황·위약금 갱신
   renderInvoicePreview();
   saveGenPay(); // 정산 대시보드용 발전사업자 전력대금 (js/invoice.js)
 }

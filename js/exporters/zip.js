@@ -14,7 +14,6 @@ async function exportAllPlants(){
     for(let i=0;i<plants.length;i++){
       const plant = plants[i];
       statusEl.textContent = `생성 중... (${i+1}/${plants.length}) ${plant}`;
-      adjustmentsByPlant[plant] = await fetchAdjustments(settleMonth, plant);
       const [pdfBlob, workbook] = await Promise.all([
         buildPdfBlobForPlant(plant),
         buildWorkbookForPlant(plant)

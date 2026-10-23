@@ -22,7 +22,8 @@ const Store = (function () {
   async function load() {
     data = readLocal();
     const since = String(new Date().getFullYear() - 1) + "01";
-    const remote = await gasGet("getStoreAll", { since }); // 실패 시 null
+    const pre = typeof bootPart === "function" ? await bootPart("store") : null; // 로그인 직후 한 번에 받은 값
+    const remote = pre || await gasGet("getStoreAll", { since }); // 실패 시 null
     remoteOk = remote !== null;
     if (remote) {
       // 서버에서 지운 정산 데이터가 이 브라우저 캐시에 남아 다시 보이지 않도록, 받은 범위 안의 키는 서버 값으로 맞춘다
