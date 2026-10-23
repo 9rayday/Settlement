@@ -115,8 +115,13 @@ const Registry = (function () {
   function plantKeyFor(name, app) {
     const all = plants(), n = str(name), a = str(app);
     if (all[n] && (!a || plantGroup(all[n]) === a)) return n;
-    const cands = Object.keys(all).filter(k => str(all[k]["발전소명"]) === n);
-    if (!cands.length) return n;
+    let cands = Object.keys(all).filter(k => str(all[k]["발전소명"]) === n);
+    if (!cands.length) { // 띄어쓰기만 다른 이름 (KPX "OO 태양광발전소" ↔ 등록 "OO태양광발전소")
+      const sq = s => str(s).replace(/s+/g, "");
+      cands = Object.keys(all).filter(k => sq(all[k]["발전소명"]) === sq(n));
+      if (!cands.length) return n;
+      return cands.find(k => a && plantGroup(all[k]) === a) || cands[0];
+    }
     return cands.find(k => a && plantGroup(all[k]) === a) || (all[n] ? n : cands[0]);
   }
   // 정산 엔진용 발전소 정보 (app 을 주면 같은 이름 중 그 신청번호에 연결된 행)

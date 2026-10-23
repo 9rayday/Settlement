@@ -65,7 +65,7 @@ function renderGenResult(){
   const sum = k => rows.reduce((t, x) => t + (Number(x.c[k]) || 0), 0);
   host.innerHTML = `<div class="table-wrap" style="margin-top:12px"><table class="grid gen-result">
     <tr><th>발전소</th><th>공급량 (kWh)</th><th>계약단가</th><th>전력량요금 (VAT 포함)</th><th>거래수수료 (VAT 포함)</th><th>위약금</th><th>지급액</th></tr>
-    ${rows.map(({p, c}) => `<tr data-p="${p}"><td><a href="#" class="gen-open" data-p="${p}">${p}</a></td><td class="num">${f(c.supply)}</td><td class="num">${c.unitPrice==null ? '<span class="tag bad">미등록</span>' : c.unitPrice}</td>
+    ${rows.map(({p, c}) => `<tr data-p="${p}"><td><a href="#" class="gen-open" data-p="${p}">${p}</a></td><td class="num">${f(c.supply)}</td><td class="num">${c.unitPrice!=null ? c.unitPrice : !masterData[p] ? '<span class="tag bad" title="계약관리 > 발전사업자에 이 발전기명(KPX와 동일)으로 등록된 발전소가 없습니다">발전소 미등록</span>' : '<span class="tag bad" title="발전소는 등록되어 있지만 계약단가 칸이 비어 있습니다">단가 빈칸</span>'}</td>
       <td class="num">${f(c.subtotal1)}</td><td class="num">${f(c.subtotal2)}</td><td class="num">${c.penalty ? f(c.penalty) : "-"}</td><td class="num"><b>${f(c.payment)}</b></td></tr>`).join("")}
     <tr class="total"><td>합계 (${rows.length}개소)</td><td class="num">${f(sum("supply"))}</td><td></td><td class="num">${f(sum("subtotal1"))}</td><td class="num">${f(sum("subtotal2"))}</td><td class="num">${f(sum("penalty"))}</td><td class="num"><b>${f(sum("payment"))}</b></td></tr>
   </table></div>`;
