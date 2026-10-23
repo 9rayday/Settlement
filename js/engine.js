@@ -200,7 +200,10 @@
     Object.keys(match.supplyByPlant).forEach(p => {
       const info = ctx.plants[p];
       if (!info) throw new Error("발전소 등록 정보가 없습니다: " + p);
-      const r = E.networkFee(match.supplyByPlant[p], info, { region: ctx.demandRegion, grid: ctx.demandGrid, node: ctx.demandNode }, rates);
+      let r = E.networkFee(match.supplyByPlant[p], info, { region: ctx.demandRegion, grid: ctx.demandGrid, node: ctx.demandNode }, rates);
+      // 오차정산: 한전 청구서의 확정 망이용요금을 직접 넣은 발전소는 그 금액 사용 (calcFee = 시스템 계산값)
+      const o = ctx.netOverride && ctx.netOverride[p];
+      if (o != null && o !== "" && !isNaN(o)) r = Object.assign({}, r, { fee: Math.round(Number(o)), calcFee: r.fee, confirmed: true });
       net[p] = r; netTotal += r.fee;
     });
     const fee = E.round(supplyTotal * rates.tradeFee);
