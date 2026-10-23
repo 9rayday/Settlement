@@ -621,3 +621,17 @@ td.empty{ text-align:center; }
 /* 계약관리 검색 */
 .reg-tools{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .reg-search{ width:240px; max-width:100%; padding:7px 10px; border:1px solid var(--line); border-radius:7px; font-size:13px; font-family:inherit; }
+
+/* 발전사업자 정산서 미리보기 = PDF(js/exporters/pdf.js) 배색·배치 */
+.doc.bill.gen table.doc-table th.section, .doc.bill.gen table.doc-table td.label-dark{ background:#595959; color:#fff; }
+.doc.bill.gen table.doc-table td.label{ background:#ECECEC; color:#4A4A4A; }
+.doc.bill.gen table.doc-table tr.total td{ background:#fff; font-weight:700; }
+.doc.bill.gen table.doc-table tr.pay td{ background:#fff; font-size:11px; font-weight:700; }
+.doc.bill.gen table.doc-table td.editable{ color:inherit; }
+.doc.bill.gen table.doc-table tr.red-top td{ border-top:1.5px solid #C00000; }
+.doc.bill.gen table.doc-table tr.red-bottom td{ border-bottom:1.5px solid #C00000; }
+.doc.bill.gen table.doc-table tr.red-top td:first-of-type, .doc.bill.gen table.doc-table tr.red-bottom td:first-of-type{ border-left:1.5px solid #C00000; }
+.doc.bill.gen table.doc-table tr.red-top td:last-child, .doc.bill.gen table.doc-table tr.red-bottom td:last-child{ border-right:1.5px solid #C00000; }
+.doc.bill.gen .bill-head{ grid-template-columns:150px 1fr 150px; }
+.doc.bill.gen .doc-date{ font-weight:700; font-size:13px; }
+.doc.bill.gen table.doc-table td.nw{ white-space:nowrap; font-size:8.5px; letter-spacing:-.2px; }
