@@ -261,7 +261,8 @@ function upsertRegistryRow_(sheet, fields, keyField, record, originalKey, legacy
     if (row < 0) row = lastRow + 1;
     const values = row <= lastRow ? sheet.getRange(row, 1, 1, header.length).getValues()[0] : new Array(header.length).fill("");
     fields.forEach(f => { if (record[f] !== undefined) values[colOf(f)] = record[f]; });
-    TEXT_FIELDS.forEach(f => { const c = colOf(f); if (c >= 0 && fields.indexOf(f) >= 0) sheet.getRange(row, c + 1).setNumberFormat("@"); });
+    const textCells = TEXT_FIELDS.filter(f => fields.indexOf(f) >= 0 && colOf(f) >= 0).map(f => colLetter_(colOf(f) + 1) + row);
+    if (textCells.length) sheet.getRangeList(textCells).setNumberFormat("@"); // 칸마다 호출하지 않고 한 번에
     sheet.getRange(row, 1, 1, header.length).setValues([values]);
     return { saved: true, key: key };
   } finally {

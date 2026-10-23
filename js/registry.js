@@ -182,10 +182,16 @@ const Registry = (function () {
   }
   const plantsOfContract = key => Object.keys(plants()).filter(p => plantContract(p) === str(key));
 
-  async function save(kind, record, originalKey) {
+  // opts.reload === false: 서버에서 전체를 다시 받지 않고 저장한 칸만 화면 데이터에 반영 (계약 연결처럼 일부 칸만 바꿀 때 빠르게)
+  async function save(kind, record, originalKey, opts) {
     const originalRow = kind === "plant" && originalKey && plants()[originalKey] ? plants()[originalKey]._row : undefined; // 같은 이름 여러 행 구분
     const r = await gasCall(kind === "plant" ? "savePlant" : "saveCustomer", { record, originalKey, originalRow });
-    if (r.ok) await load();
+    if (!r.ok) return r;
+    if (opts && opts.reload === false) {
+      if (kind === "plant" && originalKey && plants()[originalKey]) masterData[originalKey] = Object.assign({}, plants()[originalKey], record);
+      else if (kind === "customer") { const c = customerByKey(originalKey); if (c) Object.assign(c, record); else await load(); }
+      else await load();
+    } else await load();
     return r;
   }
   async function remove(kind, key) {
@@ -283,15 +289,17 @@ const groupLabel = app => Array.from(new Set(Registry.contractsOfApp(app).map(c 
 const singleContract = app => Registry.contractsOfApp(app).length === 1;
 const contractCapacity = key => Registry.plantsOfContract(key).reduce((s, p) => s + (Number(Registry.plants()[p]["계약용량"]) || 0), 0);
 // 매핑이 바뀌거나 발전소 용량이 바뀌면 해당 계약의 계약용량·연간보장공급량을 다시 저장한다
-async function syncContractTotals(keys) {
+async function syncContractTotals(keys, opts) {
+  const jobs = [];
   for (const k of new Set(keys.map(rStr).filter(Boolean))) {
     const raw = Registry.customerByKey(k); if (!raw) continue;
     const cap = contractCapacity(k); if (!(cap > 0)) continue; // 매핑된 발전소가 없으면 직접 입력값 유지
     const g = guaranteeOf(cap, hoursPerDay(raw["연간보장시간"]) * 365);
     if (Number(raw["계약용량"]) === cap && String(raw["연간보장공급량"]) === String(g)) continue;
     const key = Registry.custKey(raw);
-    await Registry.save("customer", { "계약ID": key, "계약용량": cap, "연간보장공급량": g }, key);
+    jobs.push(Registry.save("customer", { "계약ID": key, "계약용량": cap, "연간보장공급량": g }, key, opts));
   }
+  await Promise.all(jobs);
 }
 const plantContractOf = name => name ? Registry.plantContract(name) : "";
 
@@ -490,9 +498,9 @@ async function setPlantContract(plant, key, keepApp) {
   const oldContract = plantContractOf(plant);
   const cc = key ? Registry.customerByKey(key) : null;
   const app = cc ? Registry.groupOf(cc) : (keepApp || "");
-  const r = await Registry.save("plant", { "발전소명": plant, "계약ID": key, "KPX신청번호": app }, plant);
+  const r = await Registry.save("plant", { "발전소명": plant, "계약ID": key, "KPX신청번호": app }, plant, { reload: false });
   if (!r.ok) { st.textContent = "저장 실패: " + r.error; st.className = "status bad"; return; }
-  await syncContractTotals([oldContract, key]); // 계약용량·연간보장공급량 자동 갱신
+  await syncContractTotals([oldContract, key], { reload: false }); // 계약용량·연간보장공급량 자동 갱신 (두 계약 동시에)
   afterRegistryChange();
   const st2 = r$("grpStatus"); if (st2) { st2.textContent = `${plant} → ${key ? key + " 계약" : (app ? "계약 미지정" : "그룹에서 제외")} (구글시트 저장)`; st2.className = "status ok"; }
 }
