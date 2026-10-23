@@ -35,13 +35,14 @@
    * 초과 E = G − S, 발전소별 배분 S_p = ROUND(S×g_p/G,3), E_p = ROUND(E×g_p/G,3)
    * 부족(단순) = U − S (음수 허용), 부족(손실) = S × L
    * usage 가 null/undefined 이면 "가정산 간주": U = G → S = G, E = 0
+   * fullBuy(월간균등 정산): 발전량 전량 구매 → S = G, E = 0 (사용량과 비교하지 않음, E-PPA 와 같은 규칙)
    */
-  E.matchHour = function (usage, gen, loss) {
+  E.matchHour = function (usage, gen, loss, fullBuy) {
     if (loss == null) loss = E.DEFAULT_RATES.transLossRate;
     const plants = Object.keys(gen);
     const G = plants.reduce((s, p) => s + (gen[p] || 0), 0);
     const U = (usage === null || usage === undefined) ? G : usage;
-    const S = G > 0 ? E.round(U > G * (1 - loss) ? G : U / (1 - loss), 3) : 0;
+    const S = G > 0 ? E.round(fullBuy || U > G * (1 - loss) ? G : U / (1 - loss), 3) : 0;
     const X = G - S;
     const out = { supply: {}, excess: {}, supplyTotal: S, excessTotal: X, deficitSimple: U - S, deficitLoss: S * loss, usage: U, genTotal: G };
     plants.forEach(p => {
@@ -55,8 +56,10 @@
   /* days: [{date, load:[24 × '경부하'|'중간부하'|'최대부하'], usage:[24]|null, gen:{plant:[24]}}]
    * 반환: { supplyByPlant, genByPlant, excessByPlant, byLoad:{구분:{usage,supply,deficitSimple,deficitLoss}}, totals }
    * totals.supply = 발전소별 공급량 합 (청구 기준), totals.supplyHourly = 시간별 S 합 (부하별 표 기준)
+   * opts.fullBuy: 월간균등 정산 (발전량 전량 구매, 초과발전 0)
    */
-  E.matchMonth = function (days, rates, onHour) {
+  E.matchMonth = function (days, rates, onHour, opts) {
+    const fullBuy = !!(opts && opts.fullBuy);
     const loss = (rates && rates.transLossRate != null) ? rates.transLossRate : E.DEFAULT_RATES.transLossRate;
     const supplyByPlant = {}, genByPlant = {}, excessByPlant = {};
     const byLoad = {};
@@ -66,7 +69,7 @@
       for (let h = 0; h < 24; h++) {
         const gen = {};
         Object.keys(d.gen).forEach(p => { gen[p] = d.gen[p][h] || 0; });
-        const m = E.matchHour(d.usage ? d.usage[h] : null, gen, loss);
+        const m = E.matchHour(d.usage ? d.usage[h] : null, gen, loss, fullBuy);
         if (onHour) onHour(d, h, m);
         const lc = d.load[h];
         const b = byLoad[lc] || (byLoad[lc] = { usage: 0, supply: 0, deficitSimple: 0, deficitLoss: 0 });
@@ -90,6 +93,7 @@
 
   /* 월간균등정산: 발전기별 K = ROUND(월발전량합 / 월시간수, 6) MWh, 마지막 시간이 잔차 흡수 (합 = 월발전량)
    * days[].gen 을 균등값으로 바꾼다 (kWh). 실측 발전량은 days[].actGen 에 남는다.
+   * 매칭은 matchMonth(..., { fullBuy: true }) — 전량 구매라 초과발전이 생기지 않는다.
    */
   E.equalizeGen = function (days) {
     const hours = days.length * 24;

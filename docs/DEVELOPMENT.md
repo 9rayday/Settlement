@@ -66,6 +66,7 @@ node tests/engine.test.js fixture.json    # 전부 OK 여야 함 (원 단위 일
 
 ## 계산 규칙 요약 (engine.js)
 - 공급량 = KPX 파일의 재생E공급량(발전소·시간별) 그대로 — 가정산·오차정산 공통 (`matchMonthKpx`). 초과발전량 = 발전량 − 공급량
+- 월간균등 정산: 발전량을 월 균등값으로 나눈 뒤 전량 구매 (공급량 = 발전량, 초과발전량 0, `matchMonth(..., { fullBuy: true })`). E-PPA 비용편익과 같은 규칙
 - 사용량 파일(15분)은 부하구분별 사용량·부족전력량 표시에만 쓴다. 없거나 빈 시간은 KPX 전기사용량으로 대체
 - (참고) `matchMonth` 의 min(사용량, Σ발전량) 방식은 8월 엑셀 검증(`tests/engine.test.js`)용으로 남아 있음
 - 오차정산 차액(과세) = (확정 − 가정산)의 전력량요금 + 망이용요금 + 거래수수료 (`trueUpDiff`)

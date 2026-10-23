@@ -296,6 +296,7 @@ const safeSplits = sp => sp ? sp.map(x => Object.assign({}, x, { unitPrice: x.un
  * U = 고객 사용량 파일 → KPX 전기사용량(확정 파일) → 없으면 U = K (가정산 간주)
  * L = KPX 손실률(%) 컬럼 → 없으면 요율의 송전손실률
  * S = U > K×(1−L) ? K : U/(1−L), E = K − S (Engine.matchHour)
+ * 월간균등: 발전량 전량 구매 → S = K, E = 0 (E-PPA 비용편익과 같은 규칙)
  */
 function settleGroup(g, ami, rates, onHour) {
   const cust = Registry.customerByApp(g.app, g.month);
@@ -304,7 +305,7 @@ function settleGroup(g, ami, rates, onHour) {
   if (monthly && !g.hasPpa) Engine.equalizeGen(days);
   const usage = Parsers.resolveUsage(days, ami);
   const loss = g.lossRate != null ? g.lossRate : rates.transLossRate;
-  const match = Engine.matchMonth(days, Object.assign({}, rates, { transLossRate: loss }), onHour);
+  const match = Engine.matchMonth(days, Object.assign({}, rates, { transLossRate: loss }), onHour, { fullBuy: monthly });
   const kpxSupply = days.reduce((t, x) => t + Object.values(x.supply || {}).reduce((a, arr) => a + arr.reduce((p, q) => p + (q || 0), 0), 0), 0);
   return { days, match, usage, loss, monthly, kpxSupply };
 }
