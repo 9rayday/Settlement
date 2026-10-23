@@ -635,3 +635,8 @@ td.empty{ text-align:center; }
 .doc.bill.gen .bill-head{ grid-template-columns:150px 1fr 150px; }
 .doc.bill.gen .doc-date{ font-weight:700; font-size:13px; }
 .doc.bill.gen table.doc-table td.nw{ white-space:nowrap; font-size:8.5px; letter-spacing:-.2px; }
+.perf-kpis .kpi-btn{ cursor:pointer; transition:border-color .15s, background .15s; }
+.perf-kpis .kpi-btn:hover{ border-color:var(--navy-2); background:#F2F5F9; }
+.perf-kpis .kpi-btn.active{ border-color:var(--navy); background:#E7EEF7; box-shadow:inset 0 0 0 1px var(--navy); }
+.perf-filter{ display:inline-flex; align-items:center; gap:4px; margin-left:8px; padding:1px 4px 1px 10px; border-radius:12px; background:#E7EEF7; color:var(--navy); font-size:12px; font-weight:600; vertical-align:middle; }
+.perf-filter button{ border:none; background:none; cursor:pointer; font-size:14px; line-height:1; color:var(--sub); padding:0 4px; }
