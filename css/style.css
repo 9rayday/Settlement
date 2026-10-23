@@ -618,3 +618,6 @@ td.empty{ text-align:center; }
 .smp-table input{ min-width:44px; width:44px; padding:3px 2px; font-size:11px; letter-spacing:-0.2px; text-align:right; border-color:#E3E7EC; }
 .smp-table th:first-child{ position:sticky; left:0; z-index:1; background:#EEF1F5; }
 .reg-head{ margin-bottom:12px; }
+/* 계약관리 검색 */
+.reg-tools{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.reg-search{ width:240px; max-width:100%; padding:7px 10px; border:1px solid var(--line); border-radius:7px; font-size:13px; font-family:inherit; }

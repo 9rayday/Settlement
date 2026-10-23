@@ -198,7 +198,14 @@ const Registry = (function () {
 })();
 
 /* ---------- 화면: 정산관리 > 계약관리 (전기사용자 / 발전사업자 / 그룹화) ---------- */
-const regState = { openCust: null, openPlant: null, openGroup: null, month: "", pages: { cust: 1, plant: 1, group: 1, perfCust: 1, perfGen: 1 } };
+const regState = { openCust: null, openPlant: null, openGroup: null, month: "", pages: { cust: 1, plant: 1, group: 1, perfCust: 1, perfGen: 1 }, q: { cust: "", plant: "" } };
+// 목록 검색: 공백으로 나눈 단어가 모두 들어 있으면 표시 (대소문자·공백 무시)
+const regMatch = (q, fields) => { const hay = fields.map(v => rStr(v)).join(" ").toLowerCase().replace(/\s+/g, ""); return String(q || "").toLowerCase().split(/\s+/).filter(Boolean).every(w => hay.includes(w)); };
+// 검색칸: 입력할 때마다 목록만 다시 그리고 커서는 그대로
+function bindRegSearch(kind, id, render) {
+  const el = r$(id); if (!el) return;
+  el.oninput = () => { regState.q[kind] = el.value; regState.pages[kind] = 1; render(); const n = r$(id); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } };
+}
 // 목록이 길면 페이지로 나눠 보여준다
 const PAGE_SIZE = { cust: 12, plant: 15, group: 8, perfCust: 15, perfGen: 15 };
 function pageSlice(kind, items) {
@@ -341,14 +348,17 @@ function groupCardsHtml(activeApp, apps) {
 /* ----- 전기사용자 ----- */
 function renderCustomerPage() {
   const host = r$("regCustPage"); if (!host) return;
-  const pg = pageSlice("cust", Registry.rawCustomers());
+  const list = Registry.rawCustomers().filter(c => regMatch(regState.q.cust, [c["수요기업명"], c["계약ID"], c["소비계약신청번호"], c["KPX신청번호"], c["사업자등록번호"], c["대표자명"], c["담당자"], c["수요지지역"], c["사용장소명"]]));
+  const pg = pageSlice("cust", list);
   host.innerHTML = `${loadFailNotice()}<div class="card">
-      <div class="reg-head"><h2>전력거래계약</h2><button class="btn secondary" id="regAddCust">+ 전기사용자 추가</button></div>
+      <div class="reg-head"><h2>전력거래계약</h2><div class="reg-tools"><button class="btn secondary" id="regAddCust">+ 전기사용자 추가</button><input type="search" id="regCustQ" class="reg-search" placeholder="검색 (사업자명·계약ID·소비계약신청번호)" value="${rEsc(regState.q.cust)}"></div></div>
+      ${list.length ? "" : '<div class="empty">검색 결과 없음</div>'}
       <div class="reg-cards">${custCardsHtml(regState.openCust, "cust-card", pg.items)}</div>${pagerHtml("cust", pg.page, pg.pages)}
       <div id="regCustDetail"></div></div>`;
   bindPager(host, renderCustomerPage);
   host.querySelectorAll(".cust-card").forEach(b => b.onclick = () => openCustomer(b.dataset.key));
   r$("regAddCust").onclick = () => openCustomer("");
+  bindRegSearch("cust", "regCustQ", renderCustomerPage);
   if (regState.openCust !== null) openCustomer(regState.openCust, true);
 }
 
@@ -379,9 +389,11 @@ function openCustomer(key, keepScroll) {
 /* ----- 발전사업자 ----- */
 function renderPlantPage() {
   const host = r$("regPlantPage"); if (!host) return;
-  const plants = Registry.plants(), pg = pageSlice("plant", Object.keys(plants));
+  const plants = Registry.plants();
+  const keys = Object.keys(plants).filter(p => { const m = plants[p]; return regMatch(regState.q.plant, [m["발전소명"], m["사업자명(대표자명)"], m["사업자명"], m["대표자명"], m["지역(요금구분)"], m["계약ID"], Registry.plantGroup(m), Registry.plantContract(p), m["발전기ID"], m["사업자등록번호"]]); });
+  const pg = pageSlice("plant", keys);
   host.innerHTML = `${loadFailNotice()}<div class="card">
-      <div class="reg-head"><h2>전력공급계약</h2><button class="btn secondary" id="regAddPlant">+ 발전소 추가</button></div>
+      <div class="reg-head"><h2>전력공급계약</h2><div class="reg-tools"><button class="btn secondary" id="regAddPlant">+ 발전소 추가</button><input type="search" id="regPlantQ" class="reg-search" placeholder="검색 (발전소명·사업자명·계약)" value="${rEsc(regState.q.plant)}"></div></div>
       <div class="grid-wrap"><table class="grid reg-table"><tr><th>발전소명</th><th>사업자명</th><th>지역</th><th>배전</th><th>그룹 (전기사용자)</th><th>계약용량(kW)</th><th>매입단가</th><th>계약일자</th></tr>
         ${pg.items.map(p => { const m = plants[p], app = Registry.plantGroup(m);
           return `<tr class="reg-row${regState.openPlant === p ? " active" : ""}" data-plant="${rEsc(p)}"><td><b>${rEsc(m["발전소명"] || p)}</b></td><td>${rEsc(m["사업자명(대표자명)"])}</td>
@@ -392,6 +404,7 @@ function renderPlantPage() {
   bindPager(host, renderPlantPage);
   host.querySelectorAll(".reg-row").forEach(tr => tr.onclick = () => openPlant(tr.dataset.plant));
   r$("regAddPlant").onclick = () => openPlant("");
+  bindRegSearch("plant", "regPlantQ", renderPlantPage);
   if (regState.openPlant !== null) openPlant(regState.openPlant, true);
 }
 
@@ -435,7 +448,7 @@ function renderGroupMain() {
   const app = regState.openGroup, c = app && Registry.customerByApp(app);
   if (!c) { host.innerHTML = `<div class="hint">등록된 계약이 없습니다.</div>`; return; }
   const members = Registry.plantsOfGroup(app), all = Registry.plants();
-  const others = Object.keys(all).filter(p => !members.includes(p));
+  const others = Object.keys(all).filter(p => !members.includes(p) && !Registry.plantGroup(all[p])); // 미연결 발전소만
   if (!regState.month) regState.month = defaultMonth(app);
   const contracts = Registry.contractsOfApp(app);
   host.innerHTML = `<div><h2>${rEsc(groupLabel(app))}</h2><div class="hint" style="margin:2px 0 0">${rEsc(app)} · ${rEsc(c.demandRegion || "-")}</div></div>
@@ -451,8 +464,9 @@ function renderGroupMain() {
         <td>${m["지역(요금구분)"] ? rEsc(m["지역(요금구분)"]) : '<span class="tag bad">미지정</span>'}</td><td>${GRID_LABEL[gridOf(m["배전연결"])]}</td>
         <td class="num">${rEsc(fmtKw(m["계약용량"]))}</td><td style="text-align:center"><button class="btn secondary small grp-remove" data-plant="${rEsc(p)}">제외</button></td></tr>`; }).join("")
         : `<tr><td colspan="7" class="empty">없음</td></tr>`}</table></div>
-    <div class="row" style="margin-top:10px"><select id="grpAddSel" style="min-width:300px">${others.map(p => { const a = Registry.plantGroup(all[p]);
-        return `<option value="${rEsc(p)}">${rEsc(p)}${a ? ` (현재: ${rEsc(groupLabel(a) || a)})` : " (미연결)"}</option>`; }).join("")}</select>
+    <div class="row" style="margin-top:10px"><input type="search" id="grpAddQ" class="reg-search" placeholder="미연결 발전소 검색" style="width:180px">
+      <select id="grpAddSel" style="min-width:300px">${others.map(p => { const m = all[p];
+        return `<option value="${rEsc(p)}">${rEsc(m["발전소명"] || p)} · ${rEsc(m["사업자명(대표자명)"] || m["사업자명"] || "-")} · ${rEsc(fmtKw(m["계약용량"]))} kW</option>`; }).join("") || '<option value="">미연결 발전소 없음</option>'}</select>
       <select id="grpAddContract" style="min-width:180px">${contracts.map(x => `<option value="${rEsc(Registry.custKey(x))}">${rEsc(Registry.custKey(x))}</option>`).join("")}</select>
       <button class="btn accent" id="grpAddBtn"${others.length ? "" : " disabled"}>계약에 추가</button><span id="grpStatus" class="status warn" style="background:none"></span></div>
     <div class="reg-group">
@@ -461,6 +475,11 @@ function renderGroupMain() {
       <div id="regAgg"><div class="hint">불러오는 중...</div></div></div>`;
   host.querySelectorAll(".grp-remove").forEach(b => b.onclick = () => setPlantContract(b.dataset.plant, ""));
   host.querySelectorAll(".grp-contract").forEach(sel => sel.onchange = () => setPlantContract(sel.dataset.plant, sel.value, app));
+  r$("grpAddQ").oninput = e => { // 미연결 발전소 목록 거르기
+    const q = e.target.value, sel = r$("grpAddSel"); let first = null;
+    [...sel.options].forEach(o => { const show = regMatch(q, [o.textContent]); o.hidden = !show; if (show && !first) first = o; });
+    if (first) sel.value = first.value;
+  };
   r$("grpAddBtn").onclick = () => {
     const p = r$("grpAddSel").value, k = r$("grpAddContract").value, cur = Registry.plantGroup(all[p]);
     if (cur && cur !== app && !confirm(`${p} 은(는) 지금 ${groupLabel(cur) || cur} 그룹입니다. ${k} 계약으로 옮길까요?`)) return;
