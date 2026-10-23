@@ -8,7 +8,7 @@
  * 처리 방식이 "청구서 차감"이면 연차 종료월 정산서에서 차감한다 (전기사용자 가정산서 / 발전사업자 정산서).
  */
 const PERF_ALERT_DAYS = 30;
-const perfState = { rows: null, loaded: false, open: { cust: null, gen: null }, year: { cust: "", gen: "" } }; // year: "" = 진행 중 연차, "1"~"20"
+const perfState = { rows: null, loaded: false, open: { cust: null, gen: null }, year: { cust: "", gen: "" }, filter: { cust: "", gen: "" } }; // filter: 상단 카드로 고른 목록 (met|risk|short|penalty) // year: "" = 진행 중 연차, "1"~"20"
 
 async function loadPerformance() {
   const pre = typeof bootPart === "function" ? await bootPart("performance") : null; // 로그인 직후 한 번에 받은 값
@@ -133,20 +133,34 @@ function renderPerfPages() { renderPerfPage("cust"); renderPerfPage("gen"); }
 function renderPerfPage(kind) {
   const host = document.getElementById(kind === "gen" ? "perfGenPage" : "perfCustPage"); if (!host) return;
   const list = perfContracts(kind), label = kind === "gen" ? "발전소" : "전기사용자", sel = perfState.year[kind];
-  const pick = ({ ys, cur }) => !ys ? null : (sel ? ys[Number(sel) - 1] || null : cur); // 표에 보일 연차
-  const shown = list.map(pick).filter(Boolean);
+  const basePick = ({ ys, cur }) => !ys ? null : (sel ? ys[Number(sel) - 1] || null : cur);
+  // 상단 카드 필터: 카드를 누르면 해당 계약만 보여 준다 (다시 누르면 전체)
+  const flt = perfState.filter[kind];
+  const lastShort = ys => ys ? ys.filter(y => y.state === "ended" && y.status === "미달").pop() || null : null;
+  const lastPenalty = ys => ys ? ys.filter(y => y.penalty > 0).pop() || null : null;
+  const FILTERS = {
+    met: x => { const y = basePick(x); return !!y && y.status === "달성"; },
+    risk: x => !!(x.cur && x.cur.status === "미달 위험"),
+    short: x => !!lastShort(x.ys),
+    penalty: x => !!lastPenalty(x.ys)
+  };
+  // 종료 연차 미달·위약금 필터에서는 그 미달 연차를 표에 보여 준다 (연차를 직접 고르면 그 연차)
+  const pick = x => !sel && flt === "short" ? lastShort(x.ys) : (!sel && flt === "penalty" ? lastPenalty(x.ys) : basePick(x)); // 표에 보일 연차
+  const shown = list.map(basePick).filter(Boolean);
   const ended = list.flatMap(x => x.ys || []).filter(y => y.state === "ended");
   const kpi = [
-    ["계약", list.length + "건"],
-    [`${sel ? sel + "년차" : "진행 연차"} 달성`, shown.filter(y => y.status === "달성").length + "건"],
-    ["미달 위험 (30일 이내)", list.filter(x => x.cur && x.cur.status === "미달 위험").length + "건"],
-    ["종료 연차 미달", ended.filter(y => y.status === "미달").length + "건"],
-    ["미달 위약금 합계", ended.reduce((sum, y) => sum + y.penalty, 0).toLocaleString() + " 원"]
+    ["", "계약", list.length + "건"],
+    ["met", `${sel ? sel + "년차" : "진행 연차"} 달성`, shown.filter(y => y.status === "달성").length + "건"],
+    ["risk", "미달 위험 (30일 이내)", list.filter(x => x.cur && x.cur.status === "미달 위험").length + "건"],
+    ["short", "종료 연차 미달", ended.filter(y => y.status === "미달").length + "건"],
+    ["penalty", "미달 위약금 합계", ended.reduce((sum, y) => sum + y.penalty, 0).toLocaleString() + " 원"]
   ];
-  const pk = kind === "gen" ? "perfGen" : "perfCust", pg = pageSlice(pk, list);
+  const rowsList = flt && FILTERS[flt] ? list.filter(FILTERS[flt]) : list;
+  const pk = kind === "gen" ? "perfGen" : "perfCust", pg = pageSlice(pk, rowsList);
+  const fltLabel = flt ? (kpi.find(k => k[0] === flt) || [])[1] : "";
   host.innerHTML = `${perfState.loaded ? "" : `<div class="notice warn">월별 실적을 불러오지 못했습니다. Apps Script를 최신 Code.gs로 재배포했는지 확인하세요.</div>`}
-    <div class="perf-kpis">${kpi.map(([l, v]) => `<div class="kpi"><div class="label">${l}</div><div class="value">${v}</div></div>`).join("")}</div>
-    <div class="card"><div class="reg-head"><h2>${label} 계약이행현황</h2>
+    <div class="perf-kpis">${kpi.map(([f, l, v]) => `<div class="kpi kpi-btn${(flt || "") === f ? " active" : ""}" data-f="${f}" title="${f ? "누르면 해당 " + label + "만 보기" : "전체 보기"}"><div class="label">${l}</div><div class="value">${v}</div></div>`).join("")}</div>
+    <div class="card"><div class="reg-head"><h2>${label} 계약이행현황${flt ? ` <span class="perf-filter">${fltLabel} ${rowsList.length}건 <button type="button" id="${kind}PerfClear" title="전체 보기">×</button></span>` : ""}</h2>
       <div class="row"><label class="adj-label">해당 연차</label><select id="${kind}PerfYear" style="min-width:140px"><option value="">진행 중 연차</option>
         ${Array.from({ length: 20 }, (_, i) => `<option value="${i + 1}"${sel === String(i + 1) ? " selected" : ""}>${i + 1}년차</option>`).join("")}</select></div></div>
       <div class="grid-wrap perf-wrap" style="margin-top:10px"><table class="grid perf-table"><tr><th>${label}</th><th class="num">계약용량(kW)</th><th class="num">효율감소</th><th>계약기간</th>
@@ -172,6 +186,9 @@ function renderPerfPage(kind) {
       <div id="${kind}PerfDetail"></div></div>`;
   bindPager(host, () => renderPerfPage(kind));
   document.getElementById(kind + "PerfYear").onchange = e => { perfState.year[kind] = e.target.value; renderPerfPage(kind); };
+  const setFilter = f => { perfState.filter[kind] = f; regState.pages[pk] = 1; perfState.open[kind] = null; renderPerfPage(kind); };
+  host.querySelectorAll(".kpi-btn").forEach(el => el.onclick = () => setFilter(el.dataset.f && perfState.filter[kind] !== el.dataset.f ? el.dataset.f : ""));
+  const clr = document.getElementById(kind + "PerfClear"); if (clr) clr.onclick = () => setFilter("");
   host.querySelectorAll(".perf-row").forEach(tr => tr.onclick = () => { perfState.open[kind] = perfState.open[kind] === tr.dataset.key ? null : tr.dataset.key; renderPerfPage(kind); });
   if (perfState.open[kind]) renderPerfDetail(kind, list.find(x => x.c.key === perfState.open[kind]));
 }
