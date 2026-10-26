@@ -214,10 +214,15 @@ const Registry = (function () {
 const regState = { openCust: null, openPlant: null, openGroup: null, month: "", pages: { cust: 1, plant: 1, group: 1, perfCust: 1, perfGen: 1 }, q: { cust: "", plant: "" } };
 // 목록 검색: 공백으로 나눈 단어가 모두 들어 있으면 표시 (대소문자·공백 무시)
 const regMatch = (q, fields) => { const hay = fields.map(v => rStr(v)).join(" ").toLowerCase().replace(/\s+/g, ""); return String(q || "").toLowerCase().split(/\s+/).filter(Boolean).every(w => hay.includes(w)); };
-// 검색칸: 입력할 때마다 목록만 다시 그리고 커서는 그대로
+// 검색칸: 입력할 때마다 목록을 다시 그리고 커서는 그대로.
+// 한글 조합 중(ㅎ→하→한)에 다시 그리면 조합이 끊겨 "ㅎㅏㄴ"처럼 풀어지므로, 조합이 끝난 뒤에 그린다.
 function bindRegSearch(kind, id, render) {
   const el = r$(id); if (!el) return;
-  el.oninput = () => { regState.q[kind] = el.value; regState.pages[kind] = 1; render(); const n = r$(id); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } };
+  let composing = false;
+  const apply = () => { regState.q[kind] = el.value; regState.pages[kind] = 1; render(); const n = r$(id); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } };
+  el.addEventListener("compositionstart", () => { composing = true; });
+  el.addEventListener("compositionend", () => { composing = false; apply(); });
+  el.oninput = e => { if (composing || (e && e.isComposing)) return; apply(); };
 }
 // 목록이 길면 페이지로 나눠 보여준다
 const PAGE_SIZE = { cust: 12, plant: 15, group: 8, perfCust: 15, perfGen: 15 };
