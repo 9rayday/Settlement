@@ -86,7 +86,9 @@ function renderAlerts() {
 }
 
 /* ----- 로그아웃 ----- */
-function logout(msg) {
+async function logout(msg) {
+  // 드라이브 저장 중이면 끝날 때까지 기다린 뒤 로그아웃 (최대 3분) — 로그인 토큰을 먼저 지우면 저장이 실패한다
+  if (typeof Drive !== "undefined" && Drive.busy()) await Promise.race([Drive.idle(), new Promise(r => setTimeout(r, 180000))]);
   try {
     const tok = sessionStorage.getItem(TOKEN_KEY);
     if (tok && typeof GAS_WEBAPP_URL === "string" && GAS_WEBAPP_URL) navigator.sendBeacon && navigator.sendBeacon(GAS_WEBAPP_URL, new Blob([JSON.stringify({ action: "logout", token: tok })], { type: "text/plain" }));
@@ -97,7 +99,7 @@ function logout(msg) {
 }
 function resetIdle() {
   clearTimeout(_idleTimer);
-  _idleTimer = setTimeout(() => logout("5분 동안 사용이 없어 자동 로그아웃되었습니다."), IDLE_LIMIT_MS);
+  _idleTimer = setTimeout(() => { if (typeof Drive !== "undefined" && Drive.busy()) return resetIdle(); logout("5분 동안 사용이 없어 자동 로그아웃되었습니다."); }, IDLE_LIMIT_MS); // 저장 중이면 미룸
 }
 
 /* ----- 화면 배율 ----------

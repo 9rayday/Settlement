@@ -4,7 +4,7 @@
  * 발전사업자 정산서: 내려받기와 같은 PDF (js/exporters/pdf.js)
  */
 const Drive = (function () {
-  let queue = Promise.resolve();
+  let queue = Promise.resolve(), pending = 0; // pending: 아직 끝나지 않은 저장 수 (새로고침·로그아웃 때 기다림)
   const listeners = [];
   const notify = s => listeners.forEach(fn => { try { fn(s); } catch (e) { /* 무시 */ } });
   const ymLabel = m => `${m.slice(0, 4)}년 ${m.slice(4, 6)}월`;
@@ -24,11 +24,12 @@ const Drive = (function () {
     return out;
   }
   function enqueue(label, job, anchorId) {
-    tag(anchorId, "busy");
+    tag(anchorId, "busy"); pending++;
     queue = queue.then(async () => {
       notify({ state: "busy", label });
       try { const r = await job(); tag(anchorId, "done"); notify({ state: "done", label, count: r.length }); }
       catch (e) { console.warn("[drive]", e); tag(anchorId, "fail", e.message); notify({ state: "fail", label, error: e.message }); }
+      finally { pending--; }
     });
     return queue;
   }
@@ -99,6 +100,8 @@ const Drive = (function () {
       return done;
     }, anchorId);
   }
-  return { saveCust, saveGen, onStatus: fn => listeners.push(fn), idle: () => queue };
+  return { saveCust, saveGen, onStatus: fn => listeners.push(fn), idle: () => queue, busy: () => pending > 0 };
 })();
+// 저장 중에 창을 닫거나 새로고침하면 브라우저가 한 번 확인한다 (메뉴 이동은 같은 화면 안이라 상관없음)
+window.addEventListener("beforeunload", e => { if (Drive.busy()) { e.preventDefault(); e.returnValue = ""; } });
 
