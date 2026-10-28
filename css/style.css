@@ -196,7 +196,7 @@ button.btn.secondary.danger{ color:var(--danger); border-color:var(--danger); }
 
 /* ===== 사이드 메뉴 레이아웃 (js/nav.js) ===== */
 :root{ --side-bg:#26292E; --side-line:#363A41; --side-text:#B9BFC8; --side-dim:#868D97; --side-hover:#30343A; --side-w:248px; }
-.layout{ display:grid; grid-template-columns:minmax(240px, 20%) minmax(0, 80%); min-height:calc(100vh - 72px); } /* 사이드 메뉴 20% : 본문 80% */
+.layout{ display:grid; grid-template-columns:var(--side-w) minmax(0, 1fr); min-height:calc(100vh - 72px); } /* 사이드 메뉴 고정 폭 (화면 전체가 자동 배율로 함께 커지고 줄어듦) */
 .sidebar{ background:var(--side-bg); color:var(--side-text); position:sticky; top:0; align-self:start; height:100vh; overflow-y:auto; padding-bottom:24px; }
 .side-toggle{ display:grid; grid-template-columns:1fr 1fr; border-bottom:1px solid var(--side-line); }
 .side-toggle button{ background:none; border:none; border-bottom:2px solid transparent; color:var(--side-dim); font:inherit; font-size:13.5px; font-weight:600; padding:15px 0 13px; cursor:pointer; }
@@ -663,3 +663,20 @@ td.empty{ text-align:center; }
 .arc-docs .doc + .doc{ margin-top:12px; }
 a.arc-link{ color:inherit; text-decoration:underline; text-decoration-color:#B8C3D3; text-underline-offset:2px; }
 @media print{ .no-print{ display:none !important; } }
+
+/* ===== 화면 크기 대응 (자동 배율은 js/header.js applyZoom) ===== */
+body{ word-break:keep-all; overflow-wrap:break-word; } /* 한글은 단어 단위로 줄바꿈, 긴 값만 강제 줄바꿈 */
+img, svg{ max-width:100%; }
+img{ height:auto; }
+input, select, textarea, button{ max-width:100%; }
+@media (max-width:600px){
+  main.content{ padding:12px; }
+  .card{ padding:14px; }
+  .reg-head{ flex-wrap:wrap; gap:8px; }
+  .reg-search{ width:100%; }
+  .perf-kpis{ grid-template-columns:1fr 1fr; gap:8px; }
+  .page-title{ font-size:20px; }
+  .grid-wrap > table.grid, .table-wrap > table.grid{ min-width:640px; } /* 좁은 화면: 표는 글자가 한 자씩 꺾이지 않게 폭을 두고 가로 스크롤 */
+  table.grid{ table-layout:auto !important; }
+  table.grid th, table.grid td{ white-space:nowrap !important; }
+}

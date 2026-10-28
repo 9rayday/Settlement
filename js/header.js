@@ -100,20 +100,31 @@ function resetIdle() {
   _idleTimer = setTimeout(() => logout("5분 동안 사용이 없어 자동 로그아웃되었습니다."), IDLE_LIMIT_MS);
 }
 
-/* ----- 화면 배율 (80~120%, 이 브라우저에 기억) — 화면 크기에 따라 표가 잘리면 줄여서 본다. 인쇄할 때는 100% ----- */
+/* ----- 화면 배율 ----------
+ * 자동 맞춤: 기준 화면 폭(1680px)에서 디자인한 비율 그대로 보이도록, 브라우저 폭에 맞춰 화면 전체를 같은 비율로 키우거나 줄인다
+ *   (예: 1920px → 약 114%, 1536px(125% 배율 노트북) → 약 91%, 1366px → 85%). 글자·여백·표가 함께 바뀌어 화면마다 모양이 같다.
+ *   900px 이하(태블릿·휴대폰)는 자동 맞춤 없이 반응형 배치(사이드 메뉴 접힘·1열)로.
+ * 사용자 배율(80~120%, 이 브라우저에 기억)은 자동 맞춤 위에 곱한다. 인쇄할 때는 100%.
+ */
 const ZOOM_KEY = "settlement.zoom";
+const DESIGN_W = 1680, AUTO_MIN = 0.85, AUTO_MAX = 1.35;
+const autoScale = () => { const w = window.innerWidth || DESIGN_W; return w <= 900 ? 1 : Math.min(AUTO_MAX, Math.max(AUTO_MIN, w / DESIGN_W)); };
+let _userZoom = 100;
 function applyZoom(v) { // 배율만큼 화면 높이(vh) 보정 — 사이드 메뉴가 끝까지 차도록
-  const z = v / 100, root = document.documentElement;
-  root.style.zoom = v === 100 ? "" : String(z);
+  if (v != null) _userZoom = v;
+  const z = Math.round(autoScale() * _userZoom) / 100, root = document.documentElement;
+  root.style.zoom = z === 1 ? "" : String(z);
   root.style.setProperty("--zoom", String(z));
 }
+let _zoomTimer = null;
+window.addEventListener("resize", () => { clearTimeout(_zoomTimer); _zoomTimer = setTimeout(() => applyZoom(), 120); });
 function initZoom() {
   const sel = document.getElementById("zoomSel"); if (!sel) return;
   let v = 100; try { v = Number(localStorage.getItem(ZOOM_KEY)) || 100; } catch (e) { /* 무시 */ }
   sel.value = String(v); applyZoom(v);
   sel.onchange = () => { const z = Number(sel.value) || 100; applyZoom(z); try { localStorage.setItem(ZOOM_KEY, String(z)); } catch (e) { /* 무시 */ } };
   window.addEventListener("beforeprint", () => { document.documentElement.style.zoom = ""; });
-  window.addEventListener("afterprint", () => applyZoom(Number(sel.value) || 100));
+  window.addEventListener("afterprint", () => applyZoom());
 }
 
 function initHeader() {
