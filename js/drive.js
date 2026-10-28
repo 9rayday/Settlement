@@ -16,46 +16,59 @@ const Drive = (function () {
     for (let i = 0; i < files.length; i += 4) {
       const part = files.slice(i, i + 4);
       const body = await Promise.all(part.map(async f => ({ year: f.year, kind: f.kind, owner: f.owner, name: f.name, base64: await toB64(f.blob) })));
-      const r = await gasPost("savePdfs", { files: body });
-      if (!r) throw new Error("드라이브 저장 실패 (Apps Script 재배포·setupDrive 실행 필요)");
-      out.push(...r);
+      const r = await gasCall("savePdfs", { files: body });
+      if (!r.ok) throw new Error(/unknown action/.test(r.error) ? "Apps Script를 새 버전으로 재배포해야 합니다." : /permission|권한|DriveApp/i.test(r.error) ? "드라이브 권한이 없습니다. 편집기에서 setupDrive 를 실행해 승인하세요. (" + r.error + ")" : r.error);
+      out.push(...(Array.isArray(r.data) ? r.data : []));
       if (onStep) onStep(Math.min(i + 4, files.length), files.length);
     }
     return out;
   }
-  function enqueue(label, job) {
+  function enqueue(label, job, anchorId) {
+    tag(anchorId, "busy");
     queue = queue.then(async () => {
       notify({ state: "busy", label });
-      try { const r = await job(); notify({ state: "done", label, count: r.length }); }
-      catch (e) { console.warn("[drive]", e); notify({ state: "fail", label, error: e.message }); }
+      try { const r = await job(); tag(anchorId, "done"); notify({ state: "done", label, count: r.length }); }
+      catch (e) { console.warn("[drive]", e); tag(anchorId, "fail", e.message); notify({ state: "fail", label, error: e.message }); }
     });
     return queue;
   }
+  // 발행 완료 글자 바로 오른쪽에 "드라이브 저장" / "드라이브 저장 실패" (실패 이유는 마우스 올리면)
+  function tag(anchorId, state, error) {
+    const a = anchorId && document.getElementById(anchorId); if (!a) return;
+    let t = a.nextElementSibling && a.nextElementSibling.classList.contains("drive-tag") ? a.nextElementSibling : null;
+    if (!t) { t = document.createElement("span"); a.insertAdjacentElement("afterend", t); }
+    t.className = "drive-tag " + state; t.title = error || "";
+    t.textContent = state === "busy" ? "드라이브 저장 중" : state === "done" ? "드라이브 저장" : "드라이브 저장 실패";
+    if (a.style.display === "none") a.style.display = "";
+  }
 
-  // 정산서 HTML → PDF (문서 한 장 = 한 페이지). 화면 배율(zoom)과 상관없이 같은 크기로 찍는다
+  // 정산서 HTML → PDF (문서 한 장 = 한 페이지). 화면 배율과 상관없게 보이지 않는 별도 창(iframe)에 그려서 찍는다
   async function docsPdf(html) {
-    const root = document.documentElement, zoom = root.style.zoom;
-    const box = document.createElement("div");
-    box.style.cssText = "position:fixed; left:-10000px; top:0; width:794px; background:#fff;";
-    box.innerHTML = html; document.body.appendChild(box);
+    const frame = document.createElement("iframe");
+    frame.style.cssText = "position:fixed; left:-10000px; top:0; width:820px; height:1200px; border:0; visibility:hidden;";
+    document.body.appendChild(frame);
     try {
-      root.style.zoom = "";
-      await Promise.all(Array.from(box.querySelectorAll("img")).map(img => img.complete ? null : new Promise(r => { img.onload = img.onerror = r; })));
-      if (typeof fitDocs === "function") fitDocs(box);
+      const d = frame.contentDocument, base = document.baseURI;
+      const styles = Array.from(document.querySelectorAll('link[rel="stylesheet"], style')).map(n => n.outerHTML).join("");
+      d.open(); d.write(`<!doctype html><html><head><meta charset="utf-8"><base href="${base}">${styles}</head><body style="margin:0;background:#fff"><div id="box" style="width:794px">${html}</div></body></html>`); d.close();
+      await new Promise(r => { if (d.readyState === "complete") r(); else frame.onload = r; });
+      await Promise.all(Array.from(d.querySelectorAll("img")).map(img => img.complete ? null : new Promise(r => { img.onload = img.onerror = r; })));
+      if (d.fonts && d.fonts.ready) await d.fonts.ready;
+      if (typeof fitDocs === "function") fitDocs(d.getElementById("box"));
       const { jsPDF } = window.jspdf, pdf = new jsPDF({ unit: "pt", format: "a4" });
-      const docs = Array.from(box.querySelectorAll(".doc"));
+      const docs = Array.from(d.querySelectorAll(".doc"));
       for (let i = 0; i < docs.length; i++) {
-        const c = await html2canvas(docs[i], { scale: 2, backgroundColor: "#ffffff", logging: false });
+        const c = await html2canvas(docs[i], { scale: 2, backgroundColor: "#ffffff", logging: false, windowWidth: 820 });
         const PW = 595.28, PH = 841.89, M = 14, s = Math.min((PW - 2 * M) / c.width, (PH - 2 * M) / c.height);
         if (i) pdf.addPage();
         pdf.addImage(c.toDataURL("image/jpeg", 0.85), "JPEG", (PW - c.width * s) / 2, M, c.width * s, c.height * s);
       }
       return pdf.output("blob");
-    } finally { box.remove(); root.style.zoom = zoom; }
+    } finally { frame.remove(); }
   }
 
   // 전기사용자 문서: doc = "bill"(가정산서) | "trueup"(오차정산서)
-  function saveCust(R, doc) {
+  function saveCust(R, doc, anchorId) {
     if (!R || R.preview) return;
     const owner = (R.customer && R.customer.name) || R.app, type = doc === "bill" ? "가정산서" : "오차정산서";
     const no = docNo(R, doc === "bill" ? "0001" : "0002");
@@ -64,10 +77,10 @@ const Drive = (function () {
     return enqueue(`${ymLabel(R.month)} ${owner} ${type}`, async () => {
       const blob = await docsPdf(doc === "bill" ? invoiceHtml(snap) : trueUpHtml(snap));
       return upload([{ year: R.month.slice(0, 4), kind: "cust", owner, name: `${ymLabel(R.month)}_${type}_${owner}_${no}`, blob }]);
-    });
+    }, anchorId);
   }
   // 발전사업자 정산서: items = [{ plant, snap? }] (snap 이 없으면 지금 발전대금 계산 결과)
-  function saveGen(month, items, onStep) {
+  function saveGen(month, items, anchorId) {
     if (!items.length) return;
     const ownerOf = p => String(((typeof masterData !== "undefined" && masterData[p]) || {})["사업자명(대표자명)"] || p).split("(")[0].trim() || p;
     return enqueue(`${ymLabel(month)} 발전사업자 정산서 ${items.length}건`, async () => {
@@ -79,21 +92,10 @@ const Drive = (function () {
           files.push({ year: month.slice(0, 4), kind: "gen", owner: ownerOf(plant), name: `${ymLabel(month)}_정산서_${plant}_${no}`, blob: await buildPdfBlobForPlant(plant, snap) });
         }
         done.push(...await upload(files));
-        if (onStep) onStep(Math.min(i + 4, items.length), items.length);
       }
       return done;
-    });
+    }, anchorId);
   }
   return { saveCust, saveGen, onStatus: fn => listeners.push(fn), idle: () => queue };
 })();
 
-// 진행 상황: 헤더 옆 작은 표시 (저장 중 / 완료 / 실패)
-Drive.onStatus(s => {
-  let el = document.getElementById("driveStatus");
-  if (!el) { el = document.createElement("span"); el.id = "driveStatus"; el.className = "drive-status"; const h = document.querySelector(".hdr-right, header.app"); if (!h) return; h.insertBefore(el, h.firstChild); }
-  clearTimeout(el._t);
-  el.className = "drive-status " + s.state;
-  el.textContent = s.state === "busy" ? `드라이브 저장 중 · ${s.label}` : s.state === "done" ? `드라이브 저장됨 · ${s.label}` : `드라이브 저장 실패 · ${s.label}`;
-  el.title = s.error || "";
-  if (s.state === "done") el._t = setTimeout(() => { el.textContent = ""; el.className = "drive-status"; }, 6000);
-});

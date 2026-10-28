@@ -215,7 +215,7 @@ async function redrawDoc(o) {
 }
 
 /* ---------- 저장 + 연결 문서 반영 ---------- */
-const arcDrive = (R, doc) => { if (R && typeof Drive !== "undefined") Drive.saveCust(R, doc); }; // 고친 문서를 드라이브에도 다시 저장
+const arcDrive = (R, doc) => { if (R && typeof Drive !== "undefined") Drive.saveCust(R, doc, "arcMsg"); }; // 고친 문서를 드라이브에도 다시 저장
 const arcSet = async (key, val) => { const w = await Store.set(key, val); if (w === "denied") throw new Error("정산 권한이 없습니다."); return w; };
 
 async function arcSaveBill(o, R) {
@@ -271,7 +271,7 @@ async function arcSaveGen(o, snap) {
   g.plants[o.key] = Object.assign({}, g.plants[o.key], { unitPrice: c.unitPrice, feeRate: c.feeRate, energyFee: c.energyFee, supplyValue: c.supplyValue, vat1: c.vat1, subtotal1: c.subtotal1,
     fee: c.fee, vat2: c.vat2, subtotal2: c.subtotal2, adj: c.adj, payment: c.payment, editedAt: new Date().toISOString() });
   await arcSet(key, g);
-  if (typeof Drive !== "undefined") Drive.saveGen(o.month, [{ plant: o.key, snap: arcGenSnap(o.key, o.month) }]);
+  if (typeof Drive !== "undefined") Drive.saveGen(o.month, [{ plant: o.key, snap: arcGenSnap(o.key, o.month) }], "arcMsg");
   if (typeof settleMonth !== "undefined" && settleMonth === o.month && typeof adjustmentsByPlant !== "undefined") adjustmentsByPlant[o.key] = c.adj; // 발전사업자 정산 화면에 같은 달이 열려 있으면 조정값 유지
   return [`${monthLabel(o.month)} ${o.key} 정산서`, "정산 대시보드 지급액"];
 }
