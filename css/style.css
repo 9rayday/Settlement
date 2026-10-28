@@ -686,7 +686,7 @@ input, select, textarea, button{ max-width:100%; }
 .arc-bar h2{ margin:0; }
 .arc-bar #arcMsg{ display:inline-block; margin-top:8px; }
 @media (max-width:720px){ 
-.drive-tag{ display:inline-block; margin-left:8px; font-size:12px; font-weight:600; padding:1px 8px; border-radius:10px; vertical-align:middle; }
-.drive-tag.busy{ background:#F1F3F6; color:var(--sub); }
-.drive-tag.done{ background:#E6F5F1; color:var(--accent-2); }
-.drive-tag.fail{ background:#FBE3E1; color:var(--danger); cursor:help; }
+.status.drive-tag{ background:none; padding-left:0; margin-left:6px; }
+.status.drive-tag.busy{ color:var(--sub); }
+.status.drive-tag.done{ color:#1E8E4F; }
+.status.drive-tag.fail{ color:var(--danger); cursor:help; }

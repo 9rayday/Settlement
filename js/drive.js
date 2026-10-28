@@ -37,7 +37,7 @@ const Drive = (function () {
     const a = anchorId && document.getElementById(anchorId); if (!a) return;
     let t = a.nextElementSibling && a.nextElementSibling.classList.contains("drive-tag") ? a.nextElementSibling : null;
     if (!t) { t = document.createElement("span"); a.insertAdjacentElement("afterend", t); }
-    t.className = "drive-tag " + state; t.title = error || "";
+    t.className = "status drive-tag " + state; // 왼쪽 상태 글자(계산 완료·발행 완료)와 같은 모양, 색만 다르게 t.title = error || "";
     t.textContent = state === "busy" ? "드라이브 저장 중" : state === "done" ? "드라이브 저장" : "드라이브 저장 실패";
     if (a.style.display === "none") a.style.display = "";
   }
