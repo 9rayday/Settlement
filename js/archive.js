@@ -11,7 +11,6 @@ const arcState = { kind: "cust", year: null, open: null, edit: null, flash: null
 
 const arcYm = (y, i) => `${y}${String(i + 1).padStart(2, "0")}`;
 const arcWon = n => n == null || isNaN(n) ? "-" : Math.round(n).toLocaleString() + " 원";
-const arcShort = n => n == null || isNaN(n) ? "" : (Math.abs(n) >= 1e4 ? Math.round(n / 1e4).toLocaleString() + "만" : Math.round(n).toLocaleString());
 
 function arcYears() {
   const ys = new Set([String(new Date().getFullYear())]);
@@ -47,7 +46,7 @@ function renderArchivePage() {
   const cells = r => r.m.map((c, i) => {
     const ym = arcYm(y, i);
     if (kind === "cust") return `<td class="arc-cell">${c.bill ? chip("bill", r.key, ym, "가", `가정산서 · 당월 청구 계 ${arcWon(c.bill.grandTotal)}${c.bill.paidAt ? " · 수령 " + c.bill.paidAt : ""}`, true) : ""}${c.trueup ? chip("trueup", r.key, ym, "오", "오차정산서", true) : ""}${!c.bill && !c.trueup ? '<span class="arc-none">·</span>' : ""}</td>`;
-    return `<td class="arc-cell">${c.gen ? chip("gen", r.key, ym, arcShort(c.gen.payment) || "-", `정산서 · 지급액 ${arcWon(c.gen.payment)}`, true) : '<span class="arc-none">·</span>'}</td>`;
+    return `<td class="arc-cell">${c.gen ? chip("gen", r.key, ym, "정", `정산서 · 지급액 ${arcWon(c.gen.payment)}`, true) : '<span class="arc-none">·</span>'}</td>`;
   }).join("");
   host.innerHTML = `<div class="card"><div class="reg-head"><h2>정산서 보관함</h2>
       <div class="row"><div class="seg arc-kind">${[["cust", "전기사용자"], ["gen", "발전사업자"]].map(([k, l]) => `<button type="button" data-k="${k}"${k === kind ? ' class="active"' : ""}>${l}</button>`).join("")}</div>
