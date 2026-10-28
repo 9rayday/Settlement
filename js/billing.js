@@ -416,9 +416,11 @@ function invoiceHtml(R) {
   // 행: 항목(2칸) | 금액 | 산출근거
   const row = (l, a, basis, cls) => `<tr${cls ? ` class="${cls}"` : ""}><td class="label" colspan="2">${l}</td><td class="num">${a}</td><td class="basis">${basis || ""}</td></tr>`;
   const sub = (l, a, basis, cls) => `<td class="label${cls ? " " + cls : ""}">${l}</td><td class="num">${a}</td><td class="basis">${basis || ""}</td>`;
-  const energyBasis = inv.energyParts.length > 1
+  // 계약이 여러 건이어도 단가가 같으면 한 줄 (다를 때만 계약별)
+  const prices = Array.from(new Set(inv.energyParts.map(x => x.unitPrice)));
+  const energyBasis = prices.length > 1
     ? inv.energyParts.map(x => `${esc(x.id)} ${kwh2(x.kwh)} × ${x.unitPrice} 원/kWh`).join("<br>")
-    : `공급량 계 × ${ctx.unitPrice} 원/kWh`;
+    : `공급량 계 × ${prices.length ? prices[0] : ctx.unitPrice} 원/kWh`;
   const netRows = 2 + plantsN.length;
   const plantRows = plantsN.map(p => { const n = inv.netByPlant[p];
     const temp = ctx.plants[p] && ctx.plants[p].tempRegion ? ' <b class="warn-t">※ 발전소 지역 미등록 → 임시 비수도권</b>' : "";
@@ -653,24 +655,30 @@ function hourlyChartSvg(byHour) {
 }
 
 // 연간보장공급량: 계약관리 이행현황과 같은 계산 (시트 월별실적 기준), 정산월까지의 실적만
+// 정산서용 연간보장공급량: 그룹(신청번호)의 계약을 회차별로 합쳐 한 줄씩 (보장량·실적·미달 합계, 기간은 가장 이른 시작 ~ 가장 늦은 끝)
+// 진행 중인 회차까지만 표시 (앞으로 올 회차는 빈 줄이라 A4만 넘김). 계약별 회차 관리는 계약이행현황에서.
 function guaranteeRows(app, month) {
   if (typeof contractOf !== "function" || typeof yearSchedule !== "function" || typeof perfByPlant !== "function") return [];
   const byPlant = {}; Object.entries(perfByPlant()).forEach(([p, ms]) => { byPlant[p] = {}; Object.entries(ms).forEach(([ym, v]) => { if (ym <= month) byPlant[p][ym] = v; }); });
-  const yy = ymd => `'${ymd.slice(2, 4)}.${ymd.slice(5, 7)}.`;
-  const out = [];
+  const yy = ymd => `'${ymd.slice(2, 4)}.${ymd.slice(5, 7)}.`, ymOf = ymd => ymd.slice(0, 7).replace("-", "");
+  const byN = {};
   Registry.contractsOfApp(app).forEach(raw => {
-    const key = Registry.custKey(raw), c = contractOf("cust", key), ys = yearSchedule(c, byPlant);
-    if (!ys) return;
-    const multi = Registry.contractsOfApp(app).length > 1;
-    ys.forEach(y => {
-      const started = y.s.slice(0, 7).replace("-", "") <= month;
-      const lastYm = started ? (month < y.e.slice(0, 7).replace("-", "") ? month : y.e.slice(0, 7).replace("-", "")) : "";
-      out.push({ label: `${multi ? esc(key) + " " : ""}${y.n}회차<br><small>(${yy(y.s)} ~ ${yy(y.e)})</small>`, guar: y.guar,
-        actual: started ? y.actual : null, short: y.state === "ended" ? y.short : null,
-        note: started ? `${yy(y.s)}~'${lastYm.slice(2, 4)}.${lastYm.slice(4)}. 누계` : "" });
+    const ys = yearSchedule(contractOf("cust", Registry.custKey(raw)), byPlant);
+    (ys || []).forEach(y => {
+      const g = byN[y.n] || (byN[y.n] = { n: y.n, s: y.s, e: y.e, guar: 0, actual: 0, short: 0, started: false, ended: true });
+      if (y.s < g.s) g.s = y.s; if (y.e > g.e) g.e = y.e;
+      g.guar += y.guar;
+      if (ymOf(y.s) <= month) { g.started = true; g.actual += y.actual; }
+      if (y.state === "ended") g.short += y.short; else g.ended = false;
     });
   });
-  return out;
+  const all = Object.values(byN).sort((x, y) => x.n - y.n);
+  const lastStarted = all.filter(g => g.started).map(g => g.n).pop() || 1;
+  return all.filter(g => g.n <= lastStarted).map(g => {
+    const lastYm = g.started ? (month < ymOf(g.e) ? month : ymOf(g.e)) : "";
+    return { label: `${g.n}회차<br><small>(${yy(g.s)} ~ ${yy(g.e)})</small>`, guar: g.guar, actual: g.started ? g.actual : null,
+      short: g.ended && g.short > 0 ? g.short : null, note: g.started ? `${yy(g.s)}~'${lastYm.slice(2, 4)}.${lastYm.slice(4)}. 누계` : "" };
+  });
 }
 function guaranteeTable(app, month) {
   const rows = guaranteeRows(app, month);
