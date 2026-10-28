@@ -12,15 +12,15 @@ body{ margin:0; background:var(--paper); color:var(--ink); font-size:14px; line-
 .login-card{
   background:#fff; border-radius:12px; text-align:center;
   box-shadow:0 12px 40px rgba(0,0,0,0.25);
-  width:min(94vw, 460px);
-  padding:clamp(28px,5vw,44px) clamp(24px,5vw,40px);
+  width:min(92vw, 360px);
+  padding:28px 26px;
 }
-.login-card .login-logo{ height:clamp(36px,6vw,52px); margin-bottom:clamp(16px,3vw,24px); }
+.login-card .login-logo{ height:38px; margin-bottom:18px; }
 .login-card input{
-  padding:clamp(10px,1.6vw,14px) 14px; border-radius:7px; border:1px solid var(--line);
-  font-size:clamp(13.5px,1.8vw,16px); width:100%;
+  padding:9px 12px; border-radius:7px; border:1px solid var(--line);
+  font-size:14px; width:100%;
 }
-.login-card #loginBtn{ width:100%; padding-top:clamp(9px,1.6vw,13px); padding-bottom:clamp(9px,1.6vw,13px); font-size:clamp(13px,1.6vw,15px); }
+.login-card #loginBtn{ width:100%; padding-top:9px; padding-bottom:9px; font-size:14px; }
 .pw-field{ position:relative; }
 .pw-field input{ padding-right:38px; }
 .pw-toggle{
