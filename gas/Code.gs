@@ -381,18 +381,20 @@ function logPerformance_(body) {
 }
 
 /* ============ 정산서 PDF → 구글 드라이브 ============
- * 폴더: TWh 정산서 / <연도> / 전기사용자 | 발전사업자 / <사업자명> / 파일
- * 올해 이전 연도 폴더는 "TWh 정산서 / 백업" 아래로 옮겨 둔다 (지난 연도 문서를 늦게 저장해도 백업/<연도> 로 바로 들어감).
+ * 폴더: [TWh] 정산서 / <연도> / 01. 전기사용자 | 02. 발전사업자 / 001. <사업자명> (연도마다 처음 저장한 순서로 번호) / 파일
+ * 올해 이전 연도 폴더는 "[TWh] 정산서 / 백업" 아래로 옮겨 둔다 (지난 연도 문서를 늦게 저장해도 백업/<연도> 로 바로 들어감).
+ * 예전 이름(TWh 정산서, 전기사용자, 번호 없는 사업자 폴더)이 있으면 새 이름으로 바꿔 그대로 쓴다.
  * 같은 이름의 파일이 있으면 휴지통으로 보내고 새로 만든다 (다시 발행·수정). 최초 1회 편집기에서 setupDrive 실행 → 권한 승인.
  */
-const DRIVE_ROOT_NAME = "TWh 정산서", DRIVE_BACKUP_NAME = "백업";
+const DRIVE_ROOT_NAME = "[TWh] 정산서", DRIVE_BACKUP_NAME = "백업";
+const DRIVE_KIND = { cust: ["01. 전기사용자", "전기사용자"], gen: ["02. 발전사업자", "발전사업자"] }; // [새 이름, 예전 이름]
 function childFolder_(parent, name) {
   const it = parent.getFoldersByName(name);
   return it.hasNext() ? it.next() : parent.createFolder(name);
 }
 function driveRoot_() {
   const props = PropertiesService.getScriptProperties(), id = props.getProperty("DRIVE_ROOT_ID");
-  if (id) { try { const f = DriveApp.getFolderById(id); if (!f.isTrashed()) return f; } catch (e) { /* 지워졌으면 새로 */ } }
+  if (id) { try { const f = DriveApp.getFolderById(id); if (!f.isTrashed()) { if (f.getName() !== DRIVE_ROOT_NAME) f.setName(DRIVE_ROOT_NAME); return f; } } catch (e) { /* 지워졌으면 새로 */ } }
   const f = childFolder_(DriveApp.getRootFolder(), DRIVE_ROOT_NAME);
   props.setProperty("DRIVE_ROOT_ID", f.getId());
   return f;
@@ -409,6 +411,26 @@ function yearFolder_(root, year) {
   const cur = Number(Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy"));
   return childFolder_(Number(year) < cur ? childFolder_(root, DRIVE_BACKUP_NAME) : root, String(year));
 }
+function kindFolder_(year, kind) {
+  const [name, old] = DRIVE_KIND[kind === "gen" ? "gen" : "cust"];
+  const it = year.getFoldersByName(name); if (it.hasNext()) return it.next();
+  const o = year.getFoldersByName(old); if (o.hasNext()) { const f = o.next(); f.setName(name); return f; }
+  return year.createFolder(name);
+}
+// "001. 사업자명" — 같은 이름이 있으면 그 폴더, 없으면 다음 번호로 새로 (번호 없는 예전 폴더는 번호를 붙여 사용)
+function ownerFolder_(parent, owner) {
+  let max = 0, found = null, plain = null;
+  const it = parent.getFolders();
+  while (it.hasNext()) {
+    const f = it.next(), m = /^(\d{3})\. (.*)$/.exec(f.getName());
+    if (m) { max = Math.max(max, Number(m[1])); if (m[2] === owner) found = f; }
+    else if (f.getName() === owner) plain = f;
+  }
+  if (found) return found;
+  const name = String(max + 1).padStart(3, "0") + ". " + owner;
+  if (plain) { plain.setName(name); return plain; }
+  return parent.createFolder(name);
+}
 const driveName_ = s => String(s == null ? "" : s).replace(/[\/:*?"<>|]/g, "_").trim() || "미지정";
 // files: [{ year, kind: "cust"|"gen", owner, name, base64 }]
 function savePdfs_(body) {
@@ -416,7 +438,7 @@ function savePdfs_(body) {
   try {
     const root = driveRoot_(); rollDriveYears_(root);
     return (body.files || []).map(f => {
-      const folder = childFolder_(childFolder_(yearFolder_(root, f.year), f.kind === "gen" ? "발전사업자" : "전기사용자"), driveName_(f.owner));
+      const folder = ownerFolder_(kindFolder_(yearFolder_(root, f.year), f.kind), driveName_(f.owner));
       const name = driveName_(f.name).replace(/(\.pdf)?$/i, ".pdf");
       const old = folder.getFilesByName(name); while (old.hasNext()) old.next().setTrashed(true);
       const file = folder.createFile(Utilities.newBlob(Utilities.base64Decode(f.base64), "application/pdf", name));

@@ -7,7 +7,7 @@ const Drive = (function () {
   let queue = Promise.resolve();
   const listeners = [];
   const notify = s => listeners.forEach(fn => { try { fn(s); } catch (e) { /* 무시 */ } });
-  const ymLabel = m => `${m.slice(0, 4)}-${m.slice(4, 6)}`;
+  const ymLabel = m => `${m.slice(0, 4)}년 ${m.slice(4, 6)}월`;
   const toB64 = blob => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(",")[1]); r.onerror = rej; r.readAsDataURL(blob); });
 
   // 몇 개씩 묶어 올린다 (요청 한 번에 너무 크지 않게)
@@ -71,25 +71,28 @@ const Drive = (function () {
   function saveCust(R, doc, anchorId) {
     if (!R || R.preview) return;
     const owner = (R.customer && R.customer.name) || R.app, type = doc === "bill" ? "가정산서" : "오차정산서";
-    const no = docNo(R, doc === "bill" ? "0001" : "0002");
+    const title = doc === "bill" ? "청구서" : "오차정산서";
     const snap = JSON.parse(JSON.stringify(R)); // 그새 화면이 바뀌어도 발행한 내용으로
     snap.docDate = R.docDate || todayYmd();
     return enqueue(`${ymLabel(R.month)} ${owner} ${type}`, async () => {
       const blob = await docsPdf(doc === "bill" ? invoiceHtml(snap) : trueUpHtml(snap));
-      return upload([{ year: R.month.slice(0, 4), kind: "cust", owner, name: `${ymLabel(R.month)}_${type}_${owner}_${no}`, blob }]);
+      return upload([{ year: R.month.slice(0, 4), kind: "cust", owner, name: `${ymLabel(R.month)} 직접PPA_전력거래대금_${title}_${owner}`, blob }]);
     }, anchorId);
   }
   // 발전사업자 정산서: items = [{ plant, snap? }] (snap 이 없으면 지금 발전대금 계산 결과)
   function saveGen(month, items, anchorId) {
     if (!items.length) return;
     const ownerOf = p => String(((typeof masterData !== "undefined" && masterData[p]) || {})["사업자명(대표자명)"] || p).split("(")[0].trim() || p;
+    // 한 사업자가 그 달 발전소를 여럿 가지면 파일 이름이 겹치지 않게 발전소명을 붙인다
+    const monthPlants = Object.keys(((typeof Store !== "undefined" && Store.get(`genpay:${month}`, null)) || {}).plants || {}).concat(items.map(x => x.plant));
+    const many = o => new Set(monthPlants.filter(p => ownerOf(p) === o)).size > 1;
     return enqueue(`${ymLabel(month)} 발전사업자 정산서 ${items.length}건`, async () => {
       const done = [];
       for (let i = 0; i < items.length; i += 4) { // PDF 만들기 → 4개씩 올리기 (메모리 아끼기)
         const files = [];
         for (const { plant, snap } of items.slice(i, i + 4)) {
-          const no = snap ? snap.docNo : genDocNo(plant);
-          files.push({ year: month.slice(0, 4), kind: "gen", owner: ownerOf(plant), name: `${ymLabel(month)}_정산서_${plant}_${no}`, blob: await buildPdfBlobForPlant(plant, snap) });
+          const o = ownerOf(plant);
+          files.push({ year: month.slice(0, 4), kind: "gen", owner: o, name: `${ymLabel(month)} 직접PPA_전력거래대금_정산서_${o}${many(o) ? ` (${plant})` : ""}`, blob: await buildPdfBlobForPlant(plant, snap) });
         }
         done.push(...await upload(files));
       }
