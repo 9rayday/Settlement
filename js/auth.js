@@ -36,32 +36,83 @@ function checkAuth(){
   return authed;
 }
 
+/* ----- 로그인: 비밀번호 → (카카오 2단계) 인증번호 입력 또는 카카오 연결 → 완료 (gas/Code.gs login_/verifyOtp_/kakaoLink_) ----- */
+let _pending = "";
+function loginErr(msg){
+  const errEl = document.getElementById("loginError");
+  errEl.textContent = msg || "";
+  errEl.style.display = msg ? "inline-flex" : "none";
+}
+function showLoginStep(step){
+  ["pwStep", "otpStep", "linkStep"].forEach(id => { const el = document.getElementById(id); el.hidden = id !== step; if (id === "pwStep") el.style.display = id === step ? "" : "none"; });
+  if (step === "pwStep") { _pending = ""; document.getElementById("otpCode").value = ""; }
+}
+async function busyBtn(id, label, job){
+  const btn = document.getElementById(id), text = btn.textContent;
+  btn.disabled = true; btn.textContent = label;
+  try { return await job(); } finally { btn.disabled = false; btn.textContent = text; }
+}
 async function handleLogin(){
   const id = document.getElementById("loginId").value.trim();
   const pw = document.getElementById("loginPw").value;
-  const errEl = document.getElementById("loginError");
-  errEl.style.display = "none";
-  if(!id || !pw){
-    errEl.textContent = "아이디와 비밀번호를 입력하세요.";
-    errEl.style.display = "inline-flex";
+  loginErr("");
+  if(!id || !pw) return loginErr("아이디와 비밀번호를 입력하세요.");
+  const result = await busyBtn("loginBtn", "확인 중...", () => login(id, pw));
+  if(!result.ok) return loginErr(result.error);
+  afterLoginStep(result.data, id);
+}
+function afterLoginStep(d, id){
+  if (d && d.otp) {
+    _pending = d.pending;
+    document.getElementById("otpTo").textContent = `카카오톡 나와의 채팅 · ${String(d.to || "").replace(/ #\d+$/, "")}`;
+    showLoginStep("otpStep"); document.getElementById("otpCode").focus();
     return;
   }
-  const btn = document.getElementById("loginBtn");
-  btn.disabled = true; btn.textContent = "확인 중...";
-  const result = await login(id, pw);
-  btn.disabled = false; btn.textContent = "로그인";
-  if(!result.ok){
-    errEl.textContent = result.error;
-    errEl.style.display = "inline-flex";
+  if (d && d.link) {
+    _pending = d.pending;
+    document.getElementById("kakaoLinkBtn").onclick = () => { location.href = d.authUrl; };
+    showLoginStep("linkStep");
     return;
   }
+  completeLogin(d, id);
+}
+async function handleOtp(){
+  const code = document.getElementById("otpCode").value.replace(/\D/g, "");
+  loginErr("");
+  if (code.length !== 6) return loginErr("인증번호 6자리를 입력하세요.");
+  const r = await busyBtn("otpBtn", "확인 중...", () => authPost({ action: "verifyOtp", pending: _pending, code }));
+  if (!r.ok) { loginErr(r.error); if (/다시 로그인/.test(r.error)) showLoginStep("pwStep"); else document.getElementById("otpCode").select(); return; }
+  completeLogin(r.data);
+}
+async function handleResend(){
+  loginErr("");
+  const r = await busyBtn("otpResend", "보내는 중...", () => authPost({ action: "resendOtp", pending: _pending }));
+  if (!r.ok) { loginErr(r.error); if (/다시 로그인/.test(r.error)) showLoginStep("pwStep"); return; }
+  document.getElementById("otpCode").value = ""; document.getElementById("otpCode").focus();
+}
+// 카카오 동의 화면에서 돌아옴 (kakao.html → index.html?code=…&state=…)
+async function handleKakaoReturn(){
+  const q = new URLSearchParams(location.search);
+  if (!q.has("state") || !(q.has("code") || q.has("error"))) return false;
+  history.replaceState(null, "", location.pathname); // 주소창의 code 지우기
+  if (!q.has("code")) { loginErr("카카오 연결이 취소되었습니다. 다시 로그인하세요."); return true; }
+  loginErr(""); document.getElementById("loginBtn").textContent = "카카오 연결 중...";
+  document.getElementById("loginBtn").disabled = true;
+  const r = await authPost({ action: "kakaoLink", code: q.get("code"), state: q.get("state") });
+  document.getElementById("loginBtn").textContent = "로그인"; document.getElementById("loginBtn").disabled = false;
+  if (!r.ok) { loginErr(r.error); return true; }
+  completeLogin(r.data);
+  return true;
+}
+function completeLogin(data, id){
+  showLoginStep("pwStep");
   sessionStorage.setItem(AUTH_KEY, "1");
   // Code.gs 재배포 전(토큰을 주지 않는 예전 서버)에는 예전처럼 전체 권한으로 들어간다. 재배포하면 서버 권한이 적용된다.
-  const legacy = !(result.data && result.data.token);
-  sessionStorage.setItem(TOKEN_KEY, legacy ? "legacy" : result.data.token);
-  sessionStorage.setItem(ROLE_KEY, legacy ? "관리자 (서버 재배포 전)" : (result.data.role || "조회"));
-  sessionStorage.setItem(PERMS_KEY, JSON.stringify(legacy ? ["admin", "rates", "contract", "settle"] : (result.data.perms || [])));
-  sessionStorage.setItem("settlement_user", (result.data && result.data.name) || id); // 헤더 사용자 표시
+  const legacy = !(data && data.token);
+  sessionStorage.setItem(TOKEN_KEY, legacy ? "legacy" : data.token);
+  sessionStorage.setItem(ROLE_KEY, legacy ? "관리자 (서버 재배포 전)" : (data.role || "조회"));
+  sessionStorage.setItem(PERMS_KEY, JSON.stringify(legacy ? ["admin", "rates", "contract", "settle"] : (data.perms || [])));
+  sessionStorage.setItem("settlement_user", (data && data.name) || id || ""); // 헤더 사용자 표시
   if(checkAuth()) initApp();
 }
 

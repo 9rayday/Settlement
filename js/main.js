@@ -22,6 +22,13 @@ document.addEventListener("DOMContentLoaded", ()=>{
   document.getElementById("loginBtn").addEventListener("click", handleLogin);
   document.getElementById("loginPw").addEventListener("keydown", e=>{ if(e.key==="Enter") handleLogin(); });
   document.getElementById("pwToggleBtn").addEventListener("click", togglePasswordVisibility);
+  document.getElementById("otpBtn").addEventListener("click", handleOtp);
+  document.getElementById("otpCode").addEventListener("keydown", e=>{ if(e.key==="Enter") handleOtp(); });
+  document.getElementById("otpCode").addEventListener("input", e=>{ e.target.value = e.target.value.replace(/\D/g, "").slice(0, 6); if(e.target.value.length === 6) handleOtp(); });
+  document.getElementById("otpResend").addEventListener("click", handleResend);
+  document.getElementById("stepBack").addEventListener("click", ()=>{ loginErr(""); showLoginStep("pwStep"); });
+  document.getElementById("linkBack").addEventListener("click", ()=>{ loginErr(""); showLoginStep("pwStep"); });
 
   if(checkAuth()) initApp();
+  else handleKakaoReturn();
 });

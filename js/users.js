@@ -24,15 +24,17 @@ async function renderUsersPage(keep) {
       <h2>계정 · 권한</h2>
       ${usersState.msg ? `<div class="notice ${usersState.msg.startsWith("⚠") ? "bad" : "warn"}">${uEsc(usersState.msg)}</div>` : ""}
       <div class="table-wrap"><table class="grid users-table">
-        <tr><th>아이디</th><th>이름</th><th>권한</th><th>상태</th><th>최근 로그인</th><th></th></tr>
+        <tr><th>아이디</th><th>이름</th><th>권한</th><th>상태</th><th>카카오</th><th>최근 로그인</th><th></th></tr>
         ${list.map(u => `<tr>
           <td>${uEsc(u.id)}${u.master ? ' <span class="tag">마스터</span>' : ""}</td>
           <td><input class="u-name" data-id="${uEsc(u.id)}" value="${uEsc(u.name)}"></td>
           <td>${roleSel(u)}</td>
           <td>${u.locked ? '<span class="tag bad">잠김</span>' : (u.fails ? `정상 <span class="perf-sub">오류 ${u.fails}/5</span>` : "정상")}</td>
+          <td>${u.otpOff ? '<span class="tag">2단계 끔</span>' : u.kakao ? uEsc(u.kakao.replace(/ #[0-9]+$/, "")) : "-"}</td>
           <td>${uEsc(u.lastLogin || "-")}</td>
           <td class="u-actions"><button class="btn secondary u-save" data-id="${uEsc(u.id)}">저장</button>
             ${u.locked ? `<button class="btn accent u-unlock" data-id="${uEsc(u.id)}">잠금 해제</button>` : ""}
+            ${u.kakao ? `<button class="btn secondary u-kakao" data-id="${uEsc(u.id)}">카카오 해제</button>` : ""}
             <button class="btn secondary u-pw" data-id="${uEsc(u.id)}">비밀번호 초기화</button>
             ${u.master ? "" : `<button class="btn secondary u-del" data-id="${uEsc(u.id)}">삭제</button>`}</td></tr>`).join("")}
       </table></div>
@@ -58,6 +60,10 @@ async function renderUsersPage(keep) {
   host.querySelectorAll(".u-pw").forEach(b => b.onclick = async () => {
     const pw = prompt(`${b.dataset.id} 의 새 비밀번호 (6자 이상)`); if (!pw) return;
     if (await usersCall("saveUser", { user: { id: b.dataset.id, password: pw } })) { usersState.msg = `${b.dataset.id} 비밀번호 초기화 완료 (잠금도 해제됨)`; renderUsersPage(true); }
+  });
+  host.querySelectorAll(".u-kakao").forEach(b => b.onclick = async () => {
+    if (!confirm(`${b.dataset.id} 의 카카오 연결을 해제할까요? (다음 로그인 때 다시 연결)`)) return;
+    if (await usersCall("kakaoUnlink", { id: b.dataset.id })) { usersState.msg = `${b.dataset.id} 카카오 연결 해제 완료`; renderUsersPage(true); }
   });
   host.querySelectorAll(".u-del").forEach(b => b.onclick = async () => {
     if (!confirm(`${b.dataset.id} 계정을 삭제할까요?`)) return;

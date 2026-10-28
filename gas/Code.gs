@@ -17,12 +17,9 @@
  *
  * 전기사용자 시트("전기사용자 정보"): CUSTOMER_FIELDS. 탭0 등록 화면이 행 단위로 저장/삭제한다.
  *
- * ※ 고지서 PDF는 이제 GAS를 거치지 않고 프론트엔드(js/exporters/pdf.js)에서 jsPDF로 직접
- * 그린다 — 이 파일은 UrlFetchApp을 쓰지 않으므로 script.external_request 스코프도 불필요하다.
- *
  * 권한(appsscript.json oauthScopes, 저장소 gas/appsscript.json 과 같게):
- *   spreadsheets(시트) · script.scriptapp(편집 트리거) · drive(정산서 PDF 드라이브 저장)
- *   권한을 바꾼 뒤에는 편집기에서 setupDrive 를 한 번 실행해 승인하고, 웹앱을 새 버전으로 재배포한다.
+ *   spreadsheets(시트) · script.scriptapp(편집 트리거) · drive(정산서 PDF 드라이브 저장) · script.external_request(카카오톡 인증번호)
+ *   권한을 바꾼 뒤에는 편집기에서 setupDrive · setupKakao 를 한 번 실행해 승인하고, 웹앱을 새 버전으로 재배포한다.
  */
 
 const SHEET_ID = "10ulJzwqjxS6Gc-I6HsEtrljYn-OgBJ7q7yuhSY8u4Pg";
@@ -141,12 +138,16 @@ function doPost(e) {
     const action = body.action;
     if (action === "login") return jsonOut_({ ok: true, data: login_(body) });
     if (action === "logout") return jsonOut_({ ok: true, data: logout_(body.token) });
+    if (action === "verifyOtp") return jsonOut_({ ok: true, data: verifyOtp_(body) });
+    if (action === "resendOtp") return jsonOut_({ ok: true, data: resendOtp_(body) });
+    if (action === "kakaoLink") return jsonOut_({ ok: true, data: kakaoLink_(body) });
     const s = session_(body.token);
     if (action === "me") return jsonOut_({ ok: true, data: { id: s.id, role: s.role || "조회", perms: s.perms } });
     if (action === "listUsers") { need_(s, "admin"); return jsonOut_({ ok: true, data: listUsers_() }); }
     if (action === "saveUser") { need_(s, "admin"); return jsonOut_({ ok: true, data: saveUser_(body, s) }); }
     if (action === "unlockUser") { need_(s, "admin"); return jsonOut_({ ok: true, data: unlockUser_(body) }); }
     if (action === "deleteUser") { need_(s, "admin"); return jsonOut_({ ok: true, data: deleteUser_(body, s) }); }
+    if (action === "kakaoUnlink") { need_(s, "admin"); return jsonOut_({ ok: true, data: kakaoUnlink_(body) }); }
     if (["saveAdjustments", "logPerformance", "savePdfs"].indexOf(action) >= 0) need_(s, "settle");
     if (["savePlant", "deletePlant", "saveCustomer", "deleteCustomer"].indexOf(action) >= 0) need_(s, "contract");
     if (action === "saveStore") { const p = storePerm_(body.key); if (p) need_(s, p); else if (!s.perms.length) throw new Error("권한이 없습니다. (조회 전용 계정)"); }
@@ -847,7 +848,7 @@ function backfillYearlyGrid() { refillYearlyGrid(); }
  */
 const MASTER_ADMIN_ID = "9rayday";
 const ROLE_PERMS = { "관리자": ["admin", "rates", "contract", "settle"], "정산담당자": ["settle"], "실무담당자": ["contract", "settle"] };
-const AUTH_COLS = ["아이디", "비밀번호", "이름", "권한", "실패횟수", "잠금", "최근로그인", "등록일시"];
+const AUTH_COLS = ["아이디", "비밀번호", "이름", "권한", "실패횟수", "잠금", "최근로그인", "등록일시", "카카오", "2단계"];
 const SESSION_TTL = 21600; // 초 (CacheService 최대 6시간)
 const MAX_FAIL = 5;
 
@@ -900,14 +901,20 @@ function login_(body) {
     }
     setCell_(A, found._row, "실패횟수", 0);
     setCell_(A, found._row, "잠금", "");
-    setCell_(A, found._row, "최근로그인", Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm"));
     if (String(found["비밀번호"]).indexOf("sha256:") !== 0) setCell_(A, found._row, "비밀번호", hashPw_(pw)); // 평문 → 해시
-    const role = roleOf_(found);
-    if (id === MASTER_ADMIN_ID && String(found["권한"]).trim() !== "관리자") setCell_(A, found._row, "권한", "관리자");
-    const token = Utilities.getUuid();
-    CacheService.getScriptCache().put("tok:" + token, JSON.stringify({ id: String(found["아이디"]).trim(), role, t: Date.now() }), SESSION_TTL);
-    return { name: found["이름"] || id, id, role: role || "조회", perms: ROLE_PERMS[role] || [], token };
+    const cfg = kakaoCfg_();
+    if (cfg && String(found["2단계"] || "").trim().toUpperCase() !== "N") return startSecondStep_(cfg, found, body.redirect);
+    return finishLogin_(A, found);
   } finally { lock.releaseLock(); }
+}
+// 비밀번호(+카카오 인증)까지 끝나면 로그인 토큰 발급
+function finishLogin_(A, found) {
+  const id = String(found["아이디"]).trim(), role = roleOf_(found);
+  setCell_(A, found._row, "최근로그인", Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm"));
+  if (id === MASTER_ADMIN_ID && String(found["권한"]).trim() !== "관리자") setCell_(A, found._row, "권한", "관리자");
+  const token = Utilities.getUuid();
+  CacheService.getScriptCache().put("tok:" + token, JSON.stringify({ id, role, t: Date.now() }), SESSION_TTL);
+  return { name: found["이름"] || id, id, role: role || "조회", perms: ROLE_PERMS[role] || [], token };
 }
 function kickUser_(id) { CacheService.getScriptCache().put("kick:" + String(id).trim().toLowerCase(), String(Date.now()), SESSION_TTL); }
 function logout_(token) { if (token) CacheService.getScriptCache().remove("tok:" + token); return true; }
@@ -940,7 +947,7 @@ function storePerm_(key) {
 function listUsers_() {
   return authSheet_().rows.map(r => ({ id: String(r["아이디"]).trim(), name: r["이름"] || "", role: roleOf_(r) || "", fails: Number(r["실패횟수"]) || 0,
     locked: String(r["잠금"]).trim().toUpperCase() === "Y" || (Number(r["실패횟수"]) || 0) >= MAX_FAIL, lastLogin: r["최근로그인"] ? String(r["최근로그인"]) : "",
-    master: String(r["아이디"]).trim() === MASTER_ADMIN_ID })).filter(u => u.id);
+    master: String(r["아이디"]).trim() === MASTER_ADMIN_ID, kakao: String(r["카카오"] || "").trim(), otpOff: String(r["2단계"] || "").trim().toUpperCase() === "N" })).filter(u => u.id);
 }
 function saveUser_(body, s) {
   const u = body.user || {}, id = String(u.id || "").trim();
@@ -985,6 +992,137 @@ function deleteUser_(body, s) {
   const A = authSheet_(), found = A.rows.find(r => String(r["아이디"]).trim() === id);
   if (!found) throw new Error("계정을 찾을 수 없습니다.");
   A.sheet.deleteRow(found._row);
+  PropertiesService.getScriptProperties().deleteProperty(kakaoProp_(id));
   kickUser_(id);
   return listUsers_();
+}
+
+/* ============ 카카오톡 2단계 인증 ============
+ * 스크립트 속성 KAKAO_REST_KEY · KAKAO_CLIENT_SECRET 이 있으면 켜진다 (없으면 비밀번호만으로 로그인).
+ * 비밀번호가 맞으면 → 카카오 연결된 사람: 카톡 "나와의 채팅"으로 6자리 인증번호 (5분, 5회까지, 재전송 2번)
+ *                  → 연결 안 된 사람: 카카오 로그인·메시지 전송 동의(연결) 후 바로 로그인
+ * 카카오 토큰은 스크립트 속성 "kakao:<아이디>" 에 (시트에는 연결된 카카오 이름만). 시트 "카카오" 칸을 지우면 연결 해제 → 다음 로그인 때 다시 연결.
+ * 시트 "2단계" 칸 = N 이면 그 사람은 비밀번호만 (카카오 장애 때 비상용).
+ */
+const OTP_TTL = 300, OTP_TRIES = 5, OTP_SENDS = 3, LINK_TTL = 600;
+function kakaoCfg_() {
+  const p = PropertiesService.getScriptProperties(), key = String(p.getProperty("KAKAO_REST_KEY") || "").trim();
+  return key ? { key, secret: String(p.getProperty("KAKAO_CLIENT_SECRET") || "").trim() } : null;
+}
+function kakaoProp_(id) { return "kakao:" + String(id).trim().toLowerCase(); }
+function kakaoLinked_(found) {
+  return !!String(found["카카오"] || "").trim() && !!PropertiesService.getScriptProperties().getProperty(kakaoProp_(found["아이디"]));
+}
+function kakaoFetch_(url, payload, accessToken) {
+  const opt = { method: payload ? "post" : "get", muteHttpExceptions: true };
+  if (payload) opt.payload = payload;
+  if (accessToken) opt.headers = { Authorization: "Bearer " + accessToken };
+  const r = UrlFetchApp.fetch(url, opt);
+  let j = {}; try { j = JSON.parse(r.getContentText() || "{}"); } catch (e) { /* 무시 */ }
+  if (r.getResponseCode() >= 300) {
+    const err = new Error("카카오 오류: " + (j.error_description || j.msg || j.error || r.getResponseCode()) + (j.error_code ? " (" + j.error_code + ")" : j.code ? " (" + j.code + ")" : ""));
+    err.kakao = j; throw err;
+  }
+  return j;
+}
+const pendGet_ = k => { const v = k ? CacheService.getScriptCache().get("pend:" + k) : null; return v ? JSON.parse(v) : null; };
+const pendPut_ = (k, p) => CacheService.getScriptCache().put("pend:" + k, JSON.stringify(p), Math.max(1, Math.ceil((p.exp - Date.now()) / 1000)));
+const pendDel_ = k => { if (k) CacheService.getScriptCache().remove("pend:" + k); };
+const newCode_ = () => String(Math.floor(Math.random() * 1000000)).padStart(6, "0");
+
+function authUrl_(cfg, redirect, state) {
+  return "https://kauth.kakao.com/oauth/authorize?response_type=code&scope=talk_message&client_id=" + encodeURIComponent(cfg.key)
+    + "&redirect_uri=" + encodeURIComponent(redirect) + "&state=" + encodeURIComponent(state);
+}
+// 비밀번호 확인 뒤 두 번째 단계: 인증번호 보내기 또는 카카오 연결 안내
+function startSecondStep_(cfg, found, redirect) {
+  const id = String(found["아이디"]).trim(), pending = Utilities.getUuid();
+  if (kakaoLinked_(found)) {
+    const p = { id, mode: "otp", code: newCode_(), tries: 0, sends: 1, exp: Date.now() + OTP_TTL * 1000 };
+    try { sendOtp_(cfg, id, p.code); pendPut_(pending, p); return { otp: true, pending, to: String(found["카카오"]).trim() }; }
+    catch (e) { if (!e.kakao) throw e; } // 카카오 연결이 끊김(토큰 만료·동의 철회) → 다시 연결
+  }
+  if (!/^https?:\/\/[^\s?#]+\/kakao\.html$/.test(String(redirect || ""))) throw new Error("카카오 연결 주소가 올바르지 않습니다. 화면을 새로고침(Ctrl+F5)하세요.");
+  pendPut_(pending, { id, mode: "link", redirect, exp: Date.now() + LINK_TTL * 1000 });
+  return { link: true, pending, authUrl: authUrl_(cfg, redirect, pending) };
+}
+function kakaoAccess_(cfg, id) {
+  const props = PropertiesService.getScriptProperties(), k = props.getProperty(kakaoProp_(id));
+  if (!k) { const e = new Error("카카오 연결 없음"); e.kakao = {}; throw e; }
+  const info = JSON.parse(k);
+  const t = kakaoFetch_("https://kauth.kakao.com/oauth/token", { grant_type: "refresh_token", client_id: cfg.key, client_secret: cfg.secret, refresh_token: info.rt });
+  if (t.refresh_token) { info.rt = t.refresh_token; props.setProperty(kakaoProp_(id), JSON.stringify(info)); } // 만료 1개월 전부터 새로 준다
+  return { at: t.access_token, info };
+}
+function kakaoMemo_(at, site, text) {
+  return kakaoFetch_("https://kapi.kakao.com/v2/api/talk/memo/default/send",
+    { template_object: JSON.stringify({ object_type: "text", text, link: { web_url: site, mobile_web_url: site } }) }, at);
+}
+function sendOtp_(cfg, id, code) {
+  const a = kakaoAccess_(cfg, id);
+  kakaoMemo_(a.at, a.info.site, `[TWh 정산시스템] 로그인 인증번호\n\n${code}\n\n5분 안에 입력하세요. 본인이 로그인한 것이 아니면 비밀번호를 바꾸세요.`);
+}
+function verifyOtp_(body) {
+  const lock = LockService.getScriptLock(); lock.waitLock(10000);
+  try {
+    const p = pendGet_(body.pending);
+    if (!p || p.mode !== "otp" || p.exp < Date.now()) { pendDel_(body.pending); throw new Error("인증번호 시간이 지났습니다. 다시 로그인하세요."); }
+    if (String(body.code || "").trim() !== p.code) {
+      p.tries++;
+      if (p.tries >= OTP_TRIES) { pendDel_(body.pending); throw new Error(`인증번호를 ${OTP_TRIES}회 틀렸습니다. 다시 로그인하세요.`); }
+      pendPut_(body.pending, p);
+      throw new Error(`인증번호가 맞지 않습니다. (${p.tries}/${OTP_TRIES})`);
+    }
+    pendDel_(body.pending);
+    const A = authSheet_(), found = A.rows.find(r => sameId_(r["아이디"], p.id));
+    if (!found) throw new Error("계정을 찾을 수 없습니다.");
+    return finishLogin_(A, found);
+  } finally { lock.releaseLock(); }
+}
+function resendOtp_(body) {
+  const cfg = kakaoCfg_(), p = pendGet_(body.pending);
+  if (!cfg || !p || p.mode !== "otp" || p.exp < Date.now()) throw new Error("인증 시간이 지났습니다. 다시 로그인하세요.");
+  if (p.sends >= OTP_SENDS) throw new Error(`재전송은 ${OTP_SENDS - 1}번까지입니다. 다시 로그인하세요.`);
+  p.code = newCode_(); p.sends++; p.tries = 0; p.exp = Date.now() + OTP_TTL * 1000;
+  sendOtp_(cfg, p.id, p.code); pendPut_(body.pending, p);
+  return { sent: true };
+}
+// 카카오 동의 화면에서 돌아옴 (kakao.html → index.html?code=&state=) → 토큰 받아 연결하고 로그인 완료
+function kakaoLink_(body) {
+  const cfg = kakaoCfg_(), p = pendGet_(body.state);
+  if (!cfg || !p || p.mode !== "link" || p.exp < Date.now()) throw new Error("카카오 연결 시간이 지났습니다. 다시 로그인하세요.");
+  const t = kakaoFetch_("https://kauth.kakao.com/oauth/token", { grant_type: "authorization_code", client_id: cfg.key, client_secret: cfg.secret, redirect_uri: p.redirect, code: String(body.code || "") });
+  if (String(t.scope || "").split(/[\s,]+/).indexOf("talk_message") < 0) throw new Error("카카오톡 메시지 전송에 동의해야 합니다. 다시 로그인해 동의하세요.");
+  const me = kakaoFetch_("https://kapi.kakao.com/v2/user/me", null, t.access_token);
+  const nick = ((me.kakao_account && me.kakao_account.profile && me.kakao_account.profile.nickname) || (me.properties && me.properties.nickname) || "카카오") + " #" + me.id;
+  const site = p.redirect.replace(/kakao\.html$/, "");
+  PropertiesService.getScriptProperties().setProperty(kakaoProp_(p.id), JSON.stringify({ rt: t.refresh_token, kid: me.id, site }));
+  try { kakaoMemo_(t.access_token, site, "[TWh 정산시스템] 카카오 연결이 완료되었습니다.\n다음 로그인부터 인증번호를 이 채팅으로 보냅니다."); } catch (e) { /* 안내 메시지 실패는 무시 */ }
+  pendDel_(body.state);
+  const lock = LockService.getScriptLock(); lock.waitLock(10000);
+  try {
+    const A = authSheet_(), found = A.rows.find(r => sameId_(r["아이디"], p.id));
+    if (!found) throw new Error("계정을 찾을 수 없습니다.");
+    setCell_(A, found._row, "카카오", nick);
+    return finishLogin_(A, found);
+  } finally { lock.releaseLock(); }
+}
+// 관리자: 카카오 연결 해제 (휴대폰 바뀜 등) → 다음 로그인 때 다시 연결
+function kakaoUnlink_(body) {
+  const id = String(body.id || "").trim(), A = authSheet_(), found = A.rows.find(r => sameId_(r["아이디"], id));
+  if (!found) throw new Error("계정을 찾을 수 없습니다.");
+  setCell_(A, found._row, "카카오", "");
+  PropertiesService.getScriptProperties().deleteProperty(kakaoProp_(id));
+  kickUser_(id);
+  return listUsers_();
+}
+// 편집기에서 한 번 실행: 외부 호출 권한 승인 + 키 확인 (실행 로그에 결과)
+function setupKakao() {
+  const cfg = kakaoCfg_();
+  if (!cfg) { Logger.log("스크립트 속성에 KAKAO_REST_KEY 가 없습니다 (2단계 인증 꺼짐)."); return; }
+  try { kakaoFetch_("https://kauth.kakao.com/oauth/token", { grant_type: "authorization_code", client_id: cfg.key, client_secret: cfg.secret, redirect_uri: "https://9rayday.github.io/Settlement/kakao.html", code: "check" }); }
+  catch (e) {
+    const c = (e.kakao || {}).error_code;
+    Logger.log(c === "KOE320" ? "정상: REST 키와 Client Secret 확인됨 (2단계 인증 켜짐)" : c === "KOE010" ? "Client Secret 이 틀렸거나 비어 있습니다." : c === "KOE101" ? "REST API 키가 틀렸습니다." : "확인 결과: " + e.message);
+  }
 }

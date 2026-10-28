@@ -98,7 +98,11 @@ async function fetchYearlyGrid(plant){
 
 // 로그인은 실패 사유(아이디 없음/비밀번호 틀림/잠김)를 화면에 그대로 보여줘야 해서
 // 실패 시 null로 뭉개버리는 gasPost 대신 직접 처리해 {ok, data, error}를 그대로 반환한다.
-async function login(id, pw){
+// 카카오 2단계 인증(verifyOtp/resendOtp/kakaoLink)도 로그인 전 단계라 같은 방식으로 보낸다
+// redirect: 카카오 동의 후 돌아올 주소 (카카오 콘솔에 등록한 리다이렉트 URI 와 같아야 함)
+function kakaoRedirect(){ return new URL("kakao.html", location.href.split(/[?#]/)[0]).href; }
+async function login(id, pw){ return authPost({ action:"login", id, pw, redirect: kakaoRedirect() }); }
+async function authPost(payload){
   if(!gasConfigured_()){
     return { ok:false, error:"GAS 연결이 설정되지 않았습니다." };
   }
@@ -106,7 +110,7 @@ async function login(id, pw){
     const res = await fetch(GAS_WEBAPP_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({ action:"login", id, pw })
+      body: JSON.stringify(payload)
     });
     const json = await res.json();
     if(!json.ok) return { ok:false, error: String(json.error || "로그인 실패").replace(/^Error:\s*/, "") };
