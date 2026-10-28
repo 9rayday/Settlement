@@ -640,3 +640,26 @@ td.empty{ text-align:center; }
 .perf-kpis .kpi-btn.active{ border-color:var(--navy); background:#E7EEF7; box-shadow:inset 0 0 0 1px var(--navy); }
 .perf-filter{ display:inline-flex; align-items:center; gap:4px; margin-left:8px; padding:1px 4px 1px 10px; border-radius:12px; background:#E7EEF7; color:var(--navy); font-size:12px; font-weight:600; vertical-align:middle; }
 .perf-filter button{ border:none; background:none; cursor:pointer; font-size:14px; line-height:1; color:var(--sub); padding:0 4px; }
+
+/* ===== 정산서 보관함 (js/archive.js) ===== */
+.seg{ display:inline-flex; border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+.seg button{ border:none; background:#fff; padding:6px 14px; cursor:pointer; font-size:13px; color:var(--sub); }
+.seg button + button{ border-left:1px solid var(--line); }
+.seg button.active{ background:var(--navy); color:#fff; font-weight:600; }
+.arc-year{ min-width:64px; text-align:center; font-size:15px; }
+.arc-table th, .arc-table td{ text-align:center; }
+.arc-table td.arc-name{ text-align:left; white-space:nowrap; }
+.arc-cell{ white-space:nowrap; padding:4px 3px !important; }
+.arc-none{ color:#C8CDD5; }
+.arc-chip{ border:1px solid var(--line); background:#fff; border-radius:6px; padding:2px 7px; margin:1px; font-size:12px; cursor:pointer; color:var(--navy); font-variant-numeric:tabular-nums; }
+.arc-chip.bill{ background:#E7EEF7; border-color:#C5D5EA; }
+.arc-chip.trueup{ background:#FFF3E3; border-color:#F1D3A6; color:#8A5300; }
+.arc-chip.gen{ background:#EEF6EF; border-color:#C9E2CC; color:#2D6A36; }
+.arc-chip:hover{ filter:brightness(.96); }
+.arc-chip.active{ outline:2px solid var(--navy); outline-offset:1px; }
+.arc-view{ margin-top:14px; }
+.arc-bar{ margin-bottom:12px; }
+.arc-edit{ margin-top:10px; padding-top:10px; border-top:1px dashed var(--line); }
+.arc-docs .doc + .doc{ margin-top:12px; }
+a.arc-link{ color:inherit; text-decoration:underline; text-decoration-color:#B8C3D3; text-underline-offset:2px; }
+@media print{ .no-print{ display:none !important; } }

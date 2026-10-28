@@ -16,11 +16,12 @@ const PAGES = {
   "page-rate-tou":    { group: "settle", crumb: ["정산관리", "정산", "정산요율관리"], title: "시간대별 요금제 관리" },
   "page-rate-market": { group: "settle", crumb: ["정산관리", "정산", "정산요율관리"], title: "SMP · REC 가격" },
   "page-rec":         { group: "settle", crumb: ["정산관리", "정산"], title: "초과발전량 REC 관리" },
+  "page-archive":     { group: "settle", crumb: ["정산관리", "정산"], title: "정산서 보관함" },
   "page-admin-users": { group: "settle", crumb: ["정산관리"], title: "권한관리", need: "admin" }
 };
 // 페이지별 수정 권한 (없으면 "조회 전용" 표시, 실제 저장은 서버가 막는다)
 const PAGE_EDIT = { "page-cust-perf": "contract", "page-gen-perf": "contract", "page-reg-cust": "contract", "page-reg-plant": "contract", "page-reg-group": "contract",
-  "page-settle-cust": "settle", "page-settle-gen": "settle", "page-rate-kpx": "rates", "page-rate-tou": "rates", "page-rate-market": "rates", "page-rec": "settle" };
+  "page-settle-cust": "settle", "page-settle-gen": "settle", "page-rate-kpx": "rates", "page-rate-tou": "rates", "page-rate-market": "rates", "page-rec": "settle", "page-archive": "settle" };
 const DEFAULT_PAGE = "page-settle-cust";
 const NAV_KEY = "settlement.page";
 
@@ -51,6 +52,7 @@ function showPage(id) {
   if (id === "page-dash" && typeof renderDashboard === "function") renderDashboard(); // 정산 대시보드 (js/dashboard.js)
   if (id === "page-admin-users" && typeof renderUsersPage === "function") renderUsersPage(); // 권한관리 (js/users.js)
   if (id === "page-rec" && typeof renderRecPage === "function") renderRecPage(); // 초과발전량 REC (js/rec.js)
+  if (id === "page-archive" && typeof renderArchivePage === "function") renderArchivePage(); // 정산서 보관함 (js/archive.js)
   try { localStorage.setItem(NAV_KEY, id); } catch (e) { /* 저장 불가 환경 */ }
   document.body.classList.remove("side-shown");
 }

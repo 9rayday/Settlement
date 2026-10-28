@@ -76,6 +76,7 @@ function renderDashboard() {
 function bindPaid() {
   const host = document.getElementById("dashDetail"); if (!host || !dashState.month) return;
   const ym = dashState.month, key = app => `bill:${ym}:${app}`;
+  host.querySelectorAll(".arc-link").forEach(a => a.onclick = e => { e.preventDefault(); openArchive(a.dataset.k, a.dataset.key, a.dataset.m, a.dataset.doc); }); // 정산서 보관함 (js/archive.js)
   host.querySelectorAll(".paid-ok").forEach(b => b.onclick = async () => {
     const bill = Store.get(key(b.dataset.app), null); if (!bill) return;
     const d = host.querySelector(`.paid-date[data-app="${CSS.escape(b.dataset.app)}"]`).value || todayYmd();
@@ -92,10 +93,10 @@ function dashDetailHtml(ym) {
   const d = dashMonth(ym), label = `${ym.slice(0, 4)}년 ${Number(ym.slice(4))}월`;
   const sum = (arr, k) => arr.reduce((t, x) => t + (Number(x[k]) || 0), 0);
   const custName = x => x.customerName || (typeof Registry !== "undefined" && Registry.customerByApp(x.app, ym) ? Registry.customerByApp(x.app, ym).name : x.app);
-  const custRows = d.cust.map(x => `<tr><td>${dEsc(custName(x))}</td><td>${dEsc(x.app)}</td><td class="num">${dKwh(x.supplyTotal)}</td><td class="num">${dWon(x.energy)}</td><td class="num">${dWon(x.netTotal)}</td><td class="num">${dWon(x.fee)}</td><td class="num"><b class="plus">${dWon(x.grandTotal)}</b></td><td class="paid-cell">${x.paidAt
+  const custRows = d.cust.map(x => `<tr><td><a href="#" class="arc-link" data-k="cust" data-key="${dEsc(x.app)}" data-m="${ym}" data-doc="bill" title="정산서 보관함에서 가정산서 보기">${dEsc(custName(x))}</a></td><td>${dEsc(x.app)}</td><td class="num">${dKwh(x.supplyTotal)}</td><td class="num">${dWon(x.energy)}</td><td class="num">${dWon(x.netTotal)}</td><td class="num">${dWon(x.fee)}</td><td class="num"><b class="plus">${dWon(x.grandTotal)}</b></td><td class="paid-cell">${x.paidAt
     ? `<span class="tag ok-tag">수령 ${dEsc(x.paidAt)}</span> <button class="btn-link paid-undo" data-app="${dEsc(x.app)}">취소</button>`
     : `<input type="date" class="paid-date" data-app="${dEsc(x.app)}" value="${todayYmd()}"><button class="btn secondary paid-ok" data-app="${dEsc(x.app)}">수령 처리</button>`}</td></tr>`).join("");
-  const genRows = d.gen.map(x => `<tr><td>${dEsc(x.plant)}</td><td>${dEsc(x.appNo || "-")}</td><td class="num">${dKwh(x.supply)}</td><td class="num">${x.unitPrice == null ? "미등록" : x.unitPrice}</td><td class="num">${dWon(x.subtotal1)}</td><td class="num">${dWon(x.subtotal2)}</td><td class="num">${x.penalty ? dWon(x.penalty) : "-"}</td><td class="num"><b class="minus">${dWon(x.payment)}</b></td></tr>`).join("");
+  const genRows = d.gen.map(x => `<tr><td><a href="#" class="arc-link" data-k="gen" data-key="${dEsc(x.plant)}" data-m="${ym}" data-doc="gen" title="정산서 보관함에서 정산서 보기">${dEsc(x.plant)}</a></td><td>${dEsc(x.appNo || "-")}</td><td class="num">${dKwh(x.supply)}</td><td class="num">${x.unitPrice == null ? "미등록" : x.unitPrice}</td><td class="num">${dWon(x.subtotal1)}</td><td class="num">${dWon(x.subtotal2)}</td><td class="num">${x.penalty ? dWon(x.penalty) : "-"}</td><td class="num"><b class="minus">${dWon(x.payment)}</b></td></tr>`).join("");
   const pl = d.custTotal - d.genTotal;
   return `
     <div class="card">

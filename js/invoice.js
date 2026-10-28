@@ -115,7 +115,14 @@ function calcInvoice(plant){
   const m = masterData[plant] || {};
   const unitPrice = (m["계약단가"]!==undefined && m["계약단가"]!=="" && m["계약단가"]!==null) ? Number(m["계약단가"]) : null;
   const feeRate = (m["수수료율"]!==undefined && m["수수료율"]!=="" && m["수수료율"]!==null) ? Number(m["수수료율"]) : DEFAULT_FEE_RATE;
-  const supply = a.supply;
+  const adj = adjustmentsByPlant[plant] || {전월차액:0,전월미지급액:0,기타정산:0};
+  // 계약 위약금 (연간보장공급량 미달, 처리 방식 "청구서 차감") — js/performance.js
+  const pen = (typeof penaltyDue === "function" && settleMonth) ? penaltyDue("gen", plant, settleMonth) : {amount:0, label:""};
+  return genCalcParts({ supply: a.supply, unitPrice, feeRate, adj, penalty: pen.amount, penaltyLabel: pen.label });
+}
+// 발전사업자 정산 금액 (정산서 보관함에서 수정할 때도 같은 계산)
+function genCalcParts({ supply, unitPrice, feeRate, adj, penalty, penaltyLabel }){
+  adj = adj || {전월차액:0,전월미지급액:0,기타정산:0}; penalty = Number(penalty) || 0;
   const energyFee = unitPrice!=null ? Math.round(supply*unitPrice) : null;
   const supplyValue = energyFee;
   const vat1 = supplyValue!=null ? Math.round(supplyValue*0.1) : null;
@@ -123,13 +130,10 @@ function calcInvoice(plant){
   const fee = Math.round(supply*feeRate);
   const vat2 = Math.round(fee*0.1);
   const subtotal2 = fee+vat2;
-  const adj = adjustmentsByPlant[plant] || {전월차액:0,전월미지급액:0,기타정산:0};
-  // 계약 위약금 (연간보장공급량 미달, 처리 방식 "청구서 차감") — js/performance.js
-  const pen = (typeof penaltyDue === "function" && settleMonth) ? penaltyDue("gen", plant, settleMonth) : {amount:0, label:""};
   const payment = subtotal1!=null
-    ? subtotal1 - subtotal2 - (Number(adj.전월차액)||0) - (Number(adj.전월미지급액)||0) - (Number(adj.기타정산)||0) - pen.amount
+    ? subtotal1 - subtotal2 - (Number(adj.전월차액)||0) - (Number(adj.전월미지급액)||0) - (Number(adj.기타정산)||0) - penalty
     : null;
-  return { unitPrice, feeRate, supply, energyFee, supplyValue, vat1, subtotal1, fee, vat2, subtotal2, adj, payment, penalty: pen.amount, penaltyLabel: pen.label };
+  return { unitPrice, feeRate, supply, energyFee, supplyValue, vat1, subtotal1, fee, vat2, subtotal2, adj, payment, penalty, penaltyLabel: penaltyLabel || "" };
 }
 
 /* ============ 정산서 번호: <접두>-<정산월>-<그룹 신청번호>-<그룹 안 일련번호 2자리> ============
@@ -160,9 +164,10 @@ async function saveGenPay(){
     const c = calcInvoice(p); if(!c) return;
     const a = aggByPlant[p];
     out[p] = { docNo: genDocNo(p), generation: a.generation, supply: c.supply, excess: a.excess, unitPrice: c.unitPrice, energyFee: c.energyFee, vat1: c.vat1, subtotal1: c.subtotal1,
-      fee: c.fee, subtotal2: c.subtotal2, adj: c.adj, penalty: c.penalty, payment: c.payment, appNo: Registry.plantGroup(masterData[p]) };
+      fee: c.fee, subtotal2: c.subtotal2, adj: c.adj, penalty: c.penalty, payment: c.payment, appNo: Registry.plantGroup(masterData[p]),
+      feeRate: c.feeRate, supplyValue: c.supplyValue, vat2: c.vat2, penaltyLabel: c.penaltyLabel, docDate: todayYmd() };
   });
-  await Store.set(key, { plants: Object.assign({}, old.plants, out), savedAt: new Date().toISOString() });
+  await Store.set(key, { plants: Object.assign({}, old.plants, out), site: Object.assign({}, siteTotals), savedAt: new Date().toISOString() });
   if(typeof renderDashboard === "function") renderDashboard();
 }
 
@@ -223,16 +228,18 @@ async function renderInvoicePreview(){
 }
 
 // 미리보기 = PDF(js/exporters/pdf.js drawInvoicePdf)와 같은 배치 · 같은 값 서식. 한쪽을 바꾸면 다른 쪽도 같이 고친다.
-async function buildInvoiceHtml(plant){
-  const a = aggByPlant[plant];
+// snap: { month, agg, site, calc, docNo, docDate } — 정산서 보관함에서 저장된 값으로 다시 그릴 때
+async function buildInvoiceHtml(plant, snap){
+  const a = snap ? snap.agg : aggByPlant[plant];
   const m = masterData[plant] || {};
-  const calc = calcInvoice(plant), adj = calc.adj || {};
+  const calc = snap ? snap.calc : calcInvoice(plant), adj = calc.adj || {};
+  const site = snap ? snap.site : siteTotals, month = snap ? snap.month : settleMonth;
   const won = pdfFmtWon, kwh = pdfFmtKwh;
-  const lossRate = siteTotals.lossRatePct!=null ? siteTotals.lossRatePct
-    : (siteTotals.usage ? (siteTotals.usage - siteTotals.supply)/siteTotals.usage : 0);
+  const lossRate = site.lossRatePct!=null ? site.lossRatePct
+    : (site.usage ? (site.usage - site.supply)/site.usage : 0);
   const schedule = buildGuaranteeSchedule(plant, await fetchYearlyGrid(plant));
-  const monthPlain = settleMonth ? `${settleMonth.slice(0,4)}년 ${settleMonth.slice(4,6)}월` : "";
-  const t = new Date();
+  const monthPlain = month ? `${month.slice(0,4)}년 ${month.slice(4,6)}월` : "";
+  const t = snap && snap.docDate ? new Date(snap.docDate + "T00:00:00") : new Date();
   const todayLabel = `${t.getFullYear()}년 ${String(t.getMonth()+1).padStart(2,"0")}월 ${String(t.getDate()).padStart(2,"0")}일`;
   const todo = "입력 예정";
   const td = (v, o) => { o = o || {}; return `<td${o.span ? ` colspan="${o.span}"` : ""}${o.cls ? ` class="${o.cls}"` : ""}>${v == null ? "" : v}</td>`; };
@@ -267,9 +274,9 @@ async function buildInvoiceHtml(plant){
       <tr>${lab("발전소명")}${val(plant)}${lab("연락처")}${val(contact)}</tr>
     </table>
     <table class="doc-table">${COLS}
-      <tr>${sec(5, "전력<br>거래<br>내역")}${lab("총 전기사용량")}${val(kwh(siteTotals.usage))}${lab("총 발전량")}${val(kwh(siteTotals.generation))}</tr>
-      <tr>${lab("전력손실률")}${val(pdfFmtPercent2(lossRate))}${lab("총 공급량")}${val(kwh(siteTotals.supply))}</tr>
-      <tr>${lab("총 초과발전량")}${val(kwh(siteTotals.excess))}${lab("총 부족전력량")}${val(kwh(siteTotals.deficit))}</tr>
+      <tr>${sec(5, "전력<br>거래<br>내역")}${lab("총 전기사용량")}${val(kwh(site.usage))}${lab("총 발전량")}${val(kwh(site.generation))}</tr>
+      <tr>${lab("전력손실률")}${val(pdfFmtPercent2(lossRate))}${lab("총 공급량")}${val(kwh(site.supply))}</tr>
+      <tr>${lab("총 초과발전량")}${val(kwh(site.excess))}${lab("총 부족전력량")}${val(kwh(site.deficit))}</tr>
       <tr class="red-top">${lab("해당 발전소 발전량")}${val(kwh(a.generation))}${lab("해당 발전소 공급량")}${val(kwh(a.supply))}</tr>
       <tr class="red-bottom">${lab("해당 발전소 초과발전량")}${val(kwh(a.excess))}${lab("-")}${val("-")}</tr>
     </table>
@@ -282,7 +289,7 @@ async function buildInvoiceHtml(plant){
       <tr>${sec(4, "정산<br>정보")}${lab("사업자명 (대표자명)")}${val(BUYER.bizName)}${lab("사업자등록번호")}${val(BUYER.bizRegNo)}</tr>
       <tr>${lab("주소")}${val(BUYER.address.replace(/\n/g, "<br>"), 5)}</tr>
       <tr>${lab("담당자")}${val(BUYER.manager)}${lab("연락처")}${val(BUYER.contact)}</tr>
-      <tr>${lab("정산서번호")}${val(genDocNo(plant))}${lab("납부기한")}${val("계산서 발행 후 5영업일 내")}</tr>
+      <tr>${lab("정산서번호")}${val(snap ? snap.docNo || "-" : genDocNo(plant))}${lab("납부기한")}${val("계산서 발행 후 5영업일 내")}</tr>
     </table>
     <table class="doc-table">${COLS}
       <tr>${sec(schedule.length + 1, "연간<br>보장<br>공급량")}${lab("회차")}${lab("예상 공급량")}${lab("실적 누계 (공급+초과)")}${lab("미달 공급량")}${lab("미달 구매량")}${lab("비고")}</tr>

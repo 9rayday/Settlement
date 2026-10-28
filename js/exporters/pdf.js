@@ -226,7 +226,7 @@ async function drawInvoicePdf(doc, ctx){
   label(29,3,"주소"); value(29,4,8, BUYER.address);
   label(30,3,"담당자"); value(30,4,5, BUYER.manager);
   label(30,6,"연락처"); value(30,7,8, BUYER.contact);
-  label(31,3,"정산서번호"); value(31,4,5, genDocNo(plant));
+  label(31,3,"정산서번호"); value(31,4,5, ctx.docNo || genDocNo(plant));
   label(31,6,"납부기한"); value(31,7,8, "계산서 발행 후 5영업일 내");
 
   // 연간보장공급량
@@ -242,7 +242,7 @@ async function drawInvoicePdf(doc, ctx){
   });
 
   // 서명란 (55~58행, 표 테두리 없음 — 날짜 + 확인/지급 문구 + 점선 구분선)
-  const today = new Date();
+  const today = ctx.docDate ? new Date(ctx.docDate + "T00:00:00") : new Date();
   const todayLabel = `${today.getFullYear()}년 ${String(today.getMonth()+1).padStart(2,"0")}월 ${String(today.getDate()).padStart(2,"0")}일`;
   const monthPlain = String(month||"").length >= 6 ? `${month.slice(0,4)}년 ${month.slice(4,6)}월` : "";
   const bizNameOnly = (m["사업자명(대표자명)"] || plant).split("(")[0].trim();
@@ -279,22 +279,24 @@ async function drawInvoicePdf(doc, ctx){
 }
 
 /* ============ Blob 생성 ============ */
-async function buildPdfBlobForPlant(plant){
-  const a = aggByPlant[plant];
+// snap: 정산서 보관함의 저장된 값 { month, agg, site, calc, docNo, docDate }
+async function buildPdfBlobForPlant(plant, snap){
+  const a = snap ? snap.agg : aggByPlant[plant];
   if(!a) throw new Error(`${plant} 데이터가 없습니다.`);
-  const calc = calcInvoice(plant);
+  const calc = snap ? snap.calc : calcInvoice(plant);
+  const site = snap ? snap.site : siteTotals;
   const grid = await fetchYearlyGrid(plant);
   const schedule = buildGuaranteeSchedule(plant, grid);
-  const lossRate = siteTotals.lossRatePct!=null ? siteTotals.lossRatePct
-    : (siteTotals.usage ? (siteTotals.usage - siteTotals.supply)/siteTotals.usage : 0);
+  const lossRate = site.lossRatePct!=null ? site.lossRatePct
+    : (site.usage ? (site.usage - site.supply)/site.usage : 0);
 
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({unit:"pt", format:"a4"});
   await registerKoreanFont(doc);
   await drawInvoicePdf(doc, {
-    plant, month: settleMonth,
+    plant, month: snap ? snap.month : settleMonth,
     master: masterData[plant] || {},
-    siteTotals, plantAgg: a, lossRate, calc, schedule
+    siteTotals: site, plantAgg: a, lossRate, calc, schedule, docNo: snap ? snap.docNo : null, docDate: snap ? snap.docDate : null
   });
   return doc.output("blob");
 }

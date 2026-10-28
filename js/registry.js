@@ -225,7 +225,7 @@ function bindRegSearch(kind, id, render) {
   el.oninput = e => { if (composing || (e && e.isComposing)) return; apply(); };
 }
 // 목록이 길면 페이지로 나눠 보여준다
-const PAGE_SIZE = { cust: 12, plant: 15, group: 8, perfCust: 15, perfGen: 15 };
+const PAGE_SIZE = { cust: 12, plant: 15, group: 8, perfCust: 15, perfGen: 15, arcCust: 15, arcGen: 15 };
 function pageSlice(kind, items) {
   const pages = Math.max(1, Math.ceil(items.length / PAGE_SIZE[kind]));
   const page = Math.min(Math.max(1, regState.pages[kind] || 1), pages);

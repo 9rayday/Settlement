@@ -59,7 +59,14 @@ const Store = (function () {
   async function set(key, value) {
     const p = permOf(key);
     if (typeof requirePerm === "function" && p && !requirePerm(p)) return "denied";
-    data[key] = JSON.stringify(value); writeLocal();
+    data[key] = JSON.stringify(value);
+    // 시트 한 칸 5만자 제한: 정산서 보관함용 재료(snap)가 크면 시간대 그래프 → 재료 전체 순으로 덜어낸다
+    if (data[key].length > 48000 && value && value.snap) {
+      const v = Object.assign({}, value, { snap: Object.assign({}, value.snap, { match: Object.assign({}, value.snap.match, { byHour: null }) }) });
+      data[key] = JSON.stringify(v);
+      if (data[key].length > 48000) { delete v.snap; data[key] = JSON.stringify(v); }
+    }
+    writeLocal();
     const r = await gasPost("saveStore", { key, value: data[key] });
     return r ? "remote" : "local";
   }
