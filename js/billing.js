@@ -478,6 +478,7 @@ async function saveBill() {
   const old = Store.get(key, null);
   if (old && !confirm(`${monthLabel(R.month)} ${R.customer.name} 가정산서가 이미 발행되어 있습니다${old.paidAt ? " (대금 수령 " + old.paidAt + ")" : ""}. 덮어쓸까요?\n(오차정산은 이 가정산서와 비교합니다)`)) return;
   const where = await Store.set(key, billRecord(R, old));
+  if (where === "remote" && typeof Drive !== "undefined") Drive.saveCust(R, "bill"); // 구글 드라이브 자동 저장 (js/drive.js)
   // REC 정산에 청구한 달 표시 (빠진 것은 해제)
   const now = (R.inv.recItems || []).map(x => x.key), before = (old && old.recBilled) || [];
   for (const k of before.filter(k => !now.includes(k))) { const s = Store.get(k, null); if (s && s.billedIn === R.month) { delete s.billedIn; await Store.set(k, s); } }
@@ -799,6 +800,7 @@ async function saveTrueUp() {
     netConfirmed: R.netOverride || {}
   }, R.fields, { savedAt: new Date().toISOString(), docDate: todayYmd(), snap: archSnap(R) });
   const where = await Store.set(key, rec);
+  if (where === "remote" && typeof Drive !== "undefined") Drive.saveCust(R, "trueup"); // 구글 드라이브 자동 저장 (js/drive.js)
   $("billSaveStatus").textContent = (where === "remote" ? "발행 완료 (구글시트)" : "이 브라우저에만 저장됨") + ` → ${monthLabel(nextYm(R.month))} 가정산서에 자동 반영`;
   // 초과발전량 REC: 확정 데이터로 계산한 발전소별 시간별 초과발전량 저장 (js/rec.js)
   if (where !== "denied" && typeof recSaveTrueUpExcess === "function" && billState.kpx && billState.kpx.groups[R.app]) {

@@ -47,6 +47,7 @@ async function genCalculate(){
     st.textContent = label + " · 시트 저장 중...";
     await syncPerformanceToGas(); // 월별실적로그·실적그리드 기록, 계약이행현황 갱신, 발전대금 저장(genpay)
     st.textContent = label + " · 저장됨";
+    if (typeof Drive !== "undefined") Drive.saveGen(settleMonth, plants.filter(p => calcInvoice(p)).map(plant => ({ plant, snap: typeof arcGenSnap === "function" ? arcGenSnap(plant, settleMonth) : null }))); // 구글 드라이브 자동 저장
   }catch(e){ st.textContent = "오류: " + e.message; }
   btn.disabled = false;
 }

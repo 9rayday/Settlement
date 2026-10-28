@@ -143,12 +143,13 @@ function doPost(e) {
     if (action === "saveUser") { need_(s, "admin"); return jsonOut_({ ok: true, data: saveUser_(body, s) }); }
     if (action === "unlockUser") { need_(s, "admin"); return jsonOut_({ ok: true, data: unlockUser_(body) }); }
     if (action === "deleteUser") { need_(s, "admin"); return jsonOut_({ ok: true, data: deleteUser_(body, s) }); }
-    if (["saveAdjustments", "logPerformance"].indexOf(action) >= 0) need_(s, "settle");
+    if (["saveAdjustments", "logPerformance", "savePdfs"].indexOf(action) >= 0) need_(s, "settle");
     if (["savePlant", "deletePlant", "saveCustomer", "deleteCustomer"].indexOf(action) >= 0) need_(s, "contract");
     if (action === "saveStore") { const p = storePerm_(body.key); if (p) need_(s, p); else if (!s.perms.length) throw new Error("권한이 없습니다. (조회 전용 계정)"); }
     if (action === "saveAdjustments") return jsonOut_({ ok: true, data: saveAdjustments_(body) });
     if (action === "logPerformance") return jsonOut_({ ok: true, data: logPerformance_(body) });
     if (action === "saveStore") return jsonOut_({ ok: true, data: saveStore_(body) });
+    if (action === "savePdfs") return jsonOut_({ ok: true, data: savePdfs_(body) });
     if (action === "savePlant") return jsonOut_({ ok: true, data: upsertRegistryRow_(getSheet_(SHEET_MASTER), MASTER_FIELDS, "발전소명", body.record, body.originalKey, null, body.originalRow) });
     if (action === "deletePlant") return jsonOut_({ ok: true, data: deleteRegistryRow_(getSheet_(SHEET_MASTER), "발전소명", body.key, null, body.row) });
     if (action === "saveCustomer") return jsonOut_({ ok: true, data: upsertRegistryRow_(getSheet_(SHEET_CUSTOMERS), CUSTOMER_FIELDS, "계약ID", body.record, body.originalKey, "KPX신청번호") });
@@ -373,6 +374,57 @@ function logPerformance_(body) {
   _actMemo = null;
   const cumulative = rebuildDashboard_();
   return { logged: Object.keys(updates).length, cumulative: cumulative, performance: getPerformanceAll_() };
+}
+
+/* ============ 정산서 PDF → 구글 드라이브 ============
+ * 폴더: TWh 정산서 / <연도> / 전기사용자 | 발전사업자 / <사업자명> / 파일
+ * 올해 이전 연도 폴더는 "TWh 정산서 / 백업" 아래로 옮겨 둔다 (지난 연도 문서를 늦게 저장해도 백업/<연도> 로 바로 들어감).
+ * 같은 이름의 파일이 있으면 휴지통으로 보내고 새로 만든다 (다시 발행·수정). 최초 1회 편집기에서 setupDrive 실행 → 권한 승인.
+ */
+const DRIVE_ROOT_NAME = "TWh 정산서", DRIVE_BACKUP_NAME = "백업";
+function childFolder_(parent, name) {
+  const it = parent.getFoldersByName(name);
+  return it.hasNext() ? it.next() : parent.createFolder(name);
+}
+function driveRoot_() {
+  const props = PropertiesService.getScriptProperties(), id = props.getProperty("DRIVE_ROOT_ID");
+  if (id) { try { const f = DriveApp.getFolderById(id); if (!f.isTrashed()) return f; } catch (e) { /* 지워졌으면 새로 */ } }
+  const f = childFolder_(DriveApp.getRootFolder(), DRIVE_ROOT_NAME);
+  props.setProperty("DRIVE_ROOT_ID", f.getId());
+  return f;
+}
+// 올해보다 이전 연도 폴더를 백업 폴더로 옮긴다 (하루 한 번만 확인)
+function rollDriveYears_(root) {
+  const props = PropertiesService.getScriptProperties(), today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
+  if (props.getProperty("DRIVE_ROLLED") === today) return;
+  const cur = Number(today.slice(0, 4)), backup = childFolder_(root, DRIVE_BACKUP_NAME), it = root.getFolders();
+  while (it.hasNext()) { const f = it.next(), y = Number(f.getName()); if (/^\d{4}$/.test(f.getName()) && y < cur) f.moveTo(backup); }
+  props.setProperty("DRIVE_ROLLED", today);
+}
+function yearFolder_(root, year) {
+  const cur = Number(Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy"));
+  return childFolder_(Number(year) < cur ? childFolder_(root, DRIVE_BACKUP_NAME) : root, String(year));
+}
+const driveName_ = s => String(s == null ? "" : s).replace(/[\/:*?"<>|]/g, "_").trim() || "미지정";
+// files: [{ year, kind: "cust"|"gen", owner, name, base64 }]
+function savePdfs_(body) {
+  const lock = LockService.getScriptLock(); lock.waitLock(20000);
+  try {
+    const root = driveRoot_(); rollDriveYears_(root);
+    return (body.files || []).map(f => {
+      const folder = childFolder_(childFolder_(yearFolder_(root, f.year), f.kind === "gen" ? "발전사업자" : "전기사용자"), driveName_(f.owner));
+      const name = driveName_(f.name).replace(/(\.pdf)?$/i, ".pdf");
+      const old = folder.getFilesByName(name); while (old.hasNext()) old.next().setTrashed(true);
+      const file = folder.createFile(Utilities.newBlob(Utilities.base64Decode(f.base64), "application/pdf", name));
+      return { name, url: file.getUrl() };
+    });
+  } finally { lock.releaseLock(); }
+}
+// 편집기에서 최초 1회 실행: 드라이브 권한 승인 + 폴더 만들기
+function setupDrive() {
+  const root = driveRoot_(); rollDriveYears_(root);
+  console.log("드라이브 폴더: " + root.getUrl());
+  return root.getUrl();
 }
 
 /* ============ 앱데이터 (수요기업 청구 모듈: 월별 요율/발전소/계약/이월값을 JSON 으로 저장) ============

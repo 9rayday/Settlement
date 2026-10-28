@@ -685,3 +685,7 @@ input, select, textarea, button{ max-width:100%; }
 .arc-bar .reg-head{ margin-bottom:0; }
 .arc-bar h2{ margin:0; }
 .arc-bar #arcMsg{ display:inline-block; margin-top:8px; }
+.drive-status{ font-size:12px; color:#E5E7EB; margin-right:8px; white-space:nowrap; max-width:360px; overflow:hidden; text-overflow:ellipsis; }
+.drive-status.busy{ color:#FCD9A8; }
+.drive-status.fail{ color:#FFB4A9; }
+@media (max-width:720px){ .drive-status{ display:none; } }

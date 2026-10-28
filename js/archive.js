@@ -215,12 +215,14 @@ async function redrawDoc(o) {
 }
 
 /* ---------- 저장 + 연결 문서 반영 ---------- */
+const arcDrive = (R, doc) => { if (R && typeof Drive !== "undefined") Drive.saveCust(R, doc); }; // 고친 문서를 드라이브에도 다시 저장
 const arcSet = async (key, val) => { const w = await Store.set(key, val); if (w === "denied") throw new Error("정산 권한이 없습니다."); return w; };
 
 async function arcSaveBill(o, R) {
   const key = `bill:${o.month}:${o.key}`, old = Store.get(key, null);
   const oldProv = provFromBill(old);
   await arcSet(key, Object.assign(billRecord(R, old), { editedAt: new Date().toISOString() }));
+  arcDrive(R, "bill");
   const done = [`${monthLabel(o.month)} 가정산서`];
   // 같은 달 오차정산서: 차액이 예전 가정산 기준 자동값 그대로면 새 기준으로 다시 계산
   const ck = `carry:${nextYm(o.month)}:${o.key}`, rec = Store.get(ck, null);
@@ -230,6 +232,7 @@ async function arcSaveBill(o, R) {
     const before = auto(oldProv), after = auto(provFromBill(Store.get(key, null)));
     if (rec.prevDiff && rec.prevDiff.taxable === before.taxable && rec.prevDiff.exempt === before.exempt) {
       await arcSet(ck, Object.assign({}, rec, { prevDiff: after, editedAt: new Date().toISOString() }));
+      arcDrive(arcTrueUpR(o.key, o.month, Store.get(ck, null)), "trueup");
       done.push(`${monthLabel(o.month)} 오차정산서 차액 다시 계산`);
       done.push(...await arcCascadeNextBill(o.key, nextYm(o.month)));
     } else done.push(`${monthLabel(o.month)} 오차정산서 차액은 직접 고친 값이라 그대로 둠`);
@@ -245,6 +248,7 @@ async function arcSaveTrueUp(o, R) {
     diff: { supply: R.diff.supply, energy: R.diff.energy, net: R.diff.net, fee: R.diff.fee, taxable: R.diff.taxable },
     netConfirmed: R.netOverride || {}, snap: Object.assign({}, old.snap, { ctx: R.ctx }), editedAt: new Date().toISOString() });
   await arcSet(key, rec);
+  arcDrive(R, "trueup");
   return [`${monthLabel(o.month)} 오차정산서`].concat(await arcCascadeNextBill(o.key, nextYm(o.month)));
 }
 
@@ -257,6 +261,7 @@ async function arcCascadeNextBill(app, nm) {
   R.ctx = Object.assign({}, R.ctx, { confirmedSurcharge: carry.confirmed, prevDiff: carry.prevDiff });
   R.inv = Engine.invoice(R.match, R.ctx, R.rates);
   await arcSet(key, Object.assign(billRecord(R, bill), { editedAt: new Date().toISOString() }));
+  arcDrive(R, "bill");
   return [`${monthLabel(nm)} 가정산서 반영`];
 }
 
@@ -266,6 +271,7 @@ async function arcSaveGen(o, snap) {
   g.plants[o.key] = Object.assign({}, g.plants[o.key], { unitPrice: c.unitPrice, feeRate: c.feeRate, energyFee: c.energyFee, supplyValue: c.supplyValue, vat1: c.vat1, subtotal1: c.subtotal1,
     fee: c.fee, vat2: c.vat2, subtotal2: c.subtotal2, adj: c.adj, payment: c.payment, editedAt: new Date().toISOString() });
   await arcSet(key, g);
+  if (typeof Drive !== "undefined") Drive.saveGen(o.month, [{ plant: o.key, snap: arcGenSnap(o.key, o.month) }]);
   if (typeof settleMonth !== "undefined" && settleMonth === o.month && typeof adjustmentsByPlant !== "undefined") adjustmentsByPlant[o.key] = c.adj; // 발전사업자 정산 화면에 같은 달이 열려 있으면 조정값 유지
   return [`${monthLabel(o.month)} ${o.key} 정산서`, "정산 대시보드 지급액"];
 }
