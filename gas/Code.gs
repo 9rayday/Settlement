@@ -839,14 +839,14 @@ function refillYearlyGrid() {
 function backfillYearlyGrid() { refillYearlyGrid(); }
 
 /* ============ 로그인 · 계정 · 권한 (구글시트 "관리자" 탭) ============
- * 권한: 관리자(전체 + 계정관리) / 정산담당자(정산 발행·대금 수령·발전사업자 정산) / 실무담당자(계약 등록·수정). 빈칸 = 조회만.
+ * 권한: 관리자(전체 + 계정관리) / 정산담당자(정산 발행·대금 수령·발전사업자 정산) / 실무담당자(계약 등록·수정 + 정산). 빈칸 = 조회만.
  *   시트 "권한" 칸을 직접 고치거나, 웹의 [정산관리 > 권한관리]에서 관리자가 바꾼다. MASTER_ADMIN_ID 는 항상 관리자.
  * 비밀번호: 시트에 평문으로 넣어도 되고(첫 로그인 때 해시로 바뀜), 웹에서 바꾸면 해시로 저장된다.
  * 잠금: 5회 틀리면 "잠금" = Y. 관리자가 웹에서 [잠금 해제]하거나 시트에서 잠금·실패횟수 칸을 비우면 풀린다.
  * 세션: 로그인하면 토큰(6시간, 사용할 때마다 연장)을 주고, 모든 요청은 토큰과 권한을 서버에서 확인한다.
  */
 const MASTER_ADMIN_ID = "9rayday";
-const ROLE_PERMS = { "관리자": ["admin", "rates", "contract", "settle"], "정산담당자": ["settle"], "실무담당자": ["contract"] };
+const ROLE_PERMS = { "관리자": ["admin", "rates", "contract", "settle"], "정산담당자": ["settle"], "실무담당자": ["contract", "settle"] };
 const AUTH_COLS = ["아이디", "비밀번호", "이름", "권한", "실패횟수", "잠금", "최근로그인", "등록일시"];
 const SESSION_TTL = 21600; // 초 (CacheService 최대 6시간)
 const MAX_FAIL = 5;
