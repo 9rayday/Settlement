@@ -76,6 +76,14 @@ function renderDashboard() {
 function bindPaid() {
   const host = document.getElementById("dashDetail"); if (!host || !dashState.month) return;
   const ym = dashState.month, key = app => `bill:${ym}:${app}`;
+  const ap = document.getElementById("dashApplyPrice");
+  if (ap) ap.onclick = async () => {
+    if (typeof requirePerm === "function" && !requirePerm("settle")) return;
+    ap.disabled = true; ap.textContent = "계산 중...";
+    const w = await dashApplyPrices(ym);
+    if (w === "denied") { ap.disabled = false; ap.textContent = "권한 없음"; return; }
+    renderDashboard();
+  };
   host.querySelectorAll(".arc-link").forEach(a => a.onclick = e => { e.preventDefault(); openArchive(a.dataset.k, a.dataset.key, a.dataset.m, a.dataset.doc); }); // 정산서 보관함 (js/archive.js)
   host.querySelectorAll(".paid-ok").forEach(b => b.onclick = async () => {
     const bill = Store.get(key(b.dataset.app), null); if (!bill) return;
@@ -89,15 +97,38 @@ function bindPaid() {
   });
 }
 
+// 발전대금 계산 때 계약단가가 비어 있던 발전소 중, 지금은 계약관리에 단가가 등록된 것 { 발전소: 단가 }
+const dashNum = v => v === undefined || v === null || v === "" || isNaN(v) ? null : Number(v);
+function dashLatePrices(ym) {
+  const gp = Store.get(`genpay:${ym}`, null), out = {};
+  if (!gp || typeof masterData === "undefined") return out;
+  Object.keys(gp.plants).forEach(p => { const x = gp.plants[p], up = dashNum((masterData[p] || {})["계약단가"]); if (x.unitPrice == null && up != null) out[p] = up; });
+  return out;
+}
+// 저장된 공급량·조정값·위약금은 그대로 두고 등록된 단가로 지급액만 다시 계산
+async function dashApplyPrices(ym) {
+  const key = `genpay:${ym}`, gp = Store.get(key, null), late = dashLatePrices(ym);
+  Object.keys(late).forEach(p => {
+    const x = gp.plants[p], m = masterData[p] || {};
+    const feeRate = dashNum(x.feeRate) != null ? Number(x.feeRate) : (dashNum(m["수수료율"]) != null ? Number(m["수수료율"]) : DEFAULT_FEE_RATE);
+    const c = genCalcParts({ supply: x.supply, unitPrice: late[p], feeRate, adj: x.adj, penalty: x.penalty, penaltyLabel: x.penaltyLabel });
+    gp.plants[p] = Object.assign({}, x, { unitPrice: c.unitPrice, feeRate: c.feeRate, energyFee: c.energyFee, supplyValue: c.supplyValue, vat1: c.vat1, subtotal1: c.subtotal1,
+      fee: c.fee, vat2: c.vat2, subtotal2: c.subtotal2, payment: c.payment, editedAt: new Date().toISOString() });
+  });
+  return Store.set(key, gp);
+}
+
 function dashDetailHtml(ym) {
   const d = dashMonth(ym), label = `${ym.slice(0, 4)}년 ${Number(ym.slice(4))}월`;
   const sum = (arr, k) => arr.reduce((t, x) => t + (Number(x[k]) || 0), 0);
+  const late = dashLatePrices(ym);
   const custName = x => x.customerName || (typeof Registry !== "undefined" && Registry.customerByApp(x.app, ym) ? Registry.customerByApp(x.app, ym).name : x.app);
   const custRows = d.cust.map(x => `<tr><td><a href="#" class="arc-link" data-k="cust" data-key="${dEsc(x.app)}" data-m="${ym}" data-doc="bill" title="정산서 보관함에서 가정산서 보기">${dEsc(custName(x))}</a></td><td>${dEsc(x.app)}</td><td class="num">${dKwh(x.supplyTotal)}</td><td class="num">${dWon(x.energy)}</td><td class="num">${dWon(x.netTotal)}</td><td class="num">${dWon(x.fee)}</td><td class="num"><b class="plus">${dWon(x.grandTotal)}</b></td><td class="paid-cell">${x.paidAt
     ? `<span class="tag ok-tag">수령 ${dEsc(x.paidAt)}</span> <button class="btn-link paid-undo" data-app="${dEsc(x.app)}">취소</button>`
     : `<input type="date" class="paid-date" data-app="${dEsc(x.app)}" value="${todayYmd()}"><button class="btn secondary paid-ok" data-app="${dEsc(x.app)}">수령 처리</button>`}</td></tr>`).join("");
-  const genRows = d.gen.map(x => `<tr><td><a href="#" class="arc-link" data-k="gen" data-key="${dEsc(x.plant)}" data-m="${ym}" data-doc="gen" title="정산서 보관함에서 정산서 보기">${dEsc(x.plant)}</a></td><td>${dEsc(x.appNo || "-")}</td><td class="num">${dKwh(x.supply)}</td><td class="num">${x.unitPrice == null ? "미등록" : x.unitPrice}</td><td class="num">${dWon(x.subtotal1)}</td><td class="num">${dWon(x.subtotal2)}</td><td class="num">${x.penalty ? dWon(x.penalty) : "-"}</td><td class="num"><b class="minus">${dWon(x.payment)}</b></td></tr>`).join("");
+  const genRows = d.gen.map(x => `<tr><td><a href="#" class="arc-link" data-k="gen" data-key="${dEsc(x.plant)}" data-m="${ym}" data-doc="gen" title="정산서 보관함에서 정산서 보기">${dEsc(x.plant)}</a></td><td>${dEsc(x.appNo || "-")}</td><td class="num">${dKwh(x.supply)}</td><td class="num">${x.unitPrice != null ? x.unitPrice : late[x.plant] != null ? `<span class="tag warn-tag" title="발전대금 계산 때는 단가가 비어 있었고, 지금은 ${late[x.plant]}원으로 등록되어 있습니다">계산 때 미등록</span>` : "미등록"}</td><td class="num">${dWon(x.subtotal1)}</td><td class="num">${dWon(x.subtotal2)}</td><td class="num">${x.penalty ? dWon(x.penalty) : "-"}</td><td class="num"><b class="minus">${dWon(x.payment)}</b></td></tr>`).join("");
   const pl = d.custTotal - d.genTotal;
+  const lateN = Object.keys(late).length;
   return `
     <div class="card">
       <h2>${label} 상세 <span class="dash-pl ${pl >= 0 ? "plus" : "minus"}">손익 ${signed(pl)} 원</span></h2>
@@ -106,6 +137,8 @@ function dashDetailHtml(ym) {
         <tr class="total"><td colspan="2">합계 (${d.cust.length}건)</td><td class="num">${dKwh(sum(d.cust, "supplyTotal"))}</td><td class="num">${dWon(sum(d.cust, "energy"))}</td><td class="num">${dWon(sum(d.cust, "netTotal"))}</td><td class="num">${dWon(sum(d.cust, "fee"))}</td><td class="num"><b class="plus">+${dWon(d.custTotal)}</b></td><td></td></tr></table></div>`
         : `<div class="empty">없음</div>`}
       <h3 class="sub" style="margin-top:18px">발전사업자별 전력대금 요약</h3>
+      ${lateN ? `<div class="notice warn">${lateN}개 발전소는 발전대금 계산 때 계약단가가 비어 있어 지급액이 빠져 있습니다. 지금은 계약관리에 단가가 등록되어 있습니다.
+        <button type="button" class="btn accent" id="dashApplyPrice" style="margin-left:8px">등록된 계약단가로 다시 계산 (${lateN}개소)</button></div>` : ""}
       ${d.gen.length ? `<div class="table-wrap"><table class="grid dash-table"><tr><th>발전소</th><th>신청번호</th><th>공급량(kWh)</th><th>계약단가</th><th>전력량요금(VAT 포함)</th><th>수수료(VAT 포함)</th><th>위약금</th><th>지급액</th></tr>${genRows}
         <tr class="total"><td colspan="2">합계 (${d.gen.length}개소)</td><td class="num">${dKwh(sum(d.gen, "supply"))}</td><td></td><td class="num">${dWon(sum(d.gen, "subtotal1"))}</td><td class="num">${dWon(sum(d.gen, "subtotal2"))}</td><td class="num">${dWon(sum(d.gen, "penalty"))}</td><td class="num"><b class="minus">−${dWon(d.genTotal)}</b></td></tr></table></div>`
         : `<div class="empty">없음</div>`}

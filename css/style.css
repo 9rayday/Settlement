@@ -680,3 +680,4 @@ input, select, textarea, button{ max-width:100%; }
   table.grid{ table-layout:auto !important; }
   table.grid th, table.grid td{ white-space:nowrap !important; }
 }
+.warn-tag{ background:#FFF3E3 !important; color:#8A5300 !important; }
