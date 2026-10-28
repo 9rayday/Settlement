@@ -53,7 +53,7 @@ function showPage(id) {
   if (id === "page-admin-users" && typeof renderUsersPage === "function") renderUsersPage(); // 권한관리 (js/users.js)
   if (id === "page-rec" && typeof renderRecPage === "function") renderRecPage(); // 초과발전량 REC (js/rec.js)
   if (id === "page-archive" && typeof renderArchivePage === "function") renderArchivePage(); // 정산서 보관함 (js/archive.js)
-  try { localStorage.setItem(NAV_KEY, id); } catch (e) { /* 저장 불가 환경 */ }
+  try { localStorage.setItem(NAV_KEY, id); localStorage.setItem(NAV_KEY + "." + meta.group, id); } catch (e) { /* 저장 불가 환경 */ }
   document.body.classList.remove("side-shown");
 }
 
@@ -63,7 +63,15 @@ function initNav() {
     const need = PAGES[a.dataset.page] && PAGES[a.dataset.page].need;
     if (need && typeof can === "function" && !can(need)) a.hidden = true; // 권한 없는 메뉴 숨김
   });
-  document.querySelectorAll(".side-toggle button").forEach(b => b.addEventListener("click", () => setSideGroup(b.dataset.group)));
+  // 계약관리 / 정산관리 전환: 메뉴만 바꾸지 않고 그쪽에서 마지막으로 보던 화면(없으면 첫 메뉴)으로 바로 이동
+  document.querySelectorAll(".side-toggle button").forEach(b => b.addEventListener("click", () => {
+    const g = b.dataset.group;
+    if (PAGES[pageFromHash()] && PAGES[pageFromHash()].group === g) return setSideGroup(g); // 이미 그쪽 화면
+    let id = null; try { id = localStorage.getItem(NAV_KEY + "." + g); } catch (e) { /* 무시 */ }
+    const ok = p => PAGES[p] && PAGES[p].group === g && !(PAGES[p].need && typeof can === "function" && !can(PAGES[p].need));
+    if (!ok(id)) { const first = document.querySelector(`.side-menu[data-group="${g}"] .side-link:not([hidden])`); id = first ? first.dataset.page : null; }
+    if (id) location.hash = "#" + id.replace(/^page-/, ""); else setSideGroup(g);
+  }));
   document.querySelectorAll(".side-folder-btn").forEach(b => b.addEventListener("click", () => b.parentElement.classList.toggle("open")));
   document.getElementById("sideOpenBtn").addEventListener("click", () => document.body.classList.toggle("side-shown"));
   window.addEventListener("hashchange", () => { showPage(pageFromHash()); window.scrollTo(0, 0); });
