@@ -50,7 +50,7 @@ async function renderUsersPage(keep) {
   const val = (cls, id) => { const el = host.querySelector(`.${cls}[data-id="${CSS.escape(id)}"]`); return el ? el.value : undefined; };
   host.querySelectorAll(".u-save").forEach(b => b.onclick = async () => {
     const id = b.dataset.id;
-    if (await usersCall("saveUser", { user: { id, name: val("u-name", id), role: val("u-role", id) } })) { usersState.msg = `${id} 저장 완료 (다음 로그인부터 권한 반영)`; renderUsersPage(true); }
+    if (await usersCall("saveUser", { user: { id, name: val("u-name", id), role: val("u-role", id) } })) { usersState.msg = `${id} 저장 완료 (해당 사용자는 다시 로그인하면 반영)`; renderUsersPage(true); }
   });
   host.querySelectorAll(".u-unlock").forEach(b => b.onclick = async () => {
     if (await usersCall("unlockUser", { id: b.dataset.id })) { usersState.msg = `${b.dataset.id} 잠금 해제 완료`; renderUsersPage(true); }

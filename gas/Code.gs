@@ -875,17 +875,19 @@ function authSheet_() {
   if (missing.length) sheet.getRange(1, header.filter(Boolean).length + 1, 1, missing.length).setValues([missing]).setFontWeight("bold");
   const h = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
   const col = name => h.indexOf(name) + 1;
+  if (col("비밀번호")) sheet.getRange(1, col("비밀번호"), Math.max(sheet.getMaxRows(), 2), 1).setNumberFormat("@"); // 시트에 직접 넣은 비밀번호가 숫자로 바뀌지 않게 (001234 → 1234)
   return { sheet, col, rows: sheetToObjects_(sheet) };
 }
 function setCell_(A, row, name, v) { const c = A.col(name); if (c) A.sheet.getRange(row, c).setValue(v); }
 
+const sameId_ = (a, b) => String(a == null ? "" : a).trim().toLowerCase() === String(b == null ? "" : b).trim().toLowerCase(); // 아이디는 대소문자 구분 없이
 function login_(body) {
   const id = String(body.id || "").trim(), pw = String(body.pw || "");
   if (!id || !pw) throw new Error("아이디/비밀번호를 입력하세요.");
   const lock = LockService.getScriptLock(); lock.waitLock(10000);
   try {
     const A = authSheet_();
-    const found = A.rows.find(r => String(r["아이디"]).trim() === id);
+    const found = A.rows.find(r => sameId_(r["아이디"], id));
     if (!found) throw new Error("아이디 또는 비밀번호가 올바르지 않습니다.");
     const fails = Number(found["실패횟수"]) || 0;
     if (String(found["잠금"]).trim().toUpperCase() === "Y" || fails >= MAX_FAIL)
@@ -903,10 +905,11 @@ function login_(body) {
     const role = roleOf_(found);
     if (id === MASTER_ADMIN_ID && String(found["권한"]).trim() !== "관리자") setCell_(A, found._row, "권한", "관리자");
     const token = Utilities.getUuid();
-    CacheService.getScriptCache().put("tok:" + token, JSON.stringify({ id, role }), SESSION_TTL);
+    CacheService.getScriptCache().put("tok:" + token, JSON.stringify({ id: String(found["아이디"]).trim(), role, t: Date.now() }), SESSION_TTL);
     return { name: found["이름"] || id, id, role: role || "조회", perms: ROLE_PERMS[role] || [], token };
   } finally { lock.releaseLock(); }
 }
+function kickUser_(id) { CacheService.getScriptCache().put("kick:" + String(id).trim().toLowerCase(), String(Date.now()), SESSION_TTL); }
 function logout_(token) { if (token) CacheService.getScriptCache().remove("tok:" + token); return true; }
 
 // 토큰 확인 (없거나 만료 → AUTH 오류, 화면은 로그인으로 돌아간다)
@@ -914,8 +917,11 @@ function session_(token) {
   const cache = CacheService.getScriptCache();
   const raw = token ? cache.get("tok:" + token) : null;
   if (!raw) throw new Error("AUTH: 로그인이 필요합니다. 다시 로그인하세요.");
-  cache.put("tok:" + token, raw, SESSION_TTL); // 사용할 때마다 연장
   const s = JSON.parse(raw);
+  // 관리자가 권한·비밀번호를 바꾸거나 계정을 지우면 그 전에 받은 로그인은 끊는다 (다시 로그인하면 새 권한)
+  const kick = cache.get("kick:" + String(s.id).toLowerCase());
+  if (kick && Number(kick) > (s.t || 0)) { cache.remove("tok:" + token); throw new Error("AUTH: 계정 정보가 바뀌었습니다. 다시 로그인하세요."); }
+  cache.put("tok:" + token, raw, SESSION_TTL); // 사용할 때마다 연장
   s.perms = ROLE_PERMS[s.role] || [];
   return s;
 }
@@ -944,8 +950,9 @@ function saveUser_(body, s) {
   const lock = LockService.getScriptLock(); lock.waitLock(10000);
   try {
     const A = authSheet_();
-    let found = A.rows.find(r => String(r["아이디"]).trim() === id);
+    let found = A.rows.find(r => sameId_(r["아이디"], id));
     if (body.isNew && found) throw new Error("이미 있는 아이디입니다: " + id);
+    if (u.password && String(u.password).length < 6) throw new Error("비밀번호는 6자 이상으로 입력하세요.");
     if (!found) {
       if (!u.password) throw new Error("새 계정은 초기 비밀번호가 필요합니다.");
       const row = A.sheet.getLastRow() + 1;
@@ -953,6 +960,7 @@ function saveUser_(body, s) {
       setCell_(A, row, "등록일시", Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm"));
       found = { _row: row };
     }
+    const prevRole = roleOf_(found);
     if (u.name != null) setCell_(A, found._row, "이름", String(u.name));
     if (u.role != null) setCell_(A, found._row, "권한", id === MASTER_ADMIN_ID ? "관리자" : u.role);
     if (u.password) {
@@ -960,6 +968,7 @@ function saveUser_(body, s) {
       setCell_(A, found._row, "비밀번호", hashPw_(String(u.password)));
       setCell_(A, found._row, "실패횟수", 0); setCell_(A, found._row, "잠금", "");
     }
+    if (u.password || (u.role != null && u.role !== prevRole)) kickUser_(id); // 바뀐 사람은 다시 로그인해야 반영
     return listUsers_();
   } finally { lock.releaseLock(); }
 }
@@ -976,5 +985,6 @@ function deleteUser_(body, s) {
   const A = authSheet_(), found = A.rows.find(r => String(r["아이디"]).trim() === id);
   if (!found) throw new Error("계정을 찾을 수 없습니다.");
   A.sheet.deleteRow(found._row);
+  kickUser_(id);
   return listUsers_();
 }
