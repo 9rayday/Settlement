@@ -19,6 +19,10 @@
  *
  * ※ 고지서 PDF는 이제 GAS를 거치지 않고 프론트엔드(js/exporters/pdf.js)에서 jsPDF로 직접
  * 그린다 — 이 파일은 UrlFetchApp을 쓰지 않으므로 script.external_request 스코프도 불필요하다.
+ *
+ * 권한(appsscript.json oauthScopes, 저장소 gas/appsscript.json 과 같게):
+ *   spreadsheets(시트) · script.scriptapp(편집 트리거) · drive(정산서 PDF 드라이브 저장)
+ *   권한을 바꾼 뒤에는 편집기에서 setupDrive 를 한 번 실행해 승인하고, 웹앱을 새 버전으로 재배포한다.
  */
 
 const SHEET_ID = "10ulJzwqjxS6Gc-I6HsEtrljYn-OgBJ7q7yuhSY8u4Pg";
