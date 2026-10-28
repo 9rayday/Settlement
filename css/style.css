@@ -681,3 +681,7 @@ input, select, textarea, button{ max-width:100%; }
   table.grid th, table.grid td{ white-space:nowrap !important; }
 }
 .warn-tag{ background:#FFF3E3 !important; color:#8A5300 !important; }
+.arc-bar{ padding-top:14px; padding-bottom:14px; }
+.arc-bar .reg-head{ margin-bottom:0; }
+.arc-bar h2{ margin:0; }
+.arc-bar #arcMsg{ display:inline-block; margin-top:8px; }

@@ -52,7 +52,6 @@ function renderArchivePage() {
   host.innerHTML = `<div class="card"><div class="reg-head"><h2>정산서 보관함</h2>
       <div class="row"><div class="seg arc-kind">${[["cust", "전기사용자"], ["gen", "발전사업자"]].map(([k, l]) => `<button type="button" data-k="${k}"${k === kind ? ' class="active"' : ""}>${l}</button>`).join("")}</div>
         <button type="button" class="btn secondary" id="arcPrev"${years.indexOf(y) <= 0 ? " disabled" : ""}>‹</button><b class="arc-year">${y}년</b><button type="button" class="btn secondary" id="arcNext"${years.indexOf(y) >= years.length - 1 ? " disabled" : ""}>›</button></div></div>
-      <div class="hint" style="margin:6px 0 10px">${kind === "cust" ? "<b>가</b> 가정산서 · <b>오</b> 오차정산서" : "칸 = 그 달 지급액"} — 누르면 아래에 정산서가 열리고, 정산 권한이 있으면 수정할 수 있습니다.</div>
       <div class="grid-wrap"><table class="grid arc-table"><tr><th>${kind === "cust" ? "전기사용자" : "발전소"}</th>${Array.from({ length: 12 }, (_, i) => `<th>${i + 1}월</th>`).join("")}</tr>
         ${pg.items.length ? pg.items.map(r => `<tr><td class="arc-name"><b>${rEsc(r.name)}</b>${r.sub && r.sub !== r.name ? `<div class="perf-sub">${rEsc(r.sub)}</div>` : ""}</td>${cells(r)}</tr>`).join("")
           : `<tr><td colspan="13" class="empty">${y}년에 발행한 정산서가 없습니다.</td></tr>`}</table></div>
@@ -126,8 +125,8 @@ async function renderArcViewer() {
       <div class="row">${canEdit && !arcState.edit ? `<button type="button" class="btn secondary" id="arcEdit">수정</button>` : ""}
         ${docHtml ? `<button type="button" class="btn secondary" id="arcPrint">${o.doc === "gen" ? "PDF 다운" : "인쇄 / PDF 저장"}</button>` : ""}
         <button type="button" class="btn secondary" id="arcClose">닫기</button></div></div>
-      ${arcState.edit ? arcEditForm(o, R, snap) : ""}
-      <div id="arcMsg" class="status ${arcState.flash ? arcState.flash.cls : ""}" style="background:none">${arcState.flash ? rEsc(arcState.flash.text) : ""}</div></div>
+      <span id="arcMsg" class="status ${arcState.flash ? arcState.flash.cls : ""}" style="background:none${arcState.flash ? "" : ";display:none"}">${arcState.flash ? rEsc(arcState.flash.text) : ""}</span>
+      ${arcState.edit ? arcEditForm(o, R, snap) : ""}</div>
     ${note ? `<div class="card no-print">${note}</div>` : `<div class="arc-docs">${docHtml}</div>`}</div>`;
   fitDocs(host); arcState.flash = null;
   const btn = id => document.getElementById(id);
@@ -142,7 +141,7 @@ async function renderArcViewer() {
 }
 function arcSummary(rec, items) {
   if (!rec) return `<div class="hint">기록이 없습니다.</div>`;
-  return `<div class="notice warn">이 기록은 정산서 보관함 이전에 발행되어 문서 모양으로 다시 그릴 재료가 없습니다. 같은 달을 다시 발행하면 문서로 보고 수정할 수 있습니다.</div>
+  return `<div class="notice warn">예전 기록 · 요약만 표시</div>
     <table class="grid" style="max-width:520px">${items.map(([l, k, u]) => `<tr><th>${l}</th><td class="num">${rec[k] == null ? "-" : u === "kWh" ? Math.round(rec[k]).toLocaleString() + " kWh" : u === "raw" ? rec[k] : arcWon(rec[k])}</td></tr>`).join("")}</table>`;
 }
 
@@ -165,7 +164,7 @@ function arcEditForm(o, R, snap) {
   }
   return `<div class="arc-edit"><div class="adj-grid">${body}</div>
     <div class="row" style="margin-top:8px"><button type="button" class="btn accent" id="arcSave">저장하고 반영</button><button type="button" class="btn secondary" id="arcCancel">취소</button>
-      <span class="hint" style="margin:0">값을 바꾸면 아래 문서가 바로 다시 계산됩니다.</span></div></div>`;
+</div></div>`;
 }
 
 function bindArcEdit(o) {
@@ -198,8 +197,8 @@ function bindArcEdit(o) {
     recalc();
     const msg = document.getElementById("arcMsg");
     if (o.doc === "trueup" && E.R.fields.confirmed.taxable + E.R.fields.confirmed.exempt !== E.R.fields.confirmedTotal) {
-      msg.textContent = "확정 부가정산금 과세+비과세가 총액과 다릅니다."; msg.className = "status bad"; return; }
-    msg.textContent = "저장 중..."; msg.className = "status warn";
+      msg.style.display = ""; msg.textContent = "확정 부가정산금 과세+비과세가 총액과 다릅니다."; msg.className = "status bad"; return; }
+    msg.style.display = ""; msg.textContent = "저장 중..."; msg.className = "status warn";
     try {
       const done = o.doc === "bill" ? await arcSaveBill(o, E.R) : o.doc === "trueup" ? await arcSaveTrueUp(o, E.R) : await arcSaveGen(o, E.snap);
       arcState.edit = null; arcState.flash = { text: "저장 완료 · " + done.join(" · "), cls: "ok" };

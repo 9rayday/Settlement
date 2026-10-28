@@ -88,7 +88,7 @@ function surchargeRowHtml() {
 }
 
 function provisionalFormHtml() {
-  return `<div class="card"><h2>전월 오차정산 반영</h2><div id="carrySrc" class="hint" style="margin:0 0 8px"></div>
+  return `<div class="card"><h2>전월 오차정산 반영</h2>
     <div id="csRowWrap">${surchargeRowHtml()}</div>
     <div class="adj-grid">
       ${numField("전월 확정 부가정산금 (과세)", "cs_taxable", 0)}${numField("전월 확정 부가정산금 (비과세)", "cs_exempt", 0)}
@@ -126,7 +126,7 @@ function fillBillCfg(app, month) {
 function trueUpFormHtml() {
   return `<div class="card"><h2>비교 기준 가정산서</h2><div id="pvSource" class="hint" style="margin:0 0 8px"></div>
       <div class="adj-grid">${numField("공급량 (kWh)", "pv_supply")}${numField("전력량요금 (원)", "pv_energy")}${numField("송배전용 전기설비 이용요금 (원)", "pv_net")}${numField("거래수수료 (원)", "pv_fee")}</div></div>
-    <div class="card"><h2>확정 망이용요금 (한전 청구서, 발전소별)</h2><div class="hint" style="margin:0 0 8px">비워 두면 시스템 계산값을 씁니다. 넣은 금액으로 가정산서와 비교해 차액(과세)을 계산합니다.</div>
+    <div class="card"><h2>확정 망이용요금 (한전 청구서, 발전소별)</h2>
       <div class="adj-grid" id="netConfGrid"></div></div>
     <div class="card"><h2>확정 부가정산금 · 전월 차액</h2>
       ${surchargeRowHtml()}
@@ -212,9 +212,6 @@ function fillProvisionalForm(app, month) {
   // 오차정산서를 발행했으면 그 값을 그대로 쓰고 고칠 수 없게 (고치려면 오차정산서를 다시 발행)
   ["cs_taxable", "cs_exempt", "pd_taxable", "pd_exempt"].forEach(id => { $(id).readOnly = !!carry; });
   $("csRowWrap").style.display = carry ? "none" : "";
-  $("carrySrc").innerHTML = carry
-    ? `${monthLabel(prevMonth)} 오차정산서(${fmtDate(carry.savedAt)}) 값이 자동 반영됩니다. 바꾸려면 오차정산서를 다시 발행하세요.`
-    : `${monthLabel(prevMonth)} 오차정산서가 없습니다. 시스템 밖에서 정산한 경우 직접 입력하세요.`;
   fillBillCfg(app, month);
   fillRecBill(app, month);
 }
@@ -782,7 +779,6 @@ function trueUpHtml(R) {
       <tr><td class="label">비과세</td><td>${pctStr(1 - ratio)}</td><td class="num">${won(t.confirmed.exempt)}</td><td class="num">0 원</td><td class="num">${won(t.confirmed.exempt)}</td></tr>
       <tr class="total"><td class="label">계</td><td>100%</td><td class="num">${won(t.confirmedTotal)}</td><td class="num">${won(csVat)}</td><td class="num">${won(t.confirmedTotal + csVat)}</td></tr>
     </table>
-    <p class="doc-note">${nmM}월 거래분 청구서 반영 — 전월 차액 (과세) ${sign(t.prevDiff.taxable)} · 전월 차액 (비과세) ${sign(t.prevDiff.exempt)} · ${m}월 확정 부가정산금 과세 ${won(t.confirmed.taxable)} / 비과세 ${won(t.confirmed.exempt)}</p>
     ${docSignature(R, "오차", c)}
   </div>`;
 }

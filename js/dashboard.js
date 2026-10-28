@@ -137,8 +137,7 @@ function dashDetailHtml(ym) {
         <tr class="total"><td colspan="2">합계 (${d.cust.length}건)</td><td class="num">${dKwh(sum(d.cust, "supplyTotal"))}</td><td class="num">${dWon(sum(d.cust, "energy"))}</td><td class="num">${dWon(sum(d.cust, "netTotal"))}</td><td class="num">${dWon(sum(d.cust, "fee"))}</td><td class="num"><b class="plus">+${dWon(d.custTotal)}</b></td><td></td></tr></table></div>`
         : `<div class="empty">없음</div>`}
       <h3 class="sub" style="margin-top:18px">발전사업자별 전력대금 요약</h3>
-      ${lateN ? `<div class="notice warn">${lateN}개 발전소는 발전대금 계산 때 계약단가가 비어 있어 지급액이 빠져 있습니다. 지금은 계약관리에 단가가 등록되어 있습니다.
-        <button type="button" class="btn accent" id="dashApplyPrice" style="margin-left:8px">등록된 계약단가로 다시 계산 (${lateN}개소)</button></div>` : ""}
+      ${lateN ? `<div style="margin:0 0 8px"><button type="button" class="btn accent" id="dashApplyPrice">등록된 계약단가로 다시 계산 (${lateN}개소)</button></div>` : ""}
       ${d.gen.length ? `<div class="table-wrap"><table class="grid dash-table"><tr><th>발전소</th><th>신청번호</th><th>공급량(kWh)</th><th>계약단가</th><th>전력량요금(VAT 포함)</th><th>수수료(VAT 포함)</th><th>위약금</th><th>지급액</th></tr>${genRows}
         <tr class="total"><td colspan="2">합계 (${d.gen.length}개소)</td><td class="num">${dKwh(sum(d.gen, "supply"))}</td><td></td><td class="num">${dWon(sum(d.gen, "subtotal1"))}</td><td class="num">${dWon(sum(d.gen, "subtotal2"))}</td><td class="num">${dWon(sum(d.gen, "penalty"))}</td><td class="num"><b class="minus">−${dWon(d.genTotal)}</b></td></tr></table></div>`
         : `<div class="empty">없음</div>`}
