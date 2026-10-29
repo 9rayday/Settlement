@@ -60,6 +60,8 @@ function shakeOtp(){
 }
 function showLoginStep(step){
   if (step !== "otpStep") clearInterval(_otpTimer);
+  const pw = document.getElementById("pwStep"); // 단계가 바뀌어도 카드 크기가 같게: 비밀번호 단계 높이로 맞춤
+  if (pw.offsetHeight) document.querySelector(".login-card").style.setProperty("--step-h", pw.offsetHeight + "px");
   ["pwStep", "otpStep", "linkStep"].forEach(id => { const el = document.getElementById(id); el.hidden = id !== step; if (id === "pwStep") el.style.display = id === step ? "" : "none"; });
   if (step === "pwStep") { _pending = ""; document.getElementById("otpCode").value = ""; }
 }

@@ -21,10 +21,10 @@ body{ margin:0; background:var(--paper); color:var(--ink); font-size:14px; line-
   font-size:14px; width:100%;
 }
 .login-card #loginBtn{ width:100%; padding-top:9px; padding-bottom:9px; font-size:14px; }
-.login-step{ flex-direction:column; align-items:stretch; gap:10px; }
+.login-step{ flex-direction:column; align-items:stretch; justify-content:center; gap:10px; min-height:var(--step-h, auto); }
 .login-step[hidden]{ display:none; }
 .login-step .btn{ width:100%; padding-top:9px; padding-bottom:9px; font-size:14px; }
-.otp-field{ position:relative; }
+.otp-field{ position:relative; width:100%; }
 .login-card #otpCode{ text-align:center; letter-spacing:6px; font-size:16px; font-weight:600; padding-left:44px; padding-right:44px; }
 .login-card #otpCode::placeholder{ letter-spacing:0; font-size:13px; font-weight:400; }
 .otp-timer{ position:absolute; right:12px; top:50%; transform:translateY(-50%); font-size:12px; color:var(--muted, #888); font-variant-numeric:tabular-nums; }

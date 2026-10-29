@@ -992,7 +992,7 @@ function deleteUser_(body, s) {
   const A = authSheet_(), found = A.rows.find(r => String(r["아이디"]).trim() === id);
   if (!found) throw new Error("계정을 찾을 수 없습니다.");
   A.sheet.deleteRow(found._row);
-  PropertiesService.getScriptProperties().deleteProperty(kakaoProp_(id));
+  kakaoRevoke_(id);
   kickUser_(id);
   return listUsers_();
 }
@@ -1037,6 +1037,7 @@ function authUrl_(cfg, redirect, state) {
 // 비밀번호 확인 뒤 두 번째 단계: 인증번호 보내기 또는 카카오 연결 안내
 function startSecondStep_(cfg, found, redirect) {
   const id = String(found["아이디"]).trim(), pending = Utilities.getUuid();
+  if (!String(found["카카오"] || "").trim()) kakaoRevoke_(id); // 시트에서 카카오 칸을 지운 경우도 해제와 같게
   if (kakaoLinked_(found)) {
     const p = { id, mode: "otp", code: newCode_(), tries: 0, sends: 1, exp: Date.now() + OTP_TTL * 1000 };
     try { sendOtp_(cfg, id, p.code); pendPut_(pending, p); return { otp: true, pending, ttl: OTP_TTL }; }
@@ -1107,12 +1108,20 @@ function kakaoLink_(body) {
     return finishLogin_(A, found);
   } finally { lock.releaseLock(); }
 }
+// 카카오 쪽 연결까지 끊는다 (앱 연결 끊기 → 다음 연결 때 동의 화면이 다시 나옴). 실패해도 이쪽 연결 정보는 지움
+function kakaoRevoke_(id) {
+  const props = PropertiesService.getScriptProperties(), cfg = kakaoCfg_();
+  if (cfg && props.getProperty(kakaoProp_(id))) {
+    try { kakaoFetch_("https://kapi.kakao.com/v1/user/unlink", { id: "" }, kakaoAccess_(cfg, id).at); } catch (e) { /* 이미 끊김 */ }
+  }
+  props.deleteProperty(kakaoProp_(id));
+}
 // 관리자: 카카오 연결 해제 (휴대폰 바뀜 등) → 다음 로그인 때 다시 연결
 function kakaoUnlink_(body) {
   const id = String(body.id || "").trim(), A = authSheet_(), found = A.rows.find(r => sameId_(r["아이디"], id));
   if (!found) throw new Error("계정을 찾을 수 없습니다.");
   setCell_(A, found._row, "카카오", "");
-  PropertiesService.getScriptProperties().deleteProperty(kakaoProp_(id));
+  kakaoRevoke_(id);
   kickUser_(id);
   return listUsers_();
 }
