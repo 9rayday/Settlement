@@ -999,12 +999,12 @@ function deleteUser_(body, s) {
 
 /* ============ 카카오톡 2단계 인증 ============
  * 스크립트 속성 KAKAO_REST_KEY · KAKAO_CLIENT_SECRET 이 있으면 켜진다 (없으면 비밀번호만으로 로그인).
- * 비밀번호가 맞으면 → 카카오 연결된 사람: 카톡 "나와의 채팅"으로 6자리 인증번호 (5분, 5회까지, 재전송 2번)
+ * 비밀번호가 맞으면 → 카카오 연결된 사람: 카톡 "나와의 채팅"으로 6자리 인증번호 (3분, 5회까지, 재전송 2번)
  *                  → 연결 안 된 사람: 카카오 로그인·메시지 전송 동의(연결) 후 바로 로그인
  * 카카오 토큰은 스크립트 속성 "kakao:<아이디>" 에 (시트에는 연결된 카카오 이름만). 시트 "카카오" 칸을 지우면 연결 해제 → 다음 로그인 때 다시 연결.
  * 시트 "2단계" 칸 = N 이면 그 사람은 비밀번호만 (카카오 장애 때 비상용).
  */
-const OTP_TTL = 300, OTP_TRIES = 5, OTP_SENDS = 3, LINK_TTL = 600;
+const OTP_TTL = 180, OTP_TRIES = 5, OTP_SENDS = 3, LINK_TTL = 600;
 function kakaoCfg_() {
   const p = PropertiesService.getScriptProperties(), key = String(p.getProperty("KAKAO_REST_KEY") || "").trim();
   return key ? { key, secret: String(p.getProperty("KAKAO_CLIENT_SECRET") || "").trim() } : null;
@@ -1039,7 +1039,7 @@ function startSecondStep_(cfg, found, redirect) {
   const id = String(found["아이디"]).trim(), pending = Utilities.getUuid();
   if (kakaoLinked_(found)) {
     const p = { id, mode: "otp", code: newCode_(), tries: 0, sends: 1, exp: Date.now() + OTP_TTL * 1000 };
-    try { sendOtp_(cfg, id, p.code); pendPut_(pending, p); return { otp: true, pending, to: String(found["카카오"]).trim() }; }
+    try { sendOtp_(cfg, id, p.code); pendPut_(pending, p); return { otp: true, pending, ttl: OTP_TTL }; }
     catch (e) { if (!e.kakao) throw e; } // 카카오 연결이 끊김(토큰 만료·동의 철회) → 다시 연결
   }
   if (!/^https?:\/\/[^\s?#]+\/kakao\.html$/.test(String(redirect || ""))) throw new Error("카카오 연결 주소가 올바르지 않습니다. 화면을 새로고침(Ctrl+F5)하세요.");
@@ -1060,7 +1060,7 @@ function kakaoMemo_(at, site, text) {
 }
 function sendOtp_(cfg, id, code) {
   const a = kakaoAccess_(cfg, id);
-  kakaoMemo_(a.at, a.info.site, `[TWh 정산시스템] 로그인 인증번호\n\n${code}\n\n5분 안에 입력하세요. 본인이 로그인한 것이 아니면 비밀번호를 바꾸세요.`);
+  kakaoMemo_(a.at, a.info.site, `[TWh 정산시스템] 로그인 인증번호\n\n${code}\n\n3분 안에 입력하세요. 본인이 로그인한 것이 아니면 비밀번호를 바꾸세요.`);
 }
 function verifyOtp_(body) {
   const lock = LockService.getScriptLock(); lock.waitLock(10000);
@@ -1085,7 +1085,7 @@ function resendOtp_(body) {
   if (p.sends >= OTP_SENDS) throw new Error(`재전송은 ${OTP_SENDS - 1}번까지입니다. 다시 로그인하세요.`);
   p.code = newCode_(); p.sends++; p.tries = 0; p.exp = Date.now() + OTP_TTL * 1000;
   sendOtp_(cfg, p.id, p.code); pendPut_(body.pending, p);
-  return { sent: true };
+  return { sent: true, ttl: OTP_TTL };
 }
 // 카카오 동의 화면에서 돌아옴 (kakao.html → index.html?code=&state=) → 토큰 받아 연결하고 로그인 완료
 function kakaoLink_(body) {

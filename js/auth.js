@@ -43,7 +43,23 @@ function loginErr(msg){
   errEl.textContent = msg || "";
   errEl.style.display = msg ? "inline-flex" : "none";
 }
+let _otpTimer = null;
+function startOtpTimer(sec){ // 남은 시간 표시, 다 지나면 처음으로
+  clearInterval(_otpTimer);
+  const end = Date.now() + sec * 1000, el = document.getElementById("otpTimer");
+  const tick = () => {
+    const left = Math.max(0, Math.round((end - Date.now()) / 1000));
+    el.textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`; el.classList.toggle("low", left <= 30);
+    if (!left) { showLoginStep("pwStep"); loginErr("인증 시간이 지났습니다. 다시 로그인하세요."); }
+  };
+  tick(); _otpTimer = setInterval(tick, 1000);
+}
+function shakeOtp(){
+  const f = document.querySelector(".otp-field"); f.classList.remove("shake"); void f.offsetWidth; f.classList.add("shake");
+  setTimeout(() => f.classList.remove("shake"), 450);
+}
 function showLoginStep(step){
+  if (step !== "otpStep") clearInterval(_otpTimer);
   ["pwStep", "otpStep", "linkStep"].forEach(id => { const el = document.getElementById(id); el.hidden = id !== step; if (id === "pwStep") el.style.display = id === step ? "" : "none"; });
   if (step === "pwStep") { _pending = ""; document.getElementById("otpCode").value = ""; }
 }
@@ -64,8 +80,7 @@ async function handleLogin(){
 function afterLoginStep(d, id){
   if (d && d.otp) {
     _pending = d.pending;
-    document.getElementById("otpTo").textContent = `카카오톡 나와의 채팅 · ${String(d.to || "").replace(/ #\d+$/, "")}`;
-    showLoginStep("otpStep"); document.getElementById("otpCode").focus();
+    showLoginStep("otpStep"); startOtpTimer(d.ttl || 180); document.getElementById("otpCode").focus();
     return;
   }
   if (d && d.link) {
@@ -79,16 +94,16 @@ function afterLoginStep(d, id){
 async function handleOtp(){
   const code = document.getElementById("otpCode").value.replace(/\D/g, "");
   loginErr("");
-  if (code.length !== 6) return loginErr("인증번호 6자리를 입력하세요.");
+  if (code.length !== 6) { shakeOtp(); return loginErr("인증번호 6자리를 입력하세요."); }
   const r = await busyBtn("otpBtn", "확인 중...", () => authPost({ action: "verifyOtp", pending: _pending, code }));
-  if (!r.ok) { loginErr(r.error); if (/다시 로그인/.test(r.error)) showLoginStep("pwStep"); else document.getElementById("otpCode").select(); return; }
+  if (!r.ok) { loginErr(r.error); if (/다시 로그인/.test(r.error)) showLoginStep("pwStep"); else { shakeOtp(); document.getElementById("otpCode").select(); } return; }
   completeLogin(r.data);
 }
 async function handleResend(){
   loginErr("");
   const r = await busyBtn("otpResend", "보내는 중...", () => authPost({ action: "resendOtp", pending: _pending }));
   if (!r.ok) { loginErr(r.error); if (/다시 로그인/.test(r.error)) showLoginStep("pwStep"); return; }
-  document.getElementById("otpCode").value = ""; document.getElementById("otpCode").focus();
+  document.getElementById("otpCode").value = ""; document.getElementById("otpCode").focus(); startOtpTimer((r.data && r.data.ttl) || 180);
 }
 // 카카오 동의 화면에서 돌아옴 (kakao.html → index.html?code=…&state=…)
 async function handleKakaoReturn(){

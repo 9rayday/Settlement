@@ -10,7 +10,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-<link rel="stylesheet" href="css/style.css?v=202610290858">
+<link rel="stylesheet" href="css/style.css?v=202610290913">
 </head>
 <body>
 
@@ -39,13 +39,12 @@
       <button class="btn accent" id="loginBtn">로그인</button>
     </div>
     <div id="otpStep" class="row login-step" hidden>
-      <div id="otpTo" class="otp-to"></div>
-      <input type="text" id="otpCode" placeholder="카카오톡 인증번호 6자리" inputmode="numeric" maxlength="6" autocomplete="one-time-code">
+      <div class="otp-field"><input type="text" id="otpCode" placeholder="카카오톡 인증번호 6자리" inputmode="numeric" maxlength="6" autocomplete="one-time-code"><span id="otpTimer" class="otp-timer"></span></div>
       <button class="btn accent" id="otpBtn">확인</button>
       <div class="login-sub"><button type="button" class="link-btn" id="otpResend">재전송</button><button type="button" class="link-btn" id="stepBack">처음으로</button></div>
     </div>
     <div id="linkStep" class="row login-step" hidden>
-      <button class="btn kakao-btn" id="kakaoLinkBtn">카카오 연결 후 로그인</button>
+      <button class="btn kakao-btn" id="kakaoLinkBtn"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path fill="#191919" d="M12 3C6.48 3 2 6.48 2 10.78c0 2.77 1.85 5.2 4.64 6.58l-.95 3.48c-.08.3.26.54.52.37l4.15-2.74c.54.06 1.09.1 1.64.1 5.52 0 10-3.48 10-7.79S17.52 3 12 3z"/></svg>카카오 연결 후 로그인</button>
       <div class="login-sub"><button type="button" class="link-btn" id="linkBack">처음으로</button></div>
     </div>
     <div class="row" style="flex-direction:column; align-items:stretch;">
@@ -239,31 +238,31 @@
 
 </div>
 
-<script src="js/config.js?v=202610290858"></script>
-<script src="js/state.js?v=202610290858"></script>
-<script src="js/api.js?v=202610290858"></script>
-<script src="js/engine.js?v=202610290858"></script>
-<script src="js/parsers.js?v=202610290858"></script>
-<script src="js/store.js?v=202610290858"></script>
-<script src="js/registry.js?v=202610290858"></script>
-<script src="js/performance.js?v=202610290858"></script>
-<script src="js/auth.js?v=202610290858"></script>
-<script src="js/upload.js?v=202610290858"></script>
-<script src="js/invoice.js?v=202610290858"></script>
-<script src="js/billing.js?v=202610290858"></script>
-<script src="js/dashboard.js?v=202610290858"></script>
-<script src="js/archive.js?v=202610290858"></script>
-<script src="js/drive.js?v=202610290858"></script>
-<script src="js/users.js?v=202610290858"></script>
-<script src="js/rec.js?v=202610290858"></script>
-<script src="js/tariff.js?v=202610290858"></script>
-<script src="js/kpxrates.js?v=202610290858"></script>
-<script src="js/market.js?v=202610290858"></script>
-<script src="js/nav.js?v=202610290858"></script>
-<script src="js/header.js?v=202610290858"></script>
-<script src="js/exporters/excel.js?v=202610290858"></script>
-<script src="js/exporters/pdf.js?v=202610290858"></script>
-<script src="js/exporters/zip.js?v=202610290858"></script>
-<script src="js/main.js?v=202610290858"></script>
+<script src="js/config.js?v=202610290913"></script>
+<script src="js/state.js?v=202610290913"></script>
+<script src="js/api.js?v=202610290913"></script>
+<script src="js/engine.js?v=202610290913"></script>
+<script src="js/parsers.js?v=202610290913"></script>
+<script src="js/store.js?v=202610290913"></script>
+<script src="js/registry.js?v=202610290913"></script>
+<script src="js/performance.js?v=202610290913"></script>
+<script src="js/auth.js?v=202610290913"></script>
+<script src="js/upload.js?v=202610290913"></script>
+<script src="js/invoice.js?v=202610290913"></script>
+<script src="js/billing.js?v=202610290913"></script>
+<script src="js/dashboard.js?v=202610290913"></script>
+<script src="js/archive.js?v=202610290913"></script>
+<script src="js/drive.js?v=202610290913"></script>
+<script src="js/users.js?v=202610290913"></script>
+<script src="js/rec.js?v=202610290913"></script>
+<script src="js/tariff.js?v=202610290913"></script>
+<script src="js/kpxrates.js?v=202610290913"></script>
+<script src="js/market.js?v=202610290913"></script>
+<script src="js/nav.js?v=202610290913"></script>
+<script src="js/header.js?v=202610290913"></script>
+<script src="js/exporters/excel.js?v=202610290913"></script>
+<script src="js/exporters/pdf.js?v=202610290913"></script>
+<script src="js/exporters/zip.js?v=202610290913"></script>
+<script src="js/main.js?v=202610290913"></script>
 </body>
 </html>

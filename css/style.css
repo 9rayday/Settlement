@@ -24,11 +24,17 @@ body{ margin:0; background:var(--paper); color:var(--ink); font-size:14px; line-
 .login-step{ flex-direction:column; align-items:stretch; gap:10px; }
 .login-step[hidden]{ display:none; }
 .login-step .btn{ width:100%; padding-top:9px; padding-bottom:9px; font-size:14px; }
-.login-card #otpCode{ text-align:center; letter-spacing:4px; font-size:16px; }
-.otp-to{ font-size:13px; color:var(--muted, #666); text-align:center; }
+.otp-field{ position:relative; }
+.login-card #otpCode{ text-align:center; letter-spacing:6px; font-size:16px; font-weight:600; padding-left:44px; padding-right:44px; }
+.login-card #otpCode::placeholder{ letter-spacing:0; font-size:13px; font-weight:400; }
+.otp-timer{ position:absolute; right:12px; top:50%; transform:translateY(-50%); font-size:12px; color:var(--muted, #888); font-variant-numeric:tabular-nums; }
+.otp-timer.low{ color:#d14343; }
+.otp-field.shake{ animation:otpShake .4s; }
+.otp-field.shake #otpCode{ border-color:#d14343; }
+@keyframes otpShake{ 0%,100%{ transform:translateX(0); } 20%,60%{ transform:translateX(-7px); } 40%,80%{ transform:translateX(7px); } }
 .login-sub{ display:flex; justify-content:center; gap:14px; }
 .link-btn{ background:none; border:0; padding:2px; font-size:12px; color:var(--muted, #666); cursor:pointer; text-decoration:underline; }
-.btn.kakao-btn{ background:#FEE500; color:#191919; border:1px solid #FEE500; }
+.btn.kakao-btn{ background:#FEE500; color:#191919; border:1px solid #FEE500; font-weight:600; display:flex; align-items:center; justify-content:center; gap:7px; }
 .btn.kakao-btn:hover{ filter:brightness(.96); }
 #loginError{ margin-top:10px; }
 #loginError:empty{ display:none !important; }
