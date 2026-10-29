@@ -215,7 +215,8 @@ button.btn.secondary.danger{ color:var(--danger); border-color:var(--danger); }
 :root{ --side-bg:#26292E; --side-line:#363A41; --side-text:#B9BFC8; --side-dim:#868D97; --side-hover:#30343A; --side-w:248px; }
 .layout{ display:grid; grid-template-columns:var(--side-w) minmax(0, 1fr); min-height:calc(100vh - 72px); } /* 사이드 메뉴 고정 폭 (화면 전체가 자동 배율로 함께 커지고 줄어듦) */
 .sidebar{ background:var(--side-bg); color:var(--side-text); position:sticky; top:0; align-self:start; height:100vh; overflow-y:auto; padding-bottom:24px;
-  scrollbar-gutter:stable; scrollbar-width:thin; scrollbar-color:#4A4F57 transparent; } /* 메뉴가 길어 스크롤바가 생겨도 폭이 그대로 (계약관리·정산관리 같은 모양) */
+  scrollbar-width:none; } /* 스크롤바는 숨김 (메뉴가 길어도 폭·모양이 그대로, 휠로 스크롤은 됨) */
+.sidebar::-webkit-scrollbar{ display:none; }
 html{ scrollbar-gutter:stable; } /* 화면이 짧고 길어도 전체가 좌우로 움직이지 않게 */
 .side-toggle{ display:grid; grid-template-columns:1fr 1fr; border-bottom:1px solid var(--side-line); }
 .side-toggle button{ background:none; border:none; border-bottom:2px solid transparent; color:var(--side-dim); font:inherit; font-size:13.5px; font-weight:600; padding:15px 0 13px; cursor:pointer; }
