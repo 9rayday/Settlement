@@ -27,7 +27,7 @@ body{ margin:0; background:var(--paper); color:var(--ink); font-size:14px; line-
 .otp-field{ position:relative; width:100%; }
 .login-card #otpCode{ text-align:center; letter-spacing:6px; font-size:16px; font-weight:600; padding-left:44px; padding-right:44px; }
 .login-card #otpCode::placeholder{ letter-spacing:0; font-size:13px; font-weight:400; }
-.otp-timer{ position:absolute; right:12px; top:50%; transform:translateY(-50%); font-size:12px; color:var(--muted, #888); font-variant-numeric:tabular-nums; }
+.otp-timer{ position:absolute; right:12px; top:50%; transform:translateY(-50%); font-size:12px; font-weight:600; color:#4b5563; font-variant-numeric:tabular-nums; }
 .otp-timer.low{ color:#d14343; }
 .otp-field.shake{ animation:otpShake .4s; }
 .otp-field.shake #otpCode{ border-color:#d14343; }
