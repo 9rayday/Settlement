@@ -123,6 +123,7 @@ async function handleKakaoReturn(){
 }
 function completeLogin(data, id){
   showLoginStep("pwStep");
+  history.replaceState(null, "", location.pathname + "#dash"); // 로그인하면 정산 대시보드부터 (새로고침은 보던 화면 그대로)
   sessionStorage.setItem(AUTH_KEY, "1");
   // Code.gs 재배포 전(토큰을 주지 않는 예전 서버)에는 예전처럼 전체 권한으로 들어간다. 재배포하면 서버 권한이 적용된다.
   const legacy = !(data && data.token);

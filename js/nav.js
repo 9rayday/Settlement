@@ -22,7 +22,7 @@ const PAGES = {
 // 페이지별 수정 권한 (없으면 "조회 전용" 표시, 실제 저장은 서버가 막는다)
 const PAGE_EDIT = { "page-cust-perf": "contract", "page-gen-perf": "contract", "page-reg-cust": "contract", "page-reg-plant": "contract", "page-reg-group": "contract",
   "page-settle-cust": "settle", "page-settle-gen": "settle", "page-rate-kpx": "rates", "page-rate-tou": "rates", "page-rate-market": "rates", "page-rec": "settle", "page-archive": "settle" };
-const DEFAULT_PAGE = "page-settle-cust";
+const DEFAULT_PAGE = "page-dash"; // 처음 로그인하면 정산 대시보드
 const NAV_KEY = "settlement.page";
 
 function setSideGroup(group) {
