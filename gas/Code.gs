@@ -237,8 +237,7 @@ function getCustomers_() {
 // legacyKeyField: 키 칸이 비어 있는 예전 행은 이 칸 값으로 찾는다 (전기사용자: 계약ID 도입 전 KPX신청번호로 저장된 행)
 function upsertRegistryRow_(sheet, fields, keyField, record, originalKey, legacyKeyField, originalRow) {
   clearMemo_();
-  const lock = LockService.getScriptLock();
-  lock.waitLock(10000);
+  const lock = scriptLock_(10000);
   try {
     record = record || {};
     let header = sheet.getLastColumn() ? sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String) : [];
@@ -286,8 +285,7 @@ function upsertRegistryRow_(sheet, fields, keyField, record, originalKey, legacy
 
 function deleteRegistryRow_(sheet, keyField, key, legacyKeyField, rowNo) {
   clearMemo_();
-  const lock = LockService.getScriptLock();
-  lock.waitLock(10000);
+  const lock = scriptLock_(10000);
   try {
     const k0 = String(key || "").trim(), rows = sheetToObjects_(sheet), n = Number(rowNo) || 0;
     const nameOf = r => String(pickField_(r, keyField) || "").trim(), k = stripDupKey_(k0);
@@ -435,7 +433,7 @@ function ownerFolder_(parent, owner) {
 const driveName_ = s => String(s == null ? "" : s).replace(/[\/:*?"<>|]/g, "_").trim() || "미지정";
 // files: [{ year, kind: "cust"|"gen", owner, name, base64 }]
 function savePdfs_(body) {
-  const lock = LockService.getScriptLock(); lock.waitLock(20000);
+  const lock = scriptLock_(20000);
   try {
     const root = driveRoot_(); rollDriveYears_(root);
     return (body.files || []).map(f => {
@@ -881,14 +879,21 @@ function authSheet_() {
 }
 function setCell_(A, row, name, v) { const c = A.col(name); if (c) A.sheet.getRange(row, c).setValue(v); }
 
+// 스크립트 잠금. 못 잡으면 GAS 기본 "잠금 시간 초과" 대신 안내 문구로
+function scriptLock_(ms) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(ms)) throw new Error("다른 작업(대시보드 갱신·PDF 저장 등)을 처리 중입니다. 잠시 후 다시 시도하세요.");
+  return lock;
+}
 const sameId_ = (a, b) => String(a == null ? "" : a).trim().toLowerCase() === String(b == null ? "" : b).trim().toLowerCase(); // 아이디는 대소문자 구분 없이
 function login_(body) {
   const id = String(body.id || "").trim(), pw = String(body.pw || "");
   if (!id || !pw) throw new Error("아이디/비밀번호를 입력하세요.");
-  const lock = LockService.getScriptLock(); lock.waitLock(10000);
+  let A, found;
+  const lock = scriptLock_(20000);
   try {
-    const A = authSheet_();
-    const found = A.rows.find(r => sameId_(r["아이디"], id));
+    A = authSheet_();
+    found = A.rows.find(r => sameId_(r["아이디"], id));
     if (!found) throw new Error("아이디 또는 비밀번호가 올바르지 않습니다.");
     const fails = Number(found["실패횟수"]) || 0;
     if (String(found["잠금"]).trim().toUpperCase() === "Y" || fails >= MAX_FAIL)
@@ -902,10 +907,11 @@ function login_(body) {
     setCell_(A, found._row, "실패횟수", 0);
     setCell_(A, found._row, "잠금", "");
     if (String(found["비밀번호"]).indexOf("sha256:") !== 0) setCell_(A, found._row, "비밀번호", hashPw_(pw)); // 평문 → 해시
-    const cfg = kakaoCfg_();
-    if (cfg && String(found["2단계"] || "").trim().toUpperCase() !== "N") return startSecondStep_(cfg, found, body.redirect);
-    return finishLogin_(A, found);
   } finally { lock.releaseLock(); }
+  // 카카오 인증번호 발송(외부 호출)은 잠금 밖에서 — 다른 로그인·저장을 막지 않게
+  const cfg = kakaoCfg_();
+  if (cfg && String(found["2단계"] || "").trim().toUpperCase() !== "N") return startSecondStep_(cfg, found, body.redirect);
+  return finishLogin_(A, found);
 }
 // 비밀번호(+카카오 인증)까지 끝나면 로그인 토큰 발급
 function finishLogin_(A, found) {
@@ -954,7 +960,7 @@ function saveUser_(body, s) {
   if (!/^[A-Za-z0-9_.@-]{3,40}$/.test(id)) throw new Error("아이디는 영문·숫자 3~40자로 입력하세요.");
   if (u.role && !ROLE_PERMS[u.role]) throw new Error("권한 값이 올바르지 않습니다: " + u.role);
   if (id === MASTER_ADMIN_ID && u.role && u.role !== "관리자") throw new Error("마스터 관리자의 권한은 바꿀 수 없습니다.");
-  const lock = LockService.getScriptLock(); lock.waitLock(10000);
+  const lock = scriptLock_(10000);
   try {
     const A = authSheet_();
     let found = A.rows.find(r => sameId_(r["아이디"], id));
@@ -1064,7 +1070,7 @@ function sendOtp_(cfg, id, code) {
   kakaoMemo_(a.at, a.info.site, `[TWh 정산시스템] 로그인 인증번호\n\n${code}\n\n3분 안에 입력하세요. 본인이 로그인한 것이 아니면 비밀번호를 바꾸세요.`);
 }
 function verifyOtp_(body) {
-  const lock = LockService.getScriptLock(); lock.waitLock(10000);
+  const lock = scriptLock_(10000);
   try {
     const p = pendGet_(body.pending);
     if (!p || p.mode !== "otp" || p.exp < Date.now()) { pendDel_(body.pending); throw new Error("인증번호 시간이 지났습니다. 다시 로그인하세요."); }
@@ -1100,7 +1106,7 @@ function kakaoLink_(body) {
   PropertiesService.getScriptProperties().setProperty(kakaoProp_(p.id), JSON.stringify({ rt: t.refresh_token, kid: me.id, site }));
   try { kakaoMemo_(t.access_token, site, "[TWh 정산시스템] 카카오 연결이 완료되었습니다.\n다음 로그인부터 인증번호를 이 채팅으로 보냅니다."); } catch (e) { /* 안내 메시지 실패는 무시 */ }
   pendDel_(body.state);
-  const lock = LockService.getScriptLock(); lock.waitLock(10000);
+  const lock = scriptLock_(10000);
   try {
     const A = authSheet_(), found = A.rows.find(r => sameId_(r["아이디"], p.id));
     if (!found) throw new Error("계정을 찾을 수 없습니다.");
