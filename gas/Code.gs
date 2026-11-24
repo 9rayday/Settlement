@@ -39,9 +39,13 @@ const ADMIN_HEADERS = ["아이디","비밀번호","이름","권한","실패횟�
 const DASHBOARD_YEARS = 20;
 const DEFAULT_GUARANTEE_HOURS = 3.4; // 발전보장시간이 비어있을 때 기본값
 
+// 한 요청 안에서는 스프레드시트·시트를 한 번만 연다 (openById 는 호출마다 수백 ms)
+let _ss = null, _sheetMemo = {};
+function ss_() { return _ss || (_ss = SpreadsheetApp.openById(SHEET_ID)); }
+
 /* ============ Setup ============ */
 function setupSheets() {
-  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const ss = ss_();
   ensureSheet_(ss, SHEET_MASTER, MASTER_FIELDS);
   ensureSheet_(ss, SHEET_ADJUSTMENTS, ADJUSTMENTS_HEADERS);
   ensureSheet_(ss, SHEET_PERFORMANCE, PERFORMANCE_HEADERS);
@@ -72,7 +76,10 @@ function findSheetFuzzy_(ss, name) {
 }
 
 function getSheet_(name) {
-  const ss = SpreadsheetApp.openById(SHEET_ID);
+  return _sheetMemo[name] || (_sheetMemo[name] = openSheet_(name));
+}
+function openSheet_(name) {
+  const ss = ss_();
   if (name === SHEET_MASTER) {
     const existing = findSheetFuzzy_(ss, name);
     return existing || ensureSheet_(ss, name, MASTER_FIELDS);
@@ -92,9 +99,13 @@ function getSheet_(name) {
 }
 
 function sheetToObjects_(sheet) {
-  const values = sheet.getDataRange().getValues();
+  return objectsFromValues_(sheet.getDataRange().getValues());
+}
+function objectsFromValues_(values) {
   if (values.length < 2) return [];
   const headers = values[0];
+  const hdr = {}; // 정규화한 헤더 → 실제 헤더 (pickField_ 가 행마다 헤더를 다시 훑지 않게)
+  headers.forEach(h => { const n = normalizeKey_(h); if (!(n in hdr)) hdr[n] = h; });
   const rows = [];
   for (let i = 1; i < values.length; i++) {
     const row = values[i];
@@ -102,6 +113,7 @@ function sheetToObjects_(sheet) {
     const obj = {};
     headers.forEach((h, idx) => obj[h] = row[idx]);
     obj._row = i + 1;
+    Object.defineProperty(obj, "_hdr", { value: hdr }); // 열거되지 않음 (JSON·Object.keys 에 안 나옴)
     rows.push(obj);
   }
   return rows;
@@ -150,7 +162,8 @@ function doPost(e) {
     if (action === "kakaoUnlink") { need_(s, "admin"); return jsonOut_({ ok: true, data: kakaoUnlink_(body) }); }
     if (["saveAdjustments", "logPerformance", "savePdfs"].indexOf(action) >= 0) need_(s, "settle");
     if (["savePlant", "deletePlant", "saveCustomer", "deleteCustomer"].indexOf(action) >= 0) need_(s, "contract");
-    if (action === "saveStore") { const p = storePerm_(body.key); if (p) need_(s, p); else if (!s.perms.length) throw new Error("권한이 없습니다. (조회 전용 계정)"); }
+    if (action === "saveStore") storeNeed_(s, body.key);
+    if (action === "saveStoreMany") { (body.items || []).forEach(it => storeNeed_(s, it && it.key)); return jsonOut_({ ok: true, data: saveStoreMany_(body.items) }); }
     if (action === "saveAdjustments") return jsonOut_({ ok: true, data: saveAdjustments_(body) });
     if (action === "logPerformance") return jsonOut_({ ok: true, data: logPerformance_(body) });
     if (action === "saveStore") return jsonOut_({ ok: true, data: saveStore_(body) });
@@ -170,9 +183,11 @@ function normalizeKey_(s) {
   return String(s).replace(/[\s()（）]/g, "");
 }
 
+const _normMemo = {};
 function pickField_(row, canonical) {
   if (row[canonical] !== undefined) return row[canonical];
-  const target = normalizeKey_(canonical);
+  const target = _normMemo[canonical] || (_normMemo[canonical] = normalizeKey_(canonical));
+  if (row._hdr) { const k = row._hdr[target]; return k !== undefined ? row[k] : undefined; }
   const key = Object.keys(row).find(k => normalizeKey_(k) === target);
   return key !== undefined ? row[key] : undefined;
 }
@@ -356,6 +371,7 @@ function saveAdjustments_(body) {
 /* ============ Performance log (upsert by 정산월+발전소명) + dashboard refresh ============ */
 function logPerformance_(body) {
   // 발전소가 수천 개여도 읽기 1번 · 쓰기 1~2번 (행마다 appendRow 하지 않음)
+  const act = monthlyActuals_(); // 쓰기 전에 읽어 두고 아래에서 이 달 값만 바꾼다
   const sheet = getSheet_(SHEET_PERFORMANCE), last = sheet.getLastRow();
   const all = last > 1 ? sheet.getRange(2, 1, last - 1, 6).getValues() : [];
   const idx = {}; all.forEach((r, i) => { idx[String(r[0]) + "|" + trimName_(r[1])] = i; });
@@ -374,7 +390,10 @@ function logPerformance_(body) {
   if (firstChanged < all.length) sheet.getRange(2 + firstChanged, 1, all.length - firstChanged, 6).setValues(all.slice(firstChanged));
   if (appended.length) sheet.getRange(2 + all.length, 1, appended.length, 6).setValues(appended);
   refreshGrid_(month, updates); // 실적그리드: 이 달만 새 값, 시트에서 고친 다른 달은 유지
-  _actMemo = null;
+  if (/^\d{6}$/.test(month)) { // readActuals_ 와 같은 계산 (그리드에 방금 쓴 값)
+    Object.keys(updates).forEach(p => { const u = updates[p], total = Math.max(u.gen || 0, u.supply || 0); (act[p] || (act[p] = {}))[month] = { supply: Math.min(u.supply || 0, total), total }; });
+    _actMemo = act;
+  } else _actMemo = null;
   const cumulative = rebuildDashboard_();
   return { logged: Object.keys(updates).length, cumulative: cumulative, performance: getPerformanceAll_() };
 }
@@ -432,8 +451,17 @@ function ownerFolder_(parent, owner) {
 }
 const driveName_ = s => String(s == null ? "" : s).replace(/[\/:*?"<>|]/g, "_").trim() || "미지정";
 // files: [{ year, kind: "cust"|"gen", owner, name, base64 }]
+// 브라우저가 이미 한 번에 하나씩 올리므로 전체 잠금(로그인·저장과 공유) 대신 따로 잠근다
+function pdfLock_() {
+  let lock = null;
+  try { lock = LockService.getDocumentLock(); } catch (e) { /* 시트에 붙은 스크립트가 아님 */ }
+  if (!lock) try { lock = LockService.getUserLock(); } catch (e) { /* 무시 */ }
+  if (!lock) return scriptLock_(20000);
+  if (!lock.tryLock(20000)) throw new Error("다른 정산서 PDF를 저장 중입니다. 잠시 후 다시 시도하세요.");
+  return lock;
+}
 function savePdfs_(body) {
-  const lock = scriptLock_(20000);
+  const lock = pdfLock_();
   try {
     const root = driveRoot_(); rollDriveYears_(root);
     return (body.files || []).map(f => {
@@ -465,7 +493,7 @@ function storeYm_(key) {
   return m ? m[1] : null;
 }
 function storeArchiveSheet_(create) {
-  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const ss = ss_();
   let sh = ss.getSheetByName(SHEET_STORE_ARCHIVE);
   if (!sh && create) sh = ensureSheet_(ss, SHEET_STORE_ARCHIVE, STORE_HEADERS);
   return sh;
@@ -486,18 +514,34 @@ function getStoreRange_(from, to) {
   return out;
 }
 function saveStore_(body) {
-  const key = String(body.key || "");
-  if (!key) throw new Error("key 가 필요합니다.");
-  const value = typeof body.value === "string" ? body.value : JSON.stringify(body.value);
-  if (value.length > 49000) throw new Error("값이 너무 큽니다(5만자 제한): " + key);
-  const values = [key, value, new Date()];
-  const findRow = sh => { const last = sh ? sh.getLastRow() : 0; if (last < 2) return 0; const i = sh.getRange(2, 1, last - 1, 1).getValues().findIndex(r => String(r[0]) === key); return i >= 0 ? i + 2 : 0; };
-  const main = getSheet_(SHEET_STORE), row = findRow(main); // 키 열만 읽는다
-  if (row) { main.getRange(row, 1, 1, 3).setValues([values]); return { saved: true }; }
-  const arch = storeArchiveSheet_(false), arow = findRow(arch);
-  if (arow) { arch.getRange(arow, 1, 1, 3).setValues([values]); return { saved: true }; }
-  main.appendRow(values);
+  saveStoreMany_([{ key: body.key, value: body.value }]);
   return { saved: true };
+}
+// 여러 키를 요청 한 번에: 키 열은 시트마다 한 번만 읽는다 (같은 키가 여러 번이면 마지막 값)
+function saveStoreMany_(items) {
+  const byKey = {};
+  (items || []).forEach(it => {
+    const key = String((it && it.key) || "");
+    if (!key) throw new Error("key 가 필요합니다.");
+    const value = typeof it.value === "string" ? it.value : JSON.stringify(it.value);
+    if (value.length > 49000) throw new Error("값이 너무 큽니다(5만자 제한): " + key);
+    byKey[key] = [key, value, new Date()];
+  });
+  const keys = Object.keys(byKey);
+  if (!keys.length) return { saved: true, count: 0 };
+  const keysOf = sh => { const last = sh ? sh.getLastRow() : 0; return last < 2 ? [] : sh.getRange(2, 1, last - 1, 1).getValues().map(r => String(r[0])); };
+  const main = getSheet_(SHEET_STORE), mainKeys = keysOf(main);
+  let arch, archKeys = null;
+  keys.forEach(key => {
+    const v = byKey[key];
+    let i = mainKeys.indexOf(key);
+    if (i >= 0) { main.getRange(i + 2, 1, 1, 3).setValues([v]); return; }
+    if (!archKeys) { arch = storeArchiveSheet_(false); archKeys = keysOf(arch); }
+    i = archKeys.indexOf(key);
+    if (i >= 0) { arch.getRange(i + 2, 1, 1, 3).setValues([v]); return; }
+    main.appendRow(v); // 동시에 저장해도 행이 겹치지 않게 appendRow
+  });
+  return { saved: true, count: keys.length };
 }
 // 편집기에서 수동 실행(1년에 한 번 정도): 작년 1월보다 오래된 정산 데이터를 "앱데이터_보관" 시트로 옮긴다
 function archiveOldData() {
@@ -588,12 +632,32 @@ function rebuildDashboard_() {
 }
 
 // 시트를 직접 고치면 대시보드를 다시 만든다 (setupSheets 실행 시 설치되는 편집 트리거)
+// 칸마다 다시 그리면 그동안 전체 잠금이 잡혀 웹이 멈추므로, 마지막 수정 1분 뒤 한 번만 그린다
+const DASH_DELAY_MS = 60 * 1000;
 function onSheetEdit(e) {
   const name = e && e.range ? e.range.getSheet().getName() : "";
   if ([SHEET_YEARLY_GRID, SHEET_PERFORMANCE, SHEET_MASTER].indexOf(name) < 0) return;
+  PropertiesService.getScriptProperties().setProperty("DASH_DIRTY", String(Date.now()));
+  try { scheduleDashboard_(); }
+  catch (err) { // 트리거를 못 만들면 예전처럼 바로
+    const lock = LockService.getScriptLock();
+    if (!lock.tryLock(20000)) return;
+    try { rebuildDashboard_(); } finally { lock.releaseLock(); }
+  }
+}
+function scheduleDashboard_() {
+  if (ScriptApp.getProjectTriggers().some(t => t.getHandlerFunction() === "rebuildDashboardLater")) return;
+  ScriptApp.newTrigger("rebuildDashboardLater").timeBased().after(DASH_DELAY_MS).create();
+}
+// 시간 트리거로 실행됨 (직접 실행해도 됨)
+function rebuildDashboardLater() {
+  ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === "rebuildDashboardLater").forEach(t => ScriptApp.deleteTrigger(t));
+  const props = PropertiesService.getScriptProperties(), t = Number(props.getProperty("DASH_DIRTY")) || 0;
+  if (!t) return;
+  if (Date.now() - t < DASH_DELAY_MS - 5000) { scheduleDashboard_(); return; } // 아직 고치는 중
   const lock = LockService.getScriptLock();
-  if (!lock.tryLock(20000)) return;
-  try { rebuildDashboard_(); } finally { lock.releaseLock(); }
+  if (!lock.tryLock(20000)) { scheduleDashboard_(); return; }
+  try { props.deleteProperty("DASH_DIRTY"); rebuildDashboard_(); } finally { lock.releaseLock(); }
 }
 // appsscript.json 에 script.scriptapp 권한이 없으면 트리거 설치만 건너뛴다 (대시보드는 업로드 때 갱신)
 function installEditTrigger_() {
@@ -610,7 +674,7 @@ function installEditTrigger_() {
 //       월별실적로그, 월별정산조정, 실적그리드 → 대시보드는 빈 실적으로 다시 계산
 // 유지: KPX 요율(netrate), 시간대별 요금제(touver)·휴일, SMP·REC 가격(market·smp), 청구일 설정(billcfg), REC 가중치(recw)
 function resetTestData() {
-  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const ss = ss_();
   const isResult = k => /^(bill|carry|genpay|recx|recset):/.test(String(k));
   const main = getSheet_(SHEET_STORE), last = main.getLastRow();
   let removed = 0;
@@ -631,7 +695,7 @@ function resetTestData() {
 // 편집기에서 수동 실행: 모든 데이터를 지운다 (발전소·전기사용자 등록까지). 헤더 행·관리자(로그인) 탭은 남김.
 // 대상: 발전소 사업자 정보, 전기사용자 정보, 월별실적로그, 월별정산조정, 앱데이터, 실적그리드, 대시보드
 function resetAllData() {
-  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const ss = ss_();
   [SHEET_MASTER, SHEET_CUSTOMERS, SHEET_PERFORMANCE, SHEET_ADJUSTMENTS, SHEET_STORE].forEach(name => {
     const sh = getSheet_(name), last = sh.getLastRow();
     if (last > 1) sh.deleteRows(2, last - 1);
@@ -654,7 +718,7 @@ const GRID_OLD_RE = /^(.+) \(계약용량 /;                             // 더 
 const GRID_KINDS = ["발전량", "공급량", "초과발전량"];
 
 function getYearlyGridSheet_() {
-  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const ss = ss_();
   let sheet = ss.getSheetByName(SHEET_YEARLY_GRID);
   if (!sheet) sheet = ss.insertSheet(SHEET_YEARLY_GRID);
   return sheet;
@@ -868,14 +932,18 @@ function roleOf_(row) {
 // 관리자 탭 + 필요한 칸 보장 (없는 칸은 오른쪽에 추가)
 function authSheet_() {
   const sheet = getSheet_(SHEET_ADMIN);
-  const lastCol = Math.max(1, sheet.getLastColumn());
-  const header = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(String);
-  const missing = AUTH_COLS.filter(c => header.indexOf(c) < 0);
-  if (missing.length) sheet.getRange(1, header.filter(Boolean).length + 1, 1, missing.length).setValues([missing]).setFontWeight("bold");
-  const h = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
+  const values = sheet.getDataRange().getValues();
+  let h = (values[0] || []).map(String);
+  const missing = AUTH_COLS.filter(c => h.indexOf(c) < 0);
+  if (missing.length) {
+    sheet.getRange(1, h.filter(Boolean).length + 1, 1, missing.length).setValues([missing]).setFontWeight("bold");
+    h = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
+  }
   const col = name => h.indexOf(name) + 1;
-  if (col("비밀번호")) sheet.getRange(1, col("비밀번호"), Math.max(sheet.getMaxRows(), 2), 1).setNumberFormat("@"); // 시트에 직접 넣은 비밀번호가 숫자로 바뀌지 않게 (001234 → 1234)
-  return { sheet, col, rows: sheetToObjects_(sheet) };
+  // 시트에 직접 넣은 비밀번호가 숫자로 바뀌지 않게 (001234 → 1234). 이미 텍스트 서식이면 건너뜀 (맨 아래 칸으로 확인)
+  const pc = col("비밀번호"), maxR = Math.max(sheet.getMaxRows(), 2);
+  if (pc && (missing.length || sheet.getRange(maxR, pc).getNumberFormat() !== "@")) sheet.getRange(1, pc, maxR, 1).setNumberFormat("@");
+  return { sheet, col, rows: missing.length ? sheetToObjects_(sheet) : objectsFromValues_(values) };
 }
 function setCell_(A, row, name, v) { const c = A.col(name); if (c) A.sheet.getRange(row, c).setValue(v); }
 
@@ -904,8 +972,8 @@ function login_(body) {
       if (n >= MAX_FAIL) { setCell_(A, found._row, "잠금", "Y"); throw new Error(`비밀번호를 ${MAX_FAIL}회 틀려 계정이 잠겼습니다. 관리자에게 잠금 해제를 요청하세요.`); }
       throw new Error(`아이디 또는 비밀번호가 올바르지 않습니다. (${n}/${MAX_FAIL})`);
     }
-    setCell_(A, found._row, "실패횟수", 0);
-    setCell_(A, found._row, "잠금", "");
+    if (fails) setCell_(A, found._row, "실패횟수", 0); // 바뀐 칸만 쓴다
+    if (String(found["잠금"] == null ? "" : found["잠금"]).trim()) setCell_(A, found._row, "잠금", "");
     if (String(found["비밀번호"]).indexOf("sha256:") !== 0) setCell_(A, found._row, "비밀번호", hashPw_(pw)); // 평문 → 해시
   } finally { lock.releaseLock(); }
   // 카카오 인증번호 발송(외부 호출)은 잠금 밖에서 — 다른 로그인·저장을 막지 않게
@@ -938,6 +1006,7 @@ function session_(token) {
   s.perms = ROLE_PERMS[s.role] || [];
   return s;
 }
+function storeNeed_(s, key) { const p = storePerm_(key); if (p) need_(s, p); else if (!s.perms.length) throw new Error("권한이 없습니다. (조회 전용 계정)"); }
 function need_(s, perm) {
   if (s.perms.indexOf(perm) < 0) throw new Error(`권한이 없습니다. (${({ admin: "계정 관리", rates: "요율 관리", contract: "계약 등록·수정", settle: "정산" })[perm] || perm} 권한 필요)`);
 }

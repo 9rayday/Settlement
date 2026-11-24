@@ -228,10 +228,10 @@ async function recConfirm() {
   const R = recState.result; if (!R) return;
   if (R.rows.some(r => r.err)) { alert("REC 가중치가 없는 발전소가 있습니다."); return; }
   if (R.missingSmp && !confirm(`SMP 없는 시간 ${R.missingSmp}개가 0원으로 계산됐습니다. 확정할까요?`)) return;
-  for (const s of recSettlements(R.app).filter(s => !(s.to < R.from || s.from > R.to))) await Store.set(s.key, {});
+  const clears = recSettlements(R.app).filter(s => !(s.to < R.from || s.from > R.to)).map(s => [s.key, {}]); // 겹치는 기존 확정은 비운다
   const plants = {};
   R.rows.forEach(r => { plants[REC.norm(r.name)] = { name: r.name, weight: r.pc.weight, contract: r.pc.price, feeRate: r.pc.feeRate, recQty: r.recQty, eligibleU: r.eligibleU, smpSum: r.smpSum, amount: r.amount, fee: r.fee, recPrice: r.recPrice, recPerMwh: r.recPerMwh, carryRecU: r.carryRecU, carryInU: r.carryIn, carry: r.carry }; });
-  const where = await Store.set(`recset:${R.app || "-"}:${R.from}-${R.to}`, { app: R.app, from: R.from, to: R.to, plants, totals: R.totals, fee: R.fee, contract: R.base.price, savedAt: new Date().toISOString() });
+  const where = await Store.setMany(clears.concat([[`recset:${R.app || "-"}:${R.from}-${R.to}`, { app: R.app, from: R.from, to: R.to, plants, totals: R.totals, fee: R.fee, contract: R.base.price, savedAt: new Date().toISOString() }]])); // 비우기 + 새 확정을 한 번에 (같은 키면 새 값)
   if (where !== "denied") { recState.msg = `${recCustName(R.app)} ${ymLab(R.from)}~${ymLab(R.to)} 확정`; renderRecPage(); }
 }
 

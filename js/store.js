@@ -70,5 +70,16 @@ const Store = (function () {
     const r = await gasPost("saveStore", { key, value: data[key] });
     return r ? "remote" : "local";
   }
-  return { load, ensureYear, get, set, keys, isRemote: () => remoteOk, loadedFrom: () => loadedFrom };
+  // 여러 키를 서버 왕복 한 번에 저장: pairs = [[key, value], ...] (같은 키는 마지막 값)
+  async function setMany(pairs) {
+    pairs = (pairs || []).filter(p => p && p[0]);
+    if (!pairs.length) return "remote";
+    for (const [key] of pairs) { const p = permOf(key); if (typeof requirePerm === "function" && p && !requirePerm(p)) return "denied"; }
+    pairs.forEach(([key, value]) => { data[key] = JSON.stringify(value); });
+    writeLocal();
+    const items = [...new Set(pairs.map(p => p[0]))].map(key => ({ key, value: data[key] }));
+    const r = await gasPost("saveStoreMany", { items });
+    return r ? "remote" : "local";
+  }
+  return { load, ensureYear, get, set, setMany, keys, isRemote: () => remoteOk, loadedFrom: () => loadedFrom };
 })();

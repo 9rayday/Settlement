@@ -1,5 +1,5 @@
-/* ============ 상단 헤더: 정산월 선택 / 사용자 / 알림 / 로그아웃 / 5분 무동작 자동 로그아웃 ============ */
-const IDLE_LIMIT_MS = 5 * 60 * 1000;
+/* ============ 상단 헤더: 정산월 선택 / 사용자 / 알림 / 로그아웃 / 10분 무동작 자동 로그아웃 ============ */
+const IDLE_LIMIT_MS = 10 * 60 * 1000;
 const USER_KEY = "settlement_user";
 const LOGOUT_MSG_KEY = "settlement_logout_msg";
 let _idleTimer = null;
@@ -99,7 +99,7 @@ async function logout(msg) {
 }
 function resetIdle() {
   clearTimeout(_idleTimer);
-  _idleTimer = setTimeout(() => { if (typeof Drive !== "undefined" && Drive.busy()) return resetIdle(); logout("5분 동안 사용이 없어 자동 로그아웃되었습니다."); }, IDLE_LIMIT_MS); // 저장 중이면 미룸
+  _idleTimer = setTimeout(() => { if (typeof Drive !== "undefined" && Drive.busy()) return resetIdle(); logout("10분 동안 사용이 없어 자동 로그아웃되었습니다."); }, IDLE_LIMIT_MS); // 저장 중이면 미룸
 }
 
 /* ----- 화면 배율 ----------

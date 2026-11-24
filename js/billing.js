@@ -484,8 +484,10 @@ async function saveBill() {
   if (where === "remote" && typeof Drive !== "undefined") Drive.saveCust(R, "bill", "billSaveStatus"); // 구글 드라이브 자동 저장 (js/drive.js)
   // REC 정산에 청구한 달 표시 (빠진 것은 해제)
   const now = (R.inv.recItems || []).map(x => x.key), before = (old && old.recBilled) || [];
-  for (const k of before.filter(k => !now.includes(k))) { const s = Store.get(k, null); if (s && s.billedIn === R.month) { delete s.billedIn; await Store.set(k, s); } }
-  for (const k of now) { const s = Store.get(k, null); if (s && s.billedIn !== R.month) await Store.set(k, Object.assign(s, { billedIn: R.month })); }
+  const marks = []; // 서버 왕복 한 번에 저장
+  before.filter(k => !now.includes(k)).forEach(k => { const s = Store.get(k, null); if (s && s.billedIn === R.month) { delete s.billedIn; marks.push([k, s]); } });
+  now.forEach(k => { const s = Store.get(k, null); if (s && s.billedIn !== R.month) marks.push([k, Object.assign(s, { billedIn: R.month })]); });
+  if (marks.length) await Store.setMany(marks);
   $("billSaveStatus").textContent = (where === "remote" ? "발행 완료 (구글시트)" : "이 브라우저에만 저장됨") + "";
   renderFlow(R.app, R.month);
 }
