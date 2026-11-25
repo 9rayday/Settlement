@@ -186,7 +186,7 @@ function renderPerfPage(kind) {
     <div class="card"><div class="reg-head"><h2>${label} 계약이행현황${flt ? ` <span class="perf-filter">${fltLabel} ${rowsList.length}건 <button type="button" id="${kind}PerfClear" title="전체 보기">×</button></span>` : ""}</h2>
       <div class="row"><label class="adj-label">해당 연차</label><select id="${kind}PerfYear" style="min-width:140px"><option value="">진행 중 연차</option>
         ${Array.from({ length: 20 }, (_, i) => `<option value="${i + 1}"${sel === String(i + 1) ? " selected" : ""}>${i + 1}년차</option>`).join("")}</select>
-        <input type="search" id="${kind}PerfQ" class="reg-search" placeholder="검색 (${kind === "gen" ? "발전소명·사업자명" : "전기사용자·계약ID·신청번호·발전소"})" value="${rEsc(perfState.q[kind])}"></div></div>
+        <input type="search" id="${kind}PerfQ" class="reg-search perf-search" placeholder=" " aria-label="검색" title="${kind === "gen" ? "발전소명·사업자명" : "전기사용자·계약ID·신청번호·발전소"}" value="${rEsc(perfState.q[kind])}"></div></div>
       <div class="grid-wrap perf-wrap" style="margin-top:10px"><table class="grid perf-table"><tr><th>${label}</th><th class="num">계약용량(kW)</th><th class="num">효율감소</th><th>계약기간</th>
         <th>해당 연차</th><th>연차 남은 기간</th><th class="num">보장량(MWh)</th><th class="num">실적(MWh)</th><th class="num">달성률</th><th>상태</th></tr>
         ${pg.items.length ? pg.items.map(item => {

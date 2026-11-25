@@ -378,6 +378,9 @@ table.perf-years{ min-width:1000px; }
 /* 등록 목록: 머리글 고정 */
 .grid-wrap:has(> table.reg-table){ max-height:calc(100vh - 200px) !important; overflow:auto; }
 .grid-wrap:has(> table.reg-table) table.grid th{ z-index:2; top:-1px; box-shadow:0 1px 0 var(--line); }
+/* 계약이행현황 검색칸: 비어 있을 때 오른쪽에 돋보기만 (입력하면 지우기 ×) */
+.reg-search.perf-search{ width:170px; padding-right:30px; background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%239CA3AF' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='M20 20l-3.5-3.5'/%3E%3C/svg%3E") no-repeat right 10px center; }
+.reg-search.perf-search:not(:placeholder-shown){ background-image:none; padding-right:10px; }
 .perf-kpis .kpi-sub{ font-size:12px; color:var(--sub); margin-top:2px; font-variant-numeric:tabular-nums; }
 .perf-hr{ display:table; margin:4px auto 0; padding:1px 7px; border-radius:999px; font-size:11px; font-weight:600; white-space:nowrap; }
 .perf-hr.ok{ background:#E6EFE9; color:#4E7A5E; }
