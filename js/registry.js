@@ -117,7 +117,7 @@ const Registry = (function () {
     if (all[n] && (!a || plantGroup(all[n]) === a)) return n;
     let cands = Object.keys(all).filter(k => str(all[k]["발전소명"]) === n);
     if (!cands.length) { // 띄어쓰기만 다른 이름 (KPX "OO 태양광발전소" ↔ 등록 "OO태양광발전소")
-      const sq = s => str(s).replace(/s+/g, "");
+      const sq = s => str(s).replace(/\s+/g, "");
       cands = Object.keys(all).filter(k => sq(all[k]["발전소명"]) === sq(n));
       if (!cands.length) return n;
       return cands.find(k => a && plantGroup(all[k]) === a) || cands[0];
@@ -510,7 +510,9 @@ async function setPlantContract(plant, key, keepApp) {
   const oldContract = plantContractOf(plant);
   const cc = key ? Registry.customerByKey(key) : null;
   const app = cc ? Registry.groupOf(cc) : (keepApp || "");
-  const r = await Registry.save("plant", { "발전소명": plant, "계약ID": key, "KPX신청번호": app }, plant, { reload: false });
+  // plant 는 목록 키 (같은 이름이 여러 행이면 "이름 (행 N)") → 시트에는 실제 발전소명으로 저장
+  const realName = (Registry.plants()[plant] || {})["발전소명"] || plant;
+  const r = await Registry.save("plant", { "발전소명": realName, "계약ID": key, "KPX신청번호": app }, plant, { reload: false });
   if (!r.ok) { st.textContent = "저장 실패: " + r.error; st.className = "status bad"; return; }
   await syncContractTotals([oldContract, key], { reload: false }); // 계약용량·연간보장공급량 자동 갱신 (두 계약 동시에)
   afterRegistryChange();
