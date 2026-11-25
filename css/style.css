@@ -693,8 +693,10 @@ td.empty{ text-align:center; }
 .seg button + button{ border-left:1px solid var(--line); }
 .seg button.active{ background:var(--navy); color:#fff; font-weight:600; }
 .arc-year{ min-width:64px; text-align:center; font-size:15px; }
-.arc-table th, .arc-table td{ text-align:center; }
-.arc-table td.arc-name{ text-align:left; white-space:nowrap; }
+table.grid.arc-table{ table-layout:fixed; width:100%; min-width:1000px; } /* 1~12월 열 너비 균등 */
+table.grid.arc-table col.arc-col-name{ width:200px; }
+table.grid.arc-table th, table.grid.arc-table td{ text-align:center; vertical-align:middle; }
+table.grid.arc-table td.arc-name, table.grid.arc-table th:first-child{ text-align:left; overflow:hidden; text-overflow:ellipsis; }
 .arc-cell{ white-space:nowrap; padding:4px 3px !important; }
 .arc-none{ color:#C8CDD5; }
 .arc-chip{ border:1px solid var(--line); background:#fff; border-radius:6px; padding:2px 7px; margin:1px; font-size:12px; cursor:pointer; color:var(--navy); font-variant-numeric:tabular-nums; }

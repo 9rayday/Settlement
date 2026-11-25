@@ -51,7 +51,7 @@ function renderArchivePage() {
   host.innerHTML = `<div class="card"><div class="reg-head"><h2>정산서 보관함</h2>
       <div class="row"><div class="seg arc-kind">${[["cust", "전기사용자"], ["gen", "발전사업자"]].map(([k, l]) => `<button type="button" data-k="${k}"${k === kind ? ' class="active"' : ""}>${l}</button>`).join("")}</div>
         <button type="button" class="btn secondary" id="arcPrev"${years.indexOf(y) <= 0 ? " disabled" : ""}>‹</button><b class="arc-year">${y}년</b><button type="button" class="btn secondary" id="arcNext"${years.indexOf(y) >= years.length - 1 ? " disabled" : ""}>›</button></div></div>
-      <div class="grid-wrap"><table class="grid arc-table"><tr><th>${kind === "cust" ? "전기사용자" : "발전소"}</th>${Array.from({ length: 12 }, (_, i) => `<th>${i + 1}월</th>`).join("")}</tr>
+      <div class="grid-wrap"><table class="grid arc-table"><colgroup><col class="arc-col-name">${"<col>".repeat(12)}</colgroup><tr><th>${kind === "cust" ? "전기사용자" : "발전소"}</th>${Array.from({ length: 12 }, (_, i) => `<th>${i + 1}월</th>`).join("")}</tr>
         ${pg.items.length ? pg.items.map(r => `<tr><td class="arc-name"><b>${rEsc(r.name)}</b>${r.sub && r.sub !== r.name ? `<div class="perf-sub">${rEsc(r.sub)}</div>` : ""}</td>${cells(r)}</tr>`).join("")
           : `<tr><td colspan="13" class="empty">${y}년에 발행한 정산서가 없습니다.</td></tr>`}</table></div>
       ${pagerHtml(pk, pg.page, pg.pages)}</div>
