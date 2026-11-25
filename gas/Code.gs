@@ -577,7 +577,7 @@ function ymKey_(ym) { return String(ym.y) + String(ym.m).padStart(2, "0"); }
  * 계약해지일이 있으면 그 이후 연차는 비워둔다.
  */
 // 대시보드: 발전소별 연차 표 — 연간보장공급량 / 실발전량(재생E공급량) / 초과발전량 / 합계 / 비교(합계−보장) / 이행여부
-// 연간보장공급량 = 등록값(없으면 용량 × 보장시간(h/일) × 365), n년차 = 1년차 × (1 − 연간효율감소)^(n−1)
+// 연간보장공급량 = 등록값(없으면 용량 × 보장시간(h/일) × 365), n년차 = 1년차 × (1 − 연간효율감소 × (n−1))  (선형, 정산 엑셀과 동일)
 function rebuildDashboard_() {
   const master = getMaster_();
   const act = monthlyActuals_();
@@ -602,7 +602,7 @@ function rebuildDashboard_() {
     const rowsOut = LABELS.map(() => []);
     for (let y = 1; y <= DASHBOARD_YEARS; y++) {
       if (!startYm || !g1 || y > years) { rowsOut.forEach(r => r.push("")); continue; }
-      const guar = g1 * Math.pow(1 - decline / 100, y - 1);
+      const guar = g1 * Math.max(0, 1 - decline / 100 * (y - 1));
       const ws = ymKey_(addMonths_(startYm, (y - 1) * 12)), we = ymKey_(addMonths_(startYm, y * 12 - 1));
       let supply = 0, total = 0, has = false;
       Object.keys(monthly).forEach(ym => { if (ym >= ws && ym <= we) { supply += monthly[ym].supply; total += monthly[ym].total; has = true; } });

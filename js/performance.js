@@ -1,5 +1,5 @@
 /* ============ 계약관리 > 계약이행현황 (전기사용자 / 발전사업자) ============
- * 연차별 연간보장공급량 = 1년차 보장량 × (1 − 연간효율감소)^(연차−1)
+ * 연차별 연간보장공급량 = 1년차 보장량 × (1 − 연간효율감소 × (연차−1))  ← 매년 1년차 기준 같은 양씩 감소 (정산 엑셀과 동일, 빈칸 = 0.5%)
  *   1년차 보장량 = 등록된 연간보장공급량 (없으면 계약용량 × 보장시간으로 계산)
  * 연차 실적 = 실발전량(재생E공급량) + 초과발전량  ← GAS getPerformanceAll (월별실적로그 + 실적그리드 수동값 우선), 연차 = 계약 시작월부터 12개월
  *   발전사업자 = 그 발전소, 전기사용자 = 그룹(KPX 신청번호) 발전소 합계
@@ -55,7 +55,7 @@ function contractOf(kind, key) {
     };
   }
   return {
-    kind, key, app, name: kind === "gen" ? key : rStr(raw["수요기업명"]), cap, g1, decline: raw["연간효율감소"] === "" || raw["연간효율감소"] == null ? (kind === "gen" ? 0.5 : 0) : num(raw["연간효율감소"]) || 0, /* 발전소 빈칸 = 0.5% (시트 대시보드와 같게) */ start, end, years,
+    kind, key, app, name: kind === "gen" ? key : rStr(raw["수요기업명"]), cap, g1, decline: raw["연간효율감소"] === "" || raw["연간효율감소"] == null ? 0.5 : num(raw["연간효율감소"]) || 0, /* 빈칸 = 0.5% (시트 대시보드·정산 엑셀과 같게) */ start, end, years,
     penMethod: rStr(raw["위약금처리방식"]), shareOf,
     plants: kind === "gen" ? [key] : Registry.plantsOfGroup(app).filter(p => !Registry.plantContract(p) || Registry.plantContract(p) === key),
     direct: kind === "gen" ? [key] : Registry.plantsOfContract(key)
@@ -69,7 +69,7 @@ function yearSchedule(c, byPlant) {
   const today = todayYmd(), out = [];
   for (let i = 1; i <= c.years; i++) {
     const s = addMonthsYmd(c.start, 12 * (i - 1), 0), e = addMonthsYmd(c.start, 12 * i, -1);
-    const guar = c.g1 * Math.pow(1 - c.decline / 100, i - 1);
+    const guar = c.g1 * Math.max(0, 1 - c.decline / 100 * (i - 1)); // 선형 감소 (엑셀: O23−O23×0.5%×(n−1))
     // 연차의 달 = 계약 시작월부터 12개월 (시트 실적그리드와 같은 기준)
     const sm = c.start.slice(0, 4) + c.start.slice(5, 7), lo = monthOffset(sm, 12 * (i - 1)), hi = monthOffset(sm, 12 * i - 1);
     let supply = 0, gen = 0; const weights = {}; // weights: 월 실적 (가중평균 REC 용)
