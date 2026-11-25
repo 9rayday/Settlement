@@ -149,9 +149,10 @@
     });
   };
 
-  /* 사용량 U 정하기 (발전사업자·전기사용자 공통): 고객 AMI → KPX 전기사용량(확정 파일) → 없음(U = K, 가정산 간주)
-   * AMI 빈 시간은 KPX 값으로 채운다. 가정산 KPX 파일은 전기사용량이 0이라 쓰지 않는다.
-   * days 의 usage 를 바꾸고 { source: "ami"|"kpx"|"none", amiMissing: [날짜] } 반환
+  /* 사용량 U 정하기 (발전사업자·전기사용자 공통): KPX 전기사용량(확정 파일) → 고객 AMI(가정산) → 없음(U = K, 가정산 간주)
+   * 확정 파일의 전기사용량이 공식 값이다 (오차정산서 엑셀도 확정 = KPX, 가정산 = AMI). 가정산 KPX 파일은 전기사용량이 0이라 AMI 를 쓴다.
+   * 빈 시간은 다른 쪽 값으로 채운다.
+   * days 의 usage 를 바꾸고 { source: "ami"|"kpx"|"none", amiMissing: [날짜], amiIgnored } 반환
    */
   P.resolveUsage = function (days, ami) {
     const kpxOk = days.some(d => (d.kpxUsage || []).some(v => v > 0));
@@ -159,12 +160,12 @@
     days.forEach(d => {
       const k = kpxOk ? d.kpxUsage : null;
       const a = ami ? ami.usage[d.date] : null;
-      if (ami && !a) amiMissing.push(d.date);
-      if (a) d.usage = a.map((v, h) => v == null ? (k ? k[h] : null) : v);
-      else d.usage = k ? k.slice() : null;
+      if (ami && !kpxOk && !a) amiMissing.push(d.date);
+      if (k) d.usage = k.map((v, h) => v == null ? (a ? a[h] : null) : v);
+      else d.usage = a ? a.slice() : null;
       if (d.usage && d.usage.some(v => v == null)) d.usage = d.usage.map((v, h) => v == null ? Object.values(d.gen).reduce((t, arr) => t + (arr[h] || 0), 0) : v);
     });
-    return { source: ami ? "ami" : kpxOk ? "kpx" : "none", amiMissing };
+    return { source: kpxOk ? "kpx" : ami ? "ami" : "none", amiMissing, amiIgnored: !!(kpxOk && ami) };
   };
 
   if (typeof module !== "undefined" && module.exports) module.exports = P; else root.Parsers = P;

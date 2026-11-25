@@ -87,7 +87,7 @@ function arcTrueUpR(app, month, rec) {
   const conf = Engine.invoice(s.match, s.ctx, rates);
   return { mode: "trueup", app, month, customer: s.customer, rates, match: s.match, prov, conf, diff: Engine.trueUpDiff(prov, conf), loss: s.loss, ctx: s.ctx,
     netOverride: rec.netConfirmed || {}, docDate: rec.docDate || String(rec.savedAt || "").slice(0, 10),
-    fields: { confirmedTotal: rec.confirmedTotal, taxableRatio: rec.taxableRatio, confirmed: rec.confirmed, prevDiff: rec.prevDiff, note: rec.note || "" } };
+    fields: { confirmedTotal: rec.confirmedTotal, taxableRatio: rec.taxableRatio, confirmed: rec.confirmed, prevDiff: rec.prevDiff, note: rec.note || "", extra: rec.extra || null } };
 }
 function arcGenSnap(plant, month) {
   const g = Store.get(`genpay:${month}`, null), x = g && g.plants && g.plants[plant];
@@ -180,7 +180,7 @@ function bindArcEdit(o) {
       E.R.netOverride = no; E.R.ctx = Object.assign({}, E.R.ctx, { netOverride: no });
       E.R.conf = Engine.invoice(E.R.match, E.R.ctx, E.R.rates); E.R.diff = Engine.trueUpDiff(E.R.prov, E.R.conf);
       if (netChanged) { document.getElementById("ae_pdt").value = E.R.diff.taxable; } // 망이용요금을 바꾸면 차액(과세)도 다시 (오차정산 화면과 같게)
-      E.R.fields = { confirmedTotal: n("ae_total"), taxableRatio: Number(v("ae_ratio")), confirmed: { taxable: n("ae_cst"), exempt: n("ae_cse") }, prevDiff: { taxable: n("ae_pdt"), exempt: n("ae_pde") }, note: v("ae_note").trim() };
+      E.R.fields = { confirmedTotal: n("ae_total"), taxableRatio: Number(v("ae_ratio")), confirmed: { taxable: n("ae_cst"), exempt: n("ae_cse") }, prevDiff: { taxable: n("ae_pdt"), exempt: n("ae_pde") }, note: v("ae_note").trim(), extra: (E.R.fields && E.R.fields.extra) || null };
     } else {
       const c = E.snap.calc, up = v("ae_up") === "" ? null : Number(v("ae_up"));
       E.snap.calc = genCalcParts({ supply: c.supply, unitPrice: up, feeRate: Number(v("ae_fr")) || 0, adj: { 전월차액: n("ae_a1"), 전월미지급액: n("ae_a2"), 기타정산: n("ae_a3") }, penalty: c.penalty, penaltyLabel: c.penaltyLabel });

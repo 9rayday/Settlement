@@ -133,7 +133,10 @@ function trueUpFormHtml() {
       <div class="adj-grid">
         ${numField("확정 부가정산금 (과세)", "cs_taxable", 0)}${numField("확정 부가정산금 (비과세)", "cs_exempt", 0)}
         ${numField("차액 (과세)", "pd_taxable", 0)}${numField("차액 (비과세)", "pd_exempt", 0)}
-        ${fieldHtml("특이사항", `<input id="tu_note">`)}</div>
+        ${fieldHtml("특이사항", `<input id="tu_note">`)}</div></div>
+    <div class="card"><h2>추가 정산분 (수기)</h2>
+      <div class="adj-grid">
+        ${fieldHtml("항목명", `<input id="ex_label" placeholder="예: 3월 추가 정산분">`)}${numField("추가 정산분 (과세)", "ex_taxable", 0)}${numField("추가 정산분 (비과세)", "ex_exempt", 0)}</div>
       <div class="row" style="margin-top:10px"><button class="btn accent" id="calcBtn">오차정산 계산</button></div></div>`;
 }
 
@@ -273,6 +276,8 @@ function prepareGroup(err, warn) {
   if (S.usage.source === "ami") {
     if (S.usage.amiMissing.length) warn.push(`사용량 파일 누락 ${S.usage.amiMissing.length}일`);
     billState.ami.warnings.filter(w => /합계 불일치|96칸|미수신/.test(w)).forEach(w => warn.push(w));
+  } else if (S.usage.amiIgnored) {
+    warn.push("확정 파일의 전기사용량 적용 (사용량 파일은 가정산에만 씀)");
   } else if (S.usage.source === "none") {
     warn.push("사용량 없음 — 사용량 = 발전량으로 계산");
   }
@@ -547,11 +552,14 @@ function fillTrueUpForm(app, month) {
     setVal("cs_total", saved.confirmedTotal); setVal("cs_ratio", saved.taxableRatio);
     setVal("cs_taxable", saved.confirmed.taxable); setVal("cs_exempt", saved.confirmed.exempt);
     setVal("pd_taxable", saved.prevDiff.taxable); setVal("pd_exempt", saved.prevDiff.exempt); setVal("tu_note", saved.note);
+    const ex = saved.extra || {}; setVal("ex_label", ex.label || ""); setVal("ex_taxable", ex.taxable || 0); setVal("ex_exempt", ex.exempt || 0);
     $("billSaveStatus").textContent = `저장된 오차정산 있음 (${new Date(saved.savedAt).toLocaleString()})`;
   } else {
-    setVal("cs_total", ""); setVal("cs_ratio", ratesFor(month).rates.taxableRatio); setVal("tu_note", "");
-    ["cs_taxable", "cs_exempt", "pd_taxable", "pd_exempt"].forEach(id => setVal(id, 0));
+    setVal("cs_total", ""); setVal("cs_ratio", ratesFor(month).rates.taxableRatio); setVal("tu_note", ""); setVal("ex_label", "");
+    ["cs_taxable", "cs_exempt", "pd_taxable", "pd_exempt", "ex_taxable", "ex_exempt"].forEach(id => setVal(id, 0));
   }
+  // 추가 정산분을 바꾸면 차액(다음 달 반영)을 다시 계산
+  ["ex_taxable", "ex_exempt"].forEach(id => { $(id).onchange = () => { if (billState.result && billState.result.mode === "trueup") runTrueUp(); }; });
 }
 
 function readProvisional(month, app) {
@@ -595,7 +603,8 @@ function readTrueUpFields() {
   const t = {
     confirmedTotal: n("cs_total"), taxableRatio: Number($("cs_ratio").value),
     confirmed: { taxable: n("cs_taxable"), exempt: n("cs_exempt") },
-    prevDiff: { taxable: n("pd_taxable"), exempt: n("pd_exempt") }, note: $("tu_note").value.trim()
+    prevDiff: { taxable: n("pd_taxable"), exempt: n("pd_exempt") }, note: $("tu_note").value.trim(),
+    extra: { label: $("ex_label").value.trim(), taxable: Math.round(n("ex_taxable")), exempt: Math.round(n("ex_exempt")) } // 수기 추가 정산분
   };
   if (t.confirmed.taxable + t.confirmed.exempt !== t.confirmedTotal)
     throw new Error(`확정 부가정산금 과세+비과세(${(t.confirmed.taxable + t.confirmed.exempt).toLocaleString()})가 총액(${t.confirmedTotal.toLocaleString()})과 다릅니다.`);
@@ -616,9 +625,12 @@ function runTrueUp() {
       prevDiff: (A && A.prevDiff) || prov.prevDiff || { taxable: 0, exempt: 0 },
       penalty: A && A.penalty ? { amount: A.penalty, label: A.penaltyLabel } : null, recItems: A && A.recItems ? A.recItems : [] }, P.rates);
     const diff = Engine.trueUpDiff(prov, conf);
-    setVal("pd_taxable", diff.taxable); // 비교 결과로 채움 (직접 고친 값은 다시 계산하면 덮어씀)
+    // 차액 = 비교 결과 + 수기 추가 정산분 (직접 고친 값은 다시 계산하면 덮어씀) → 다음 달 가정산서의 전월 차액
+    const exT = Math.round(Number($("ex_taxable").value) || 0), exE = Math.round(Number($("ex_exempt").value) || 0);
+    setVal("pd_taxable", diff.taxable + exT);
     const aFund = A ? A.fund : prov.fund;
-    if (aFund != null) setVal("pd_exempt", conf.fund - aFund); // 비과세 차액 = 전력산업기반기금 차이
+    if (aFund != null) setVal("pd_exempt", conf.fund - aFund + exE); // 비과세 차액 = 전력산업기반기금 차이 + 추가 정산분
+    else if (exE) setVal("pd_exempt", exE);
     billState.result = { mode: "trueup", preview: P.preview, err: err.slice(), app: P.app, month: P.g.month, customer: P.customer, rates: P.rates, loss: P.loss, match, conf, prov, diff, warn, netOverride, ctx: R_CTX };
     renderTrueUpResult();
   } catch (e) { out.innerHTML = `<div class="notice bad">계산 오류: ${esc(e.message)}</div>`; }
@@ -717,6 +729,9 @@ function trueUpHtml(R) {
   const aVal = (k, fb) => A && A[k] != null ? A[k] : (prov[k] != null ? prov[k] : fb);
   const sign = (n, u) => n == null || isNaN(n) ? "-" : (n > 0 ? "+" : n < 0 ? "−" : "") + (u === "kWh" ? Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 }) + " kWh" : Math.abs(Math.round(n)).toLocaleString() + " 원");
   const won0 = n => n == null || isNaN(n) ? "-" : won(n);
+  // 수기 추가 정산분: 당초·수령 없음, 정정 = 차이 = 금액 (다음 달 전월 차액에 포함)
+  const ex = (t && t.extra) || {}, exT = Number(ex.taxable) || 0, exE = Number(ex.exempt) || 0, exLabel = esc(ex.label || "추가 정산분");
+  const exLine = (l, amt) => `<tr><td class="label">${l}</td><td class="num">-</td><td class="num">-</td><td class="num">${won(amt)}</td><td class="num">${sign(amt, "")}</td><td class="basis">${nmM}월 거래분 청구서에 반영</td></tr>`;
   // 행: 항목 | 당초 | 수령(A) | 정정(B) | 차이 | 비고  (a: 당초, r: 수령, b: 정정)
   const line = (l, a, b, opt) => { opt = opt || {}; const kwh = opt.kwh, f = kwh ? kwh3 : won0, r = opt.r !== undefined ? opt.r : a;
     const d = (b == null || r == null || isNaN(b) || isNaN(r)) ? null : b - r;
@@ -751,6 +766,7 @@ function trueUpHtml(R) {
     line("공급가액 (전월 차액 반영 전)", aVal("supplyBefore"), conf.supplyBefore, { cls: "total" }),
     line("전월 차액 (과세)", pd.taxable, conf.prevDiff.taxable),
     line("공급가액 (전월 차액 반영 후)", aVal("supplyAfter"), conf.supplyAfter, { cls: "total" }),
+    ...(exT ? [exLine(`${exLabel} (과세)`, exT)] : []),
     line("부가세 · 전력량요금", av("energy"), conf.vat.energy),
     line("부가세 · 망이용요금", av("network"), conf.vat.network),
     line("부가세 · 거래수수료", av("fee"), conf.vat.fee),
@@ -759,7 +775,7 @@ function trueUpHtml(R) {
     line("부가세 · 부가정산금", av("surcharge"), conf.vat.surcharge),
     line("부가세 · 전월 차액", av("prevDiff"), conf.vat.prevDiff),
     line("부가가치세 계", aVal("vatTotal"), conf.vatTotal),
-    line("세금계산서 계", aVal("taxInvoice"), conf.taxInvoice, { cls: "total" })
+    line("세금계산서 계", aVal("taxInvoice"), conf.taxInvoice + exT, { cls: "total" })
   ];
   const exRows = [
     line(`${prevM}월 확정 부가정산금 (비과세)`, cs.exempt, conf.confirmedSurcharge.exempt),
@@ -767,7 +783,8 @@ function trueUpHtml(R) {
     line("전력산업기반기금 (비과세)", aVal("fund"), conf.fund, { note: `${nmM}월 거래분 청구서에 반영` }),
     line("전월 차액 (비과세)", pd.exempt, conf.prevDiff.exempt)
   ].concat(conf.penalty || (A && A.penalty) ? [line("위약금 차감", A ? -A.penalty : null, -conf.penalty)] : [])
-   .concat([line("청구서 계", aVal("exemptSubtotal"), conf.exemptSubtotal, { cls: "total" })]);
+   .concat(exE ? [exLine(`${exLabel} (비과세)`, exE)] : [])
+   .concat([line("청구서 계", aVal("exemptSubtotal"), conf.exemptSubtotal + exE, { cls: "total" })]);
   const no = docNo(R, "0002");
   const vatRate = rates.vatRate, csVat = Engine.round(t.confirmed.taxable * vatRate);
   const ratio = t.taxableRatio;
@@ -783,7 +800,7 @@ function trueUpHtml(R) {
       ${taxRows.slice(1).join("")}
       <tr><th class="section" rowspan="${exRows.length}">청<br>구<br>서</th>${exRows[0].replace(/^<tr[^>]*>/, "")}
       ${exRows.slice(1).join("")}
-      ${line("당월 청구 계", aVal("grandTotal"), conf.grandTotal, { cls: "pay", r: paid, note: prov.paidAt ? `수령 ${esc(prov.paidAt)}` : "" }).replace("<tr class=\"pay\"><td class=\"label\">", "<tr class=\"pay\"><th class=\"section\" colspan=\"2\">").replace("당월 청구 계</td>", "당월 청구 계</th>")}
+      ${line("당월 청구 계", aVal("grandTotal"), conf.grandTotal + exT + exE, { cls: "pay", r: paid, note: prov.paidAt ? `수령 ${esc(prov.paidAt)}` : "" }).replace("<tr class=\"pay\"><td class=\"label\">", "<tr class=\"pay\"><th class=\"section\" colspan=\"2\">").replace("당월 청구 계</td>", "당월 청구 계</th>")}
     </table>
     <table class="doc-table tu-table">${CS_COLS}
       <tr><th class="section" rowspan="4">${m}월<br>확정<br>부가<br>정산금</th><td class="label">구분</td><td class="label">정산기간</td><td class="label">구성비</td><td class="label">공급량</td><td class="label">공급가액</td><td class="label">부가세</td><td class="label">계</td></tr>
