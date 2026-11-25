@@ -117,7 +117,7 @@ const Registry = (function () {
     if (all[n] && (!a || plantGroup(all[n]) === a)) return n;
     let cands = Object.keys(all).filter(k => str(all[k]["발전소명"]) === n);
     if (!cands.length) { // 띄어쓰기만 다른 이름 (KPX "OO 태양광발전소" ↔ 등록 "OO태양광발전소")
-      const sq = s => str(s).replace(/\s+/g, "");
+      const sq = s => str(s).normalize("NFKC").replace(/\s+/g, ""); // 띄어쓰기·㈜/(주) 표기 차이 무시
       cands = Object.keys(all).filter(k => sq(all[k]["발전소명"]) === sq(n));
       if (!cands.length) return n;
       return cands.find(k => a && plantGroup(all[k]) === a) || cands[0];

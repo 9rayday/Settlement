@@ -8,7 +8,7 @@
  * 정수(μMWh·μREC, 1/100원) 단위로 계산해 엑셀과 정확히 일치한다.
  */
 const REC = (() => {
-  const norm = s => String(s == null ? "" : s).replace(/\s/g, "");
+  const norm = s => String(s == null ? "" : s).normalize("NFKC").replace(/\s/g, ""); // ㈜ = (주)
   const halfUp = (num, den) => num >= 0 ? Math.floor((num + den / 2) / den) : -Math.floor((-num + den / 2) / den); // ROUND(num/den, 0)
 
   /* pieces: 시간순 [{ ym, d, h, smpC(원/kWh × 100), exU(초과 μMWh) | recU(이월 REC μREC) }]
