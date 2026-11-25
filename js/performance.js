@@ -8,7 +8,7 @@
  * 처리 방식이 "청구서 차감"이면 연차 종료월 정산서에서 차감한다 (전기사용자 가정산서 / 발전사업자 정산서).
  */
 const PERF_ALERT_DAYS = 30;
-const perfState = { rows: null, loaded: false, open: { cust: null, gen: null }, year: { cust: "", gen: "" }, filter: { cust: "", gen: "" } }; // filter: 상단 카드로 고른 목록 (met|risk|short|penalty) // year: "" = 진행 중 연차, "1"~"20"
+const perfState = { rows: null, loaded: false, open: { cust: null, gen: null }, year: { cust: "", gen: "" }, filter: { cust: "", gen: "" }, q: { cust: "", gen: "" } }; // filter: 상단 카드로 고른 목록 (met|risk|short|penalty) // year: "" = 진행 중 연차, "1"~"20"
 
 async function loadPerformance() {
   const pre = typeof bootPart === "function" ? await bootPart("performance") : null; // 로그인 직후 한 번에 받은 값
@@ -138,6 +138,16 @@ function hoursTag(y) {
   return `<div class="perf-hr ${cls}" title="일평균 발전시간 = 실적 ÷ 계약용량 ÷ 실적 있는 달의 날수 (보장 ${y.guarHours.toFixed(1)}시간)">${y.hours.toFixed(1)}시간 · ${txt}</div>`;
 }
 
+// 검색칸: 한글 조합 중에는 기다렸다가 다시 그리고, 커서를 칸 끝에 되돌린다
+function bindPerfSearch(kind, pk) {
+  const id = kind + "PerfQ", el = document.getElementById(id); if (!el) return;
+  let composing = false;
+  const apply = () => { perfState.q[kind] = el.value; regState.pages[pk] = 1; perfState.open[kind] = null; renderPerfPage(kind); const n = document.getElementById(id); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } };
+  el.addEventListener("compositionstart", () => { composing = true; });
+  el.addEventListener("compositionend", () => { composing = false; apply(); });
+  el.oninput = e => { if (composing || (e && e.isComposing)) return; apply(); };
+}
+
 function renderPerfPages() { renderPerfPage("cust"); renderPerfPage("gen"); }
 
 function renderPerfPage(kind) {
@@ -165,14 +175,18 @@ function renderPerfPage(kind) {
     ["short", "종료 연차 미달", ended.filter(y => y.status === "미달").length + "건"],
     ["penalty", "미달 위약금 합계", ended.reduce((sum, y) => sum + y.penalty, 0).toLocaleString() + " 원"]
   ];
-  const rowsList = flt && FILTERS[flt] ? list.filter(FILTERS[flt]) : list;
+  // 검색: 이름·계약ID·신청번호·소속 발전소·사업자명 (띄어쓰기 무시)
+  const q = perfState.q[kind].toLowerCase().replace(/\s+/g, "");
+  const hay = ({ c }) => !c ? "" : [c.name, c.key, c.app, ...(c.plants || []), kind === "gen" ? rStr((Registry.plants()[c.key] || {})["사업자명(대표자명)"]) : ""].join("|").toLowerCase().replace(/\s+/g, "");
+  const rowsList = (flt && FILTERS[flt] ? list.filter(FILTERS[flt]) : list).filter(x => !q || hay(x).includes(q));
   const pk = kind === "gen" ? "perfGen" : "perfCust", pg = pageSlice(pk, rowsList);
   const fltLabel = flt ? (kpi.find(k => k[0] === flt) || [])[1] : "";
   host.innerHTML = `${perfState.loaded ? "" : `<div class="notice warn">월별 실적을 불러오지 못했습니다. Apps Script를 최신 Code.gs로 재배포했는지 확인하세요.</div>`}
     <div class="perf-kpis">${kpi.map(([f, l, v, sub]) => `<div class="kpi kpi-btn${(flt || "") === f ? " active" : ""}" data-f="${f}" title="${f ? "누르면 해당 " + label + "만 보기" : "전체 보기"}"><div class="label">${l}</div><div class="value">${v}</div>${sub ? `<div class="kpi-sub">${sub}</div>` : ""}</div>`).join("")}</div>
     <div class="card"><div class="reg-head"><h2>${label} 계약이행현황${flt ? ` <span class="perf-filter">${fltLabel} ${rowsList.length}건 <button type="button" id="${kind}PerfClear" title="전체 보기">×</button></span>` : ""}</h2>
       <div class="row"><label class="adj-label">해당 연차</label><select id="${kind}PerfYear" style="min-width:140px"><option value="">진행 중 연차</option>
-        ${Array.from({ length: 20 }, (_, i) => `<option value="${i + 1}"${sel === String(i + 1) ? " selected" : ""}>${i + 1}년차</option>`).join("")}</select></div></div>
+        ${Array.from({ length: 20 }, (_, i) => `<option value="${i + 1}"${sel === String(i + 1) ? " selected" : ""}>${i + 1}년차</option>`).join("")}</select>
+        <input type="search" id="${kind}PerfQ" class="reg-search" placeholder="검색 (${kind === "gen" ? "발전소명·사업자명" : "전기사용자·계약ID·신청번호·발전소"})" value="${rEsc(perfState.q[kind])}"></div></div>
       <div class="grid-wrap perf-wrap" style="margin-top:10px"><table class="grid perf-table"><tr><th>${label}</th><th class="num">계약용량(kW)</th><th class="num">효율감소</th><th>계약기간</th>
         <th>해당 연차</th><th>연차 남은 기간</th><th class="num">보장량(MWh)</th><th class="num">실적(MWh)</th><th class="num">달성률</th><th>상태</th></tr>
         ${pg.items.length ? pg.items.map(item => {
@@ -195,6 +209,7 @@ function renderPerfPage(kind) {
       ${pagerHtml(pk, pg.page, pg.pages)}
       <div id="${kind}PerfDetail"></div></div>`;
   bindPager(host, () => renderPerfPage(kind));
+  bindPerfSearch(kind, pk);
   document.getElementById(kind + "PerfYear").onchange = e => { perfState.year[kind] = e.target.value; renderPerfPage(kind); };
   const setFilter = f => { perfState.filter[kind] = f; regState.pages[pk] = 1; perfState.open[kind] = null; renderPerfPage(kind); };
   host.querySelectorAll(".kpi-btn").forEach(el => el.onclick = () => setFilter(el.dataset.f && perfState.filter[kind] !== el.dataset.f ? el.dataset.f : ""));
