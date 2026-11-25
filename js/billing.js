@@ -83,16 +83,25 @@ async function onAmiFile(file) {
 const fieldHtml = (label, inner) => `<div class="adj-item"><label class="adj-label">${label}</label>${inner}</div>`;
 const numField = (label, id, val) => fieldHtml(label, `<input type="number" id="${id}" step="any" value="${val == null ? "" : val}">`);
 
-function surchargeRowHtml() {
-  return `<div class="row"><label>확정 부가정산금 총액</label><input type="number" id="cs_total" style="width:130px"><label>과세 비율</label><input type="number" id="cs_ratio" step="any" style="width:90px"><button class="btn secondary" id="cs_split">분할</button></div>`;
+// 라벨 앞 월 표시 자리: fill*Form 에서 정산월 기준으로 "(8월) " 처럼 채운다 (off 0 = 정산월, -1 = 전월)
+const ML = off => `<span class="mlab" data-off="${off}"></span>`;
+function setMonthLabels(month) {
+  document.querySelectorAll(".mlab").forEach(el => { const t = Number(month.slice(0, 4)) * 12 + Number(month.slice(4)) - 1 + Number(el.dataset.off); el.textContent = `(${t % 12 + 1}월) `; });
+}
+
+// 정산서 표 라벨: 끝의 " (과세)" 같은 괄호는 다음 줄 작은 글씨로 (좁은 칸에서 어색하게 줄바꿈되지 않게)
+const docLbl = l => String(l).replace(/ \(([^()<>]+)\)$/, "<small>($1)</small>");
+
+function surchargeRowHtml(off) {
+  return `<div class="row"><label>${ML(off)}확정 부가정산금 총액</label><input type="number" id="cs_total" style="width:130px"><label>과세 비율</label><input type="number" id="cs_ratio" step="any" style="width:90px"><button class="btn secondary" id="cs_split">분할</button></div>`;
 }
 
 function provisionalFormHtml() {
   return `<div class="card"><h2>전월 오차정산 반영</h2>
-    <div id="csRowWrap">${surchargeRowHtml()}</div>
+    <div id="csRowWrap">${surchargeRowHtml(-1)}</div>
     <div class="adj-grid">
-      ${numField("전월 확정 부가정산금 (과세)", "cs_taxable", 0)}${numField("전월 확정 부가정산금 (비과세)", "cs_exempt", 0)}
-      ${numField("전월 차액 (과세)", "pd_taxable", 0)}${numField("전월 차액 (비과세)", "pd_exempt", 0)}
+      ${numField(ML(-1) + "확정 부가정산금 (과세)", "cs_taxable", 0)}${numField(ML(-1) + "확정 부가정산금 (비과세)", "cs_exempt", 0)}
+      ${numField(ML(-1) + "차액 (과세)", "pd_taxable", 0)}${numField(ML(-1) + "차액 (비과세)", "pd_exempt", 0)}
       ${fieldHtml("청구일 (익월 N영업일 이내)", `<input type="number" id="cfg_send" min="1" max="31" step="1">`)}
       ${fieldHtml("검토일 (수령 후 N영업일 이내)", `<input type="number" id="cfg_review" min="1" max="31" step="1">`)}
       ${fieldHtml("납부기한 (매월 N일)", `<input type="number" id="cfg_pay" min="1" max="31" step="1">`)}
@@ -126,13 +135,13 @@ function fillBillCfg(app, month) {
 function trueUpFormHtml() {
   return `<div class="card"><h2>비교 기준 가정산서</h2><div id="pvSource" class="hint" style="margin:0 0 8px"></div>
       <div class="adj-grid">${numField("공급량 (kWh)", "pv_supply")}${numField("전력량요금 (원)", "pv_energy")}${numField("송배전용 전기설비 이용요금 (원)", "pv_net")}${numField("거래수수료 (원)", "pv_fee")}</div></div>
-    <div class="card"><h2>확정 망이용요금 (한전 청구서, 발전소별)</h2>
+    <div class="card"><h2>${ML(0)}확정 망이용요금 (한전 청구서, 발전소별)</h2>
       <div class="adj-grid" id="netConfGrid"></div></div>
-    <div class="card"><h2>확정 부가정산금 · 전월 차액</h2>
-      ${surchargeRowHtml()}
+    <div class="card"><h2>${ML(0)}확정 부가정산금 · 차액 (다음 달 반영)</h2>
+      ${surchargeRowHtml(0)}
       <div class="adj-grid">
-        ${numField("확정 부가정산금 (과세)", "cs_taxable", 0)}${numField("확정 부가정산금 (비과세)", "cs_exempt", 0)}
-        ${numField("차액 (과세)", "pd_taxable", 0)}${numField("차액 (비과세)", "pd_exempt", 0)}
+        ${numField(ML(0) + "확정 부가정산금 (과세)", "cs_taxable", 0)}${numField(ML(0) + "확정 부가정산금 (비과세)", "cs_exempt", 0)}
+        ${numField(ML(0) + "차액 (과세)", "pd_taxable", 0)}${numField(ML(0) + "차액 (비과세)", "pd_exempt", 0)}
         ${fieldHtml("특이사항", `<input id="tu_note">`)}</div></div>
     <div class="card"><h2>추가 정산분 (수기)</h2>
       <div class="adj-grid">
@@ -203,6 +212,7 @@ function renderFlow(app, month) {
 
 // 가정산: 전월 오차정산(carry:<이번달>:<신청번호>)이 있으면 그대로 채운다
 function fillProvisionalForm(app, month) {
+  setMonthLabels(month);
   const prevMonth = prevYm(month);
   const carry = Store.get(`carry:${month}:${app}`, null);
   if (carry) {
@@ -419,8 +429,8 @@ function invoiceHtml(R) {
   const prevM = Number(prevYm(R.month).slice(4)), curM = Number(R.month.slice(4));
   const plantsN = Object.keys(inv.netByPlant);
   // 행: 항목(2칸) | 금액 | 산출근거
-  const row = (l, a, basis, cls) => `<tr${cls ? ` class="${cls}"` : ""}><td class="label" colspan="2">${l}</td><td class="num">${a}</td><td class="basis">${basis || ""}</td></tr>`;
-  const sub = (l, a, basis, cls) => `<td class="label${cls ? " " + cls : ""}">${l}</td><td class="num">${a}</td><td class="basis">${basis || ""}</td>`;
+  const row = (l, a, basis, cls) => `<tr${cls ? ` class="${cls}"` : ""}><td class="label" colspan="2">${docLbl(l)}</td><td class="num">${a}</td><td class="basis">${basis || ""}</td></tr>`;
+  const sub = (l, a, basis, cls) => `<td class="label${cls ? " " + cls : ""}">${docLbl(l)}</td><td class="num">${a}</td><td class="basis">${basis || ""}</td>`;
   // 계약이 여러 건이어도 단가가 같으면 한 줄 (다를 때만 계약별)
   const prices = Array.from(new Set(inv.energyParts.map(x => x.unitPrice)));
   const energyBasis = prices.length > 1
@@ -535,6 +545,7 @@ function exportBillExcel() {
  * 시스템 밖(엑셀)에서 만든 가정산은 비교 기준 값을 직접 입력한다.
  */
 function fillTrueUpForm(app, month) {
+  setMonthLabels(month);
   const bill = Store.get(`bill:${month}:${app}`, null);
   const hasBill = !!(bill && bill.energy != null);
   const saved = Store.get(`carry:${nextYm(month)}:${app}`, null);
@@ -731,11 +742,11 @@ function trueUpHtml(R) {
   const won0 = n => n == null || isNaN(n) ? "-" : won(n);
   // 수기 추가 정산분: 당초·수령 없음, 정정 = 차이 = 금액 (다음 달 전월 차액에 포함)
   const ex = (t && t.extra) || {}, exT = Number(ex.taxable) || 0, exE = Number(ex.exempt) || 0, exLabel = esc(ex.label || "추가 정산분");
-  const exLine = (l, amt) => `<tr><td class="label">${l}</td><td class="num">-</td><td class="num">-</td><td class="num">${won(amt)}</td><td class="num">${sign(amt, "")}</td><td class="basis">${nmM}월 거래분 청구서에 반영</td></tr>`;
+  const exLine = (l, amt) => `<tr><td class="label">${docLbl(l)}</td><td class="num">-</td><td class="num">-</td><td class="num">${won(amt)}</td><td class="num">${sign(amt, "")}</td><td class="basis">${nmM}월 거래분 청구서에 반영</td></tr>`;
   // 행: 항목 | 당초 | 수령(A) | 정정(B) | 차이 | 비고  (a: 당초, r: 수령, b: 정정)
   const line = (l, a, b, opt) => { opt = opt || {}; const kwh = opt.kwh, f = kwh ? kwh3 : won0, r = opt.r !== undefined ? opt.r : a;
     const d = (b == null || r == null || isNaN(b) || isNaN(r)) ? null : b - r;
-    return `<tr${opt.cls ? ` class="${opt.cls}"` : ""}><td class="label${opt.plant ? " plant-l" : ""}">${l}</td><td class="num">${opt.fa ? opt.fa(a) : f(a)}</td><td class="num">${opt.fa ? opt.fa(r) : f(r)}</td><td class="num">${opt.fa ? opt.fa(b) : f(b)}</td><td class="num">${opt.noDiff ? "-" : sign(d, kwh ? "kWh" : "")}</td><td class="basis">${opt.note || ""}</td></tr>`; };
+    return `<tr${opt.cls ? ` class="${opt.cls}"` : ""}><td class="label${opt.plant ? " plant-l" : ""}">${docLbl(l)}</td><td class="num">${opt.fa ? opt.fa(a) : f(a)}</td><td class="num">${opt.fa ? opt.fa(r) : f(r)}</td><td class="num">${opt.fa ? opt.fa(b) : f(b)}</td><td class="num">${opt.noDiff ? "-" : sign(d, kwh ? "kWh" : "")}</td><td class="basis">${opt.note || ""}</td></tr>`; };
   const T = match.totals, aDef = PT ? PT.deficitSimple + PT.deficitLoss : prov.deficit;
   const tradeRows = [
     line("전기사용량 계", PT ? PT.usage : prov.usage, T.usage, { kwh: true }),

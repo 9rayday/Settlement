@@ -54,16 +54,18 @@
       const raw = cells.slice(i + 1, i + 97);
       if (raw.length < 96) { warnings.push(`${date}: 15분 데이터가 96칸이 아닙니다.`); continue; }
       const slots = raw.map(v => (v === "" ? NaN : parseFloat(String(v).replace(/,/g, ""))));
-      // 빈 칸(미수신)이 낀 시간은 null 로 두고 경고 — 0으로 간주하면 공급량이 조용히 줄어든다.
-      const hours = [], gapHours = [];
+      // 15분 칸 일부만 빈 시간은 있는 칸만 더한다 (엑셀 정산서·파일 합계와 같은 방식). 4칸 모두 빈 시간만 null(미수신) + 경고.
+      const hours = [], gapHours = [], partHours = [];
       for (let h = 0; h < 24; h++) {
         const q = slots.slice(4*h, 4*h + 4);
-        if (q.some(isNaN)) { hours.push(null); gapHours.push(h); } else hours.push(q[0] + q[1] + q[2] + q[3]);
+        if (q.every(isNaN)) { hours.push(null); gapHours.push(h); }
+        else { if (q.some(isNaN)) partHours.push(h); hours.push(q.reduce((a, b) => a + (isNaN(b) ? 0 : b), 0)); }
       }
       if (gapHours.length) warnings.push(`${date}: 미수신 구간 있음 (${gapHours.length}시간: ${gapHours.map(h => h + "시").join(", ")})`);
+      if (partHours.length) warnings.push(`${date}: 15분 일부 미수신 (${partHours.map(h => h + "시").join(", ")}) — 있는 값만 합산`);
       if (!gapHours.length) {
         const sum = parseFloat(String(cells[i + 97]).replace(/,/g, ""));
-        const calc = slots.reduce((a, b) => a + b, 0);
+        const calc = slots.reduce((a, b) => a + (isNaN(b) ? 0 : b), 0);
         if (!isNaN(sum) && Math.abs(sum - calc) > 0.5) warnings.push(`${date}: 합계 불일치 (파일 ${sum} / 계산 ${calc.toFixed(2)})`);
       }
       usage[date] = hours;
