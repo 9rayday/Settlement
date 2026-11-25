@@ -371,7 +371,7 @@ function renderCustomerPage() {
   const list = Registry.rawCustomers().filter(c => regMatch(regState.q.cust, [c["수요기업명"], c["계약ID"], c["소비계약신청번호"], c["KPX신청번호"], c["사업자등록번호"], c["대표자명"], c["담당자"], c["수요지지역"], c["사용장소명"]]));
   const pg = pageSlice("cust", list);
   host.innerHTML = `${loadFailNotice()}<div class="card">
-      <div class="reg-head"><h2>전력거래계약</h2><div class="reg-tools"><button class="btn secondary" id="regAddCust">+ 전기사용자 추가</button><input type="search" id="regCustQ" class="reg-search" placeholder="검색 (사업자명·계약ID·소비계약신청번호)" value="${rEsc(regState.q.cust)}"></div></div>
+      <div class="reg-head"><h2>전력거래계약</h2><div class="reg-tools"><button class="btn secondary" id="regAddCust">+ 전기사용자 추가</button><input type="search" id="regCustQ" class="reg-search perf-search" placeholder=" " title="사업자명·계약ID·소비계약신청번호로 검색" value="${rEsc(regState.q.cust)}"></div></div>
       ${list.length ? "" : '<div class="empty">검색 결과 없음</div>'}
       <div class="reg-cards">${custCardsHtml(regState.openCust, "cust-card", pg.items)}</div>${pagerHtml("cust", pg.page, pg.pages)}
       <div id="regCustDetail"></div></div>`;
@@ -413,8 +413,8 @@ function renderPlantPage() {
   const keys = Object.keys(plants).filter(p => { const m = plants[p]; return regMatch(regState.q.plant, [m["발전소명"], m["사업자명(대표자명)"], m["사업자명"], m["대표자명"], m["지역(요금구분)"], m["계약ID"], Registry.plantGroup(m), Registry.plantContract(p), m["발전기ID"], m["사업자등록번호"]]); });
   const pg = pageSlice("plant", keys);
   host.innerHTML = `${loadFailNotice()}<div class="card">
-      <div class="reg-head"><h2>전력공급계약</h2><div class="reg-tools"><button class="btn secondary" id="regAddPlant">+ 발전소 추가</button><input type="search" id="regPlantQ" class="reg-search" placeholder="검색 (발전소명·사업자명·계약)" value="${rEsc(regState.q.plant)}"></div></div>
-      <div class="grid-wrap"><table class="grid reg-table"><tr><th>발전소명</th><th>사업자명</th><th>지역</th><th>배전</th><th>그룹 (전기사용자)</th><th>계약용량(kW)</th><th>매입단가</th><th>계약일자</th></tr>
+      <div class="reg-head"><h2>전력공급계약</h2><div class="reg-tools"><button class="btn secondary" id="regAddPlant">+ 발전소 추가</button><input type="search" id="regPlantQ" class="reg-search perf-search" placeholder=" " title="발전소명·사업자명·계약으로 검색" value="${rEsc(regState.q.plant)}"></div></div>
+      <div class="grid-wrap"><table class="grid reg-table reg-plant-table"><colgroup><col style="width:17%"><col style="width:19%"><col style="width:8%"><col style="width:6%"><col style="width:20%"><col style="width:11%"><col style="width:8%"><col style="width:11%"></colgroup><tr><th>발전소명</th><th>사업자명</th><th>지역</th><th>배전</th><th>그룹 (전기사용자)</th><th>계약용량(kW)</th><th>매입단가</th><th>계약일자</th></tr>
         ${pg.items.map(p => { const m = plants[p], app = Registry.plantGroup(m);
           return `<tr class="reg-row${regState.openPlant === p ? " active" : ""}" data-plant="${rEsc(p)}"><td><b>${rEsc(m["발전소명"] || p)}</b></td><td>${rEsc(m["사업자명(대표자명)"])}</td>
             <td>${m["지역(요금구분)"] ? rEsc(m["지역(요금구분)"]) : '<span class="tag bad">미지정</span>'}</td><td>${GRID_LABEL[gridOf(m["배전연결"])]}</td>

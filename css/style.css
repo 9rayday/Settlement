@@ -736,3 +736,5 @@ input, select, textarea, button{ max-width:100%; }
 .status.drive-tag.busy{ color:var(--sub); }
 .status.drive-tag.done{ color:#1E8E4F; }
 .status.drive-tag.fail{ color:var(--danger); cursor:help; }
+/* 발전사업자 표: 페이지를 넘겨도 열 너비 고정 (내용 길이에 따라 열이 움직이지 않게) */
+table.reg-plant-table{ table-layout:fixed; width:100%; min-width:960px; }
