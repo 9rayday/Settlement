@@ -85,10 +85,13 @@ function yearSchedule(c, byPlant) {
     let status = "예정";
     if (state === "ended") status = met ? "달성" : "미달";
     else if (state === "current") status = met ? "달성" : (remain <= PERF_ALERT_DAYS ? "미달 위험" : "진행중");
+    // 일평균 발전시간 = 실적 ÷ 계약용량 ÷ 실적이 있는 달의 날수 (보장 시간 = 보장량 ÷ 계약용량 ÷ 연차 날수)
+    const dataDays = Object.keys(weights).reduce((t, ym) => t + new Date(Date.UTC(Number(ym.slice(0, 4)), Number(ym.slice(4)), 0)).getUTCDate(), 0);
+    const hours = c.cap > 0 && dataDays > 0 ? actual / c.cap / dataDays : null, guarHours = c.cap > 0 ? guar / c.cap / totalDays : null;
     const rec = state === "ended" && !met && typeof weightedRecMonths === "function" ? weightedRecMonths(lo, hi, weights) : null; // 원/REC
     const penalty = rec != null ? Math.round(short * rec / 1000) : 0; // 1 REC = 1MWh
     out.push({ n: i, s, e, guar, rec, recMissing: state === "ended" && !met && rec == null, supply, excess, actual, ratio: guar ? actual / guar - 1 : 0, short: state === "ended" ? short : 0,
-      state, status, totalDays, remain, penalty, penaltyMonth: e.slice(0, 4) + e.slice(5, 7) });
+      state, status, totalDays, remain, penalty, hours, guarHours, penaltyMonth: e.slice(0, 4) + e.slice(5, 7) });
   }
   return out;
 }
@@ -128,6 +131,13 @@ const mwh = v => (v == null || isNaN(v)) ? "-" : (v / 1000).toLocaleString(undef
 const pct = v => `${v >= 0 ? "+" : ""}${Math.round(v * 100)}%`;
 const STATUS_CLS = { "달성": "ok", "미달": "bad", "미달 위험": "bad", "진행중": "run", "예정": "wait" };
 
+// 달성률 아래 참고 지표: 일평균 발전시간 · 보장 시간 대비 정상(100% 이상) / 경고(90% 이상) / 비정상
+function hoursTag(y) {
+  if (y.hours == null || !y.guarHours) return "";
+  const r = y.hours / y.guarHours, [cls, txt] = r >= 1 ? ["ok", "정상"] : r >= 0.9 ? ["warn", "경고"] : ["bad", "비정상"];
+  return `<div class="perf-hr ${cls}" title="일평균 발전시간 = 실적 ÷ 계약용량 ÷ 실적 있는 달의 날수 (보장 ${y.guarHours.toFixed(1)}시간)">${y.hours.toFixed(1)}시간 · ${txt}</div>`;
+}
+
 function renderPerfPages() { renderPerfPage("cust"); renderPerfPage("gen"); }
 
 function renderPerfPage(kind) {
@@ -149,7 +159,7 @@ function renderPerfPage(kind) {
   const shown = list.map(basePick).filter(Boolean);
   const ended = list.flatMap(x => x.ys || []).filter(y => y.state === "ended");
   const kpi = [
-    ["", "계약", list.length + "건"],
+    ["", "계약", list.length + "건", `(${(list.reduce((t, x) => t + (x.c ? x.c.cap : 0), 0) / 1000).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}MW)`],
     ["met", `${sel ? sel + "년차" : "진행 연차"} 달성`, shown.filter(y => y.status === "달성").length + "건"],
     ["risk", "미달 위험 (30일 이내)", list.filter(x => x.cur && x.cur.status === "미달 위험").length + "건"],
     ["short", "종료 연차 미달", ended.filter(y => y.status === "미달").length + "건"],
@@ -159,7 +169,7 @@ function renderPerfPage(kind) {
   const pk = kind === "gen" ? "perfGen" : "perfCust", pg = pageSlice(pk, rowsList);
   const fltLabel = flt ? (kpi.find(k => k[0] === flt) || [])[1] : "";
   host.innerHTML = `${perfState.loaded ? "" : `<div class="notice warn">월별 실적을 불러오지 못했습니다. Apps Script를 최신 Code.gs로 재배포했는지 확인하세요.</div>`}
-    <div class="perf-kpis">${kpi.map(([f, l, v]) => `<div class="kpi kpi-btn${(flt || "") === f ? " active" : ""}" data-f="${f}" title="${f ? "누르면 해당 " + label + "만 보기" : "전체 보기"}"><div class="label">${l}</div><div class="value">${v}</div></div>`).join("")}</div>
+    <div class="perf-kpis">${kpi.map(([f, l, v, sub]) => `<div class="kpi kpi-btn${(flt || "") === f ? " active" : ""}" data-f="${f}" title="${f ? "누르면 해당 " + label + "만 보기" : "전체 보기"}"><div class="label">${l}</div><div class="value">${v}</div>${sub ? `<div class="kpi-sub">${sub}</div>` : ""}</div>`).join("")}</div>
     <div class="card"><div class="reg-head"><h2>${label} 계약이행현황${flt ? ` <span class="perf-filter">${fltLabel} ${rowsList.length}건 <button type="button" id="${kind}PerfClear" title="전체 보기">×</button></span>` : ""}</h2>
       <div class="row"><label class="adj-label">해당 연차</label><select id="${kind}PerfYear" style="min-width:140px"><option value="">진행 중 연차</option>
         ${Array.from({ length: 20 }, (_, i) => `<option value="${i + 1}"${sel === String(i + 1) ? " selected" : ""}>${i + 1}년차</option>`).join("")}</select></div></div>
@@ -179,7 +189,7 @@ function renderPerfPage(kind) {
           const future = y.state === "future";
           return `<tr class="perf-row${perfState.open[kind] === c.key ? " active" : ""}" data-key="${rEsc(c.key)}">${head}${period}
             <td>${y.n} / ${c.years}년차</td><td>${bar}</td>
-            <td class="num">${mwh(y.guar)}</td><td class="num">${future ? "-" : mwh(y.actual)}</td><td class="num">${future ? "-" : Math.round((y.ratio + 1) * 100) + "%"}</td>
+            <td class="num">${mwh(y.guar)}</td><td class="num">${future ? "-" : mwh(y.actual)}</td><td class="num">${future ? "-" : Math.round((y.ratio + 1) * 100) + "%" + hoursTag(y)}</td>
             <td><span class="perf-badge ${STATUS_CLS[y.status]}">${y.status}</span></td></tr>`;
         }).join("") : `<tr><td colspan="10" class="empty">없음</td></tr>`}</table></div>
       ${pagerHtml(pk, pg.page, pg.pages)}
@@ -199,7 +209,7 @@ function renderPerfDetail(kind, item) {
   if (!ys) { host.innerHTML = ""; return; }
   host.innerHTML = `<div class="reg-detail"><div class="reg-head"><h3 class="sub" style="margin:0">${rEsc(c.name)} 연차별 이행 현황</h3>
       <span class="hint" style="margin:0">1년차 보장량 ${mwh(c.g1)} MWh · 효율감소 ${c.decline}%/년 · 위약금 처리 ${rEsc(c.penMethod || "미정")}</span></div>
-    <div class="grid-wrap" style="max-height:none;margin-top:10px"><table class="grid perf-years"><tr><th>연차</th><th>기간</th><th class="num">보장량(MWh)</th><th class="num">실발전량(MWh)</th>
+    <div class="grid-wrap perf-years-wrap" style="margin-top:10px"><table class="grid perf-years"><tr><th>연차</th><th>기간</th><th class="num">보장량(MWh)</th><th class="num">실발전량(MWh)</th>
       <th class="num">초과발전량(MWh)</th><th class="num">합계(MWh)</th><th class="num">미달 비율</th><th class="num">미달량(MWh)</th><th class="num">가중평균 REC(원)</th><th class="num">미달 위약금(원)</th><th>상태</th></tr>
       ${ys.map(y => `<tr class="yr-${STATUS_CLS[y.status]}"><td>${y.n}년차</td><td><span class="nw">${y.s}</span> ~ <span class="nw">${y.e}</span></td><td class="num">${mwh(y.guar)}</td>
         <td class="num">${y.state === "future" ? "-" : mwh(y.supply)}</td><td class="num">${y.state === "future" ? "-" : mwh(y.excess)}</td><td class="num">${y.state === "future" ? "-" : mwh(y.actual)}</td>
