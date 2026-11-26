@@ -299,7 +299,7 @@ function prepareGroup(err, warn) {
   const cust = customer ? Object.assign({}, customer) : { name: `(미등록) ${app}`, bizNo: "", address: "", manager: "", contact: "", demandRegion: "비수도권", unitPrice: 0, appNo: app, contractId: app };
   if (!cust.demandRegion) cust.demandRegion = "비수도권";
   if (!(cust.unitPrice >= 0)) cust.unitPrice = 0;
-  return { app, g, customer: cust, rates, plants, days, match: S.match, loss: S.loss, priceSplits, preview };
+  return { app, g, customer: cust, rates, plants, days, match: S.match, loss: S.loss, monthly: S.monthly, priceSplits, preview };
 }
 const previewNotice = err => `<div class="notice bad"><b>미리보기 (저장 불가)</b><br>${err.map(esc).join("<br>")}</div>`;
 // 단가가 비어 있는 계약은 0원으로 계산 (미리보기)
@@ -343,7 +343,7 @@ function runCalc() {
       warn.push("전월 오차정산 값을 직접 수정함");
     const inv = Engine.invoice(match, ctx, P.rates);
     const days = { sendDays: Number($("cfg_send").value) || 8, reviewDays: Number($("cfg_review").value) || 2, payDay: Number($("cfg_pay").value) || 27 };
-    billState.result = { mode: "provisional", preview: P.preview, app: P.app, month: P.g.month, customer: Object.assign({}, P.customer, days), rates: P.rates, match, inv, ctx, loss: P.loss, note: $("bill_note").value.trim(), dueDate: dueDateFor(P.g.month, days.payDay) };
+    billState.result = { mode: "provisional", preview: P.preview, app: P.app, month: P.g.month, customer: Object.assign({}, P.customer, days), rates: P.rates, match, inv, ctx, loss: P.loss, days: P.days, monthly: P.monthly, note: $("bill_note").value.trim(), dueDate: dueDateFor(P.g.month, days.payDay) };
     out.innerHTML = (P.preview ? previewNotice(err) : "") + noticeHtml(warn, "warn") + invoiceHtml(billState.result);
     fitDocs(out);
     $("billActions").style.display = "flex";
@@ -523,21 +523,116 @@ function billRecord(R, old) {
   }, old && old.paidAt ? { paidAt: old.paidAt, paidAmount: old.paidAmount } : {}, old && old.editedAt ? { editedAt: old.editedAt } : {});
 }
 
-function exportBillExcel() {
-  const R = billState.result; if (!R) return;
-  const { inv, match } = R; const aoa = [
-    ["직접PPA 전력거래대금 청구서", R.month], ["수요기업", R.customer.name], [],
-    ["구분", "전기사용량", "공급량", "부족(단순)", "부족(손실률)"],
-    ...["경부하", "중간부하", "최대부하"].map(l => { const b = match.byLoad[l] || {}; return [l, b.usage || 0, b.supply || 0, b.deficitSimple || 0, b.deficitLoss || 0]; }), [],
-    ["항목", "금액"], ["전력량요금", inv.energy], ...(inv.energyParts.length > 1 ? inv.energyParts.map(x => ["  " + x.id + " (" + Math.round(x.kwh) + " kWh × " + x.unitPrice + ")", x.amount]) : []), ["망이용요금", inv.netTotal], ["거래수수료", inv.fee],
-    ["전월 확정 부가정산금(과세)", inv.confirmedSurcharge.taxable], ["전월 차액(과세)", inv.prevDiff.taxable],
-    ["공급가액", inv.supplyAfter], ["부가가치세", inv.vatTotal], ["세금계산서 계", inv.taxInvoice],
-    ["전월 확정 부가정산금(비과세)", inv.confirmedSurcharge.exempt], ["예상 부가정산금(참고)", inv.expectedSurcharge],
-    ["전력산업기반기금", inv.fund], ["전월 차액(비과세)", inv.prevDiff.exempt], ["청구서 계", inv.exemptSubtotal], ["당월 청구 계", inv.grandTotal], [],
-    ["발전소", "공급량", "망이용요금"], ...Object.keys(inv.netByPlant).map(p => [p, inv.netByPlant[p].supplyRounded, inv.netByPlant[p].fee])];
-  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), "청구서");
-  XLSX.writeFile(wb, `청구서_${R.customer.name}_${R.month}.xlsx`);
+/* ---------- 엑셀 내려받기 (가정산서·오차정산서 공통) ----------
+ * 탭1 정산서: 화면 정산서 표를 같은 행·열 배치로 (병합 칸 유지, 숫자는 숫자 셀)
+ * 탭2 직접전력거래량: 일자 × 시간 × 발전소 발전량·공급량·초과발전량 (정산서 계산과 같은 매칭)
+ * 탭3 전기사용량: 일자 × 1~24시 사용량 + 값 출처 (확정 파일 / 사용량 파일 / 발전량으로 채움)
+ * 서식(테두리·색)은 넣지 않는다 (SheetJS 무료판). 탭2·3 은 계산 직후에만 (보관함에는 시간별 원자료가 없음)
+ */
+const XL_NUM = /^[+\-−]?[\d,]+(\.\d+)?$/;
+function xlCell(text) {
+  const t = String(text || "").replace(/\s+/g, " ").trim();
+  const bare = t.replace(/\s*(원|kWh|원\/kWh)$/, "").replace(/^([+\-−])\s+/, "$1");
+  if (XL_NUM.test(bare)) {
+    const v = Number(bare.replace(/,/g, "").replace("−", "-"));
+    const dec = (bare.split(".")[1] || "").length;
+    return { t: "n", v, z: dec ? "#,##0." + "0".repeat(dec) : "#,##0" };
+  }
+  return t === "" ? null : { t: "s", v: t };
 }
+// 정산서 화면(.doc)을 시트 칸으로: 표는 rowspan/colspan 그대로 병합, 표 밖 글(제목·날짜·서명)은 한 줄씩
+function docToSheet(root) {
+  const rows = [], merges = []; let width = 1;
+  const textRow = el => { const t = (el.innerText || el.textContent || "").replace(/\s*\n\s*/g, " ").trim(); if (t) rows.push([{ t: "s", v: t }]); };
+  const table = tb => {
+    const base = rows.length, taken = {};
+    Array.from(tb.rows).forEach((tr, ri) => {
+      const r = base + ri; rows[r] = rows[r] || []; let c = 0;
+      Array.from(tr.cells).forEach(td => {
+        while (taken[r + ":" + c]) c++;
+        const rs = td.rowSpan || 1, cs = td.colSpan || 1;
+        rows[r][c] = td.querySelector("svg") ? { t: "s", v: "(그래프 생략)" } : xlCell(td.innerText || td.textContent);
+        for (let i = 0; i < rs; i++) for (let j = 0; j < cs; j++) taken[(r + i) + ":" + (c + j)] = true;
+        if (rs > 1 || cs > 1) merges.push({ s: { r, c }, e: { r: r + rs - 1, c: c + cs - 1 } });
+        c += cs; width = Math.max(width, c);
+      });
+    });
+    for (let r = base; r < base + tb.rows.length; r++) rows[r] = rows[r] || [];
+    rows.push([]);
+  };
+  const walk = el => Array.from(el.children).forEach(ch => {
+    if (ch.tagName === "TABLE") table(ch);
+    else if (ch.querySelector("table")) walk(ch);
+    else if (!/^(IMG|SVG|STYLE|SCRIPT)$/.test(ch.tagName)) textRow(ch);
+  });
+  root.querySelectorAll(".doc").forEach((d, i) => { if (i) rows.push([], []); walk(d); });
+  const ws = {};
+  rows.forEach((r, ri) => (r || []).forEach((cell, ci) => { if (cell) ws[XLSX.utils.encode_cell({ r: ri, c: ci })] = cell; }));
+  ws["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: Math.max(rows.length - 1, 0), c: width - 1 } });
+  ws["!merges"] = merges;
+  ws["!cols"] = Array.from({ length: width }, (_, i) => ({ wch: i === 0 ? 10 : 22 }));
+  return ws;
+}
+// 탭2: 정산서와 같은 매칭을 시간마다 다시 돌려 발전소별 값을 적는다
+function tradeSheet(R) {
+  const days = R.days || [], plants = days.length ? Object.keys(days[0].gen) : [];
+  const head = ["날짜", "시간", "부하구분", "전기사용량", "발전량 계", "공급량 계", "초과발전량 계", "부족전력량(단순)", "부족전력량(손실률)"];
+  plants.forEach(p => head.push(p + " 발전량", p + " 공급량", p + " 초과발전량"));
+  const aoa = [head], sum = new Array(head.length).fill(0);
+  Engine.matchMonth(days, { transLossRate: R.loss }, (d, h, m) => {
+    const row = [d.date, h + 1, d.load[h], m.usage, m.genTotal, m.supplyTotal, m.excessTotal, m.deficitSimple, m.deficitLoss];
+    plants.forEach(p => row.push(d.gen[p][h] || 0, m.supply[p] || 0, m.excess[p] || 0));
+    row.forEach((v, i) => { if (i >= 3) { row[i] = Math.round((v || 0) * 1000) / 1000; sum[i] += row[i]; } }); // 부동소수 찌꺼기 제거
+    aoa.push(row);
+  }, { fullBuy: !!R.monthly });
+  aoa.push(["합계", "", ""].concat(sum.slice(3).map(v => Math.round(v * 1000) / 1000)));
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const range = XLSX.utils.decode_range(ws["!ref"]);
+  for (let r = 1; r <= range.e.r; r++) for (let c = 3; c <= range.e.c; c++) { const cell = ws[XLSX.utils.encode_cell({ r, c })]; if (cell && cell.t === "n") cell.z = "#,##0.000"; }
+  ws["!cols"] = head.map((h, i) => ({ wch: i < 3 ? 11 : Math.min(28, Math.max(12, h.length + 4)) }));
+  ws["!freeze"] = { xSplit: 3, ySplit: 1 }; ws["!views"] = [{ state: "frozen", xSplit: 3, ySplit: 1 }];
+  return ws;
+}
+// 탭3: 정산에 쓴 시간별 전기사용량과 출처
+function usageSheet(R) {
+  const days = R.days || [], ami = billState.ami;
+  const kpxOk = days.some(d => (d.kpxUsage || []).some(v => v > 0));
+  const head = ["날짜"].concat(Array.from({ length: 24 }, (_, h) => (h + 1) + "시"), ["합계", "출처"]);
+  const aoa = [head], col = new Array(25).fill(0);
+  days.forEach(d => {
+    const a = ami && ami.usage ? ami.usage[d.date] : null, filled = [];
+    let src = kpxOk ? "확정 파일" : a ? "사용량 파일" : "발전량으로 채움";
+    const vals = Array.from({ length: 24 }, (_, h) => {
+      const fromK = kpxOk && d.kpxUsage && d.kpxUsage[h] != null, fromA = a && a[h] != null;
+      if (!fromK && !fromA) filled.push(h + 1);
+      const v = d.usage ? d.usage[h] : null; // 비어 있으면 정산과 같게 그 시간 발전량 (Engine.matchHour)
+      return Math.round((v == null ? Object.values(d.gen).reduce((t, arr) => t + (arr[h] || 0), 0) : v) * 1000) / 1000;
+    });
+    const tot = Math.round(vals.reduce((x, y) => x + y, 0) * 1000) / 1000;
+    vals.forEach((v, h) => { col[h] += v; }); col[24] += tot;
+    if (filled.length && filled.length < 24) src += ` · 발전량으로 채움 ${filled.join(",")}시`;
+    else if (filled.length === 24) src = "발전량으로 채움 (하루 전체)";
+    aoa.push([d.date].concat(vals, [tot, src]));
+  });
+  aoa.push(["합계"].concat(col.map(v => Math.round(v * 1000) / 1000), [""]));
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const range = XLSX.utils.decode_range(ws["!ref"]);
+  for (let r = 1; r <= range.e.r; r++) for (let c = 1; c <= 25; c++) { const cell = ws[XLSX.utils.encode_cell({ r, c })]; if (cell && cell.t === "n") cell.z = "#,##0.00"; }
+  ws["!cols"] = [{ wch: 11 }].concat(Array.from({ length: 24 }, () => ({ wch: 10 })), [{ wch: 13 }, { wch: 40 }]);
+  ws["!views"] = [{ state: "frozen", xSplit: 1, ySplit: 1 }];
+  return ws;
+}
+function exportDocExcel(title) {
+  const R = billState.result; if (!R) return;
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, docToSheet($("billResult")), title);
+  if (R.days && R.days.length) {
+    XLSX.utils.book_append_sheet(wb, tradeSheet(R), "직접전력거래량");
+    XLSX.utils.book_append_sheet(wb, usageSheet(R), "전기사용량");
+  }
+  XLSX.writeFile(wb, `${title}_${R.customer.name}_${R.month}.xlsx`);
+}
+function exportBillExcel() { exportDocExcel("청구서"); }
 
 /* ---------- 오차정산 ----------
  * 같은 달을 KPX 확정 파일로 다시 계산해 저장된 가정산(bill:)과 전력량요금·망이용요금·거래수수료를 비교한다.
@@ -642,7 +737,7 @@ function runTrueUp() {
     const aFund = A ? A.fund : prov.fund;
     if (aFund != null) setVal("pd_exempt", conf.fund - aFund + exE); // 비과세 차액 = 전력산업기반기금 차이 + 추가 정산분
     else if (exE) setVal("pd_exempt", exE);
-    billState.result = { mode: "trueup", preview: P.preview, err: err.slice(), app: P.app, month: P.g.month, customer: P.customer, rates: P.rates, loss: P.loss, match, conf, prov, diff, warn, netOverride, ctx: R_CTX };
+    billState.result = { mode: "trueup", preview: P.preview, err: err.slice(), app: P.app, month: P.g.month, customer: P.customer, rates: P.rates, loss: P.loss, days: P.days, monthly: P.monthly, match, conf, prov, diff, warn, netOverride, ctx: R_CTX };
     renderTrueUpResult();
   } catch (e) { out.innerHTML = `<div class="notice bad">계산 오류: ${esc(e.message)}</div>`; }
 }
@@ -854,19 +949,7 @@ async function saveTrueUp() {
 
 function exportTrueUpExcel() {
   const R = billState.result; if (!R || R.mode !== "trueup" || !renderTrueUpResult()) return;
-  const { prov, conf, diff, fields: t } = R;
-  const aoa = [["직접PPA 전력거래대금 오차정산서", R.month + " 확정"], ["수요기업", R.customer.name, R.app], [],
-    ["항목", "가정산", "확정", "차액"],
-    ["공급량(kWh)", prov.supplyTotal, conf.supplyTotal, diff.supply], ["전력량요금", prov.energy, conf.energy, diff.energy],
-    ["망이용요금", prov.netTotal, conf.netTotal, diff.net], ["거래수수료", prov.fee, conf.fee, diff.fee],
-    ["계(과세)", prov.energy + prov.netTotal + prov.fee, conf.energy + conf.netTotal + conf.fee, diff.taxable], [],
-    ["확정 부가정산금", t.confirmedTotal], ["과세 비율", t.taxableRatio], ["과세분", t.confirmed.taxable], ["비과세분", t.confirmed.exempt], [],
-    [nextYm(R.month) + " 가정산 반영"], ["전월 확정 부가정산금(과세)", t.confirmed.taxable], ["전월 차액(과세)", t.prevDiff.taxable],
-    ["전월 확정 부가정산금(비과세)", t.confirmed.exempt], ["전월 차액(비과세)", t.prevDiff.exempt], ["메모", t.note], [],
-    ["발전소", "확정 공급량", "가정산 망이용", "확정 망이용", "차액"],
-    ...Object.keys(conf.netByPlant).map(p => [p, conf.netByPlant[p].supplyRounded, diff.netByPlant[p].prov, diff.netByPlant[p].conf, diff.netByPlant[p].diff])];
-  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), "오차정산서");
-  XLSX.writeFile(wb, `오차정산서_${R.customer.name}_${R.month}.xlsx`);
+  exportDocExcel("오차정산서");
 }
 
 /* ---------- 초기화 ---------- */
