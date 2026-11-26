@@ -464,7 +464,7 @@ function invoiceHtml(R) {
   ];
   const exRows = [
     row(`${prevM}월 확정 부가정산금 (비과세)`, won(inv.confirmedSurcharge.exempt), `${prevM}월 직접PPA 전력거래대금 오차 정산서`),
-    row(`${curM}월 예상 부가정산금`, `( ${won(inv.expectedSurcharge)} 예상 )`, `공급량 계 × ${rates.surcharge} 원/kWh, 익월 확정 후 청구`),
+    row(`${curM}월 예상 부가정산금`, `<span class="nw">(${won(inv.expectedSurcharge)} 예상)</span>`, `공급량 계 × ${rates.surcharge} 원/kWh, 익월 확정 후 청구`),
     row("전력산업기반기금 (비과세)", won(inv.fund), `( 전력량요금 + 망이용요금 + 거래수수료 + ${curM}월 예상 부가정산금 ) × ${+(rates.fundRate * 100).toFixed(2)}%`),
     row("전월 차액 (비과세)", won(inv.prevDiff.exempt), `${prevM}월 직접PPA 전력거래대금 오차 정산서`)
   ].concat(inv.penalty ? [row("위약금 차감", won(-inv.penalty), `연간보장공급량 ${esc(inv.penaltyLabel)}`)] : [])
@@ -811,11 +811,11 @@ function guaranteeTable(app, month) {
 function contractNotes(c) {
   const send = c.sendDays || 8, pay = c.payDay || 27, check = c.checkDays || 5;
   return `<div class="bill-notes">
-    <p>. 재생에너지 전기공급사업자는 거래가 종료된 익월 [${esc(send)}]영업일 이내에 전기사용자에게 해당 월 발생한 전력거래 대금 및 전력량을 가정산하여 명시한 청구서를 송부합니다.</p>
-    <p>. 전기사용자는 가정산 청구서를 수령한 후 [${esc(c.reviewDays || 2)}]영업일 이내에 검토하여 재생에너지 전기공급사업자에게 세금계산서발행을 요청하고, 요청을 받은 재생에너지 전기공급사업자는 세금계산서를 발행합니다.</p>
-    <p>. 전기사용자는 세금계산서를 수령한 후 매월 [${esc(pay)}]일까지 재생에너지 전기공급사업자가 지정한 은행 계좌로 전력거래대금을 지급합니다. 단, 매월 ${esc(pay)}일이 공휴일일 경우 다음 영업일에 지급합니다.</p>
-    <p>. 재생에너지 전기공급사업자는 한국전력공사, 한국전력거래소 등 관계 기관의 개별 청구서 수령 후 [${esc(check)}]영업일 이내에 가정산과의 오차를 확인하여 그 내역을 전기사용자에게 송부합니다.</p>
-    <p>. 당사자가 본 계약에 따른 전력거래대금 계산상 착오가 있음을 발견하거나 기타 추가 정산할 사항이 있는 경우 추가 정산을 요청하는 당사자는 전력거래대금 지급일이 속한달의 말일까지 상대방 당사자에게 재정산을 요청하여야 하고, 당사자들은 본 항에 따른 다시 정산된 금액을 해당 금액이 발생한 월의 익월에 재정산합니다.</p></div>`;
+    <p>재생에너지 전기공급사업자는 거래가 종료된 익월 [${esc(send)}]영업일 이내에 전기사용자에게 해당 월 발생한 전력거래 대금 및 전력량을 가정산하여 명시한 청구서를 송부합니다.</p>
+    <p>전기사용자는 가정산 청구서를 수령한 후 [${esc(c.reviewDays || 2)}]영업일 이내에 검토하여 재생에너지 전기공급사업자에게 세금계산서 발행을 요청하고, 요청을 받은 재생에너지 전기공급사업자는 세금계산서를 발행합니다.</p>
+    <p>전기사용자는 세금계산서를 수령한 후 매월 [${esc(pay)}]일까지 재생에너지 전기공급사업자가 지정한 은행 계좌로 전력거래대금을 지급합니다. 단, 매월 ${esc(pay)}일이 공휴일일 경우 다음 영업일에 지급합니다.</p>
+    <p>재생에너지 전기공급사업자는 한국전력공사, 한국전력거래소 등 관계 기관의 개별 청구서 수령 후 [${esc(check)}]영업일 이내에 가정산과의 오차를 확인하여 그 내역을 전기사용자에게 송부합니다.</p>
+    <p>당사자가 본 계약에 따른 전력거래대금 계산상 착오가 있음을 발견하거나 기타 추가 정산할 사항이 있는 경우 추가 정산을 요청하는 당사자는 전력거래대금 지급일이 속한 달의 말일까지 상대방 당사자에게 재정산을 요청하여야 하고, 당사자들은 본 항에 따른 다시 정산된 금액을 해당 금액이 발생한 월의 익월에 재정산합니다.</p></div>`;
 }
 function invoicePage2(R) {
   return `<div class="doc bill page2">
@@ -885,7 +885,7 @@ function trueUpHtml(R) {
   ];
   const exRows = [
     line(`${prevM}월 확정 부가정산금 (비과세)`, cs.exempt, conf.confirmedSurcharge.exempt),
-    line(`${m}월 예상 부가정산금`, aVal("expectedSurcharge"), conf.expectedSurcharge, { noDiff: true, fa: x => x == null ? "-" : `( ${won(x)} 예상 )`, note: "기반기금 산정용 (청구 미포함)" }),
+    line(`${m}월 예상 부가정산금`, aVal("expectedSurcharge"), conf.expectedSurcharge, { noDiff: true, fa: x => x == null ? "-" : `<span class="nw">(${won(x)}</span> <span class="nw">예상)</span>`, note: "기반기금 산정용 (청구 미포함)" }),
     line("전력산업기반기금 (비과세)", aVal("fund"), conf.fund, { note: `${nmM}월 거래분 청구서에 반영` }),
     line("전월 차액 (비과세)", pd.exempt, conf.prevDiff.exempt)
   ].concat(conf.penalty || (A && A.penalty) ? [line("위약금 차감", A ? -A.penalty : null, -conf.penalty)] : [])

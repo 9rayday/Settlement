@@ -505,7 +505,8 @@ table.perf-years td:nth-child(-n+2), table.perf-years .perf-sub{ white-space:now
 .doc.bill .chart-legend{ display:flex; justify-content:center; gap:14px; font-size:9px; color:var(--sub); margin-top:2px; }
 .doc.bill .chart-legend i{ display:inline-block; width:10px; height:8px; margin-right:4px; vertical-align:middle; }
 .doc.bill .bill-notes{ background:#F4F4F4; padding:6px 10px; font-size:8.5px; color:#555; line-height:1.5; }
-.doc.bill .bill-notes p{ margin:2px 0; }
+.doc.bill .bill-notes p{ margin:2px 0; padding-left:0.9em; text-indent:-0.9em; word-break:keep-all; } /* 둘째 줄부터 글머리 뒤로 들여쓰기 */
+.doc.bill .bill-notes p::before{ content:"·"; display:inline-block; width:0.9em; text-indent:0; }
 .doc.bill table.doc-table td.label small{ font-weight:400; font-size:8px; }
 
 /* 권한관리 · 조회 전용 표시 */
