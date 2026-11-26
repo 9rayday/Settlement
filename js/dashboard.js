@@ -133,12 +133,12 @@ function dashDetailHtml(ym) {
     <div class="card">
       <h2>${label} 상세 <span class="dash-pl ${pl >= 0 ? "plus" : "minus"}">손익 ${signed(pl)} 원</span></h2>
       <h3 class="sub">전기사용자별 전력대금 요약</h3>
-      ${d.cust.length ? `<div class="table-wrap"><table class="grid dash-table"><tr><th>전기사용자</th><th>신청번호</th><th>공급량(kWh)</th><th>전력량요금</th><th>망이용요금</th><th>거래수수료</th><th>당월 청구 계</th><th>전력대금 수령</th></tr>${custRows}
+      ${d.cust.length ? `<div class="table-wrap"><table class="grid dash-table dash-month"><tr><th>전기사용자</th><th>신청번호</th><th>공급량(kWh)</th><th>전력량요금</th><th>망이용요금</th><th>거래수수료</th><th>당월 청구 계</th><th>전력대금 수령</th></tr>${custRows}
         <tr class="total"><td colspan="2">합계 (${d.cust.length}건)</td><td class="num">${dKwh(sum(d.cust, "supplyTotal"))}</td><td class="num">${dWon(sum(d.cust, "energy"))}</td><td class="num">${dWon(sum(d.cust, "netTotal"))}</td><td class="num">${dWon(sum(d.cust, "fee"))}</td><td class="num"><b class="plus">+${dWon(d.custTotal)}</b></td><td></td></tr></table></div>`
         : `<div class="empty">없음</div>`}
       <h3 class="sub" style="margin-top:18px">발전사업자별 전력대금 요약</h3>
       ${lateN ? `<div style="margin:0 0 8px"><button type="button" class="btn accent" id="dashApplyPrice">등록된 계약단가로 다시 계산 (${lateN}개소)</button></div>` : ""}
-      ${d.gen.length ? `<div class="table-wrap"><table class="grid dash-table"><tr><th>발전소</th><th>신청번호</th><th>공급량(kWh)</th><th>계약단가</th><th>전력량요금(VAT 포함)</th><th>수수료(VAT 포함)</th><th>위약금</th><th>지급액</th></tr>${genRows}
+      ${d.gen.length ? `<div class="table-wrap"><table class="grid dash-table dash-month"><tr><th>발전소</th><th>신청번호</th><th>공급량(kWh)</th><th>계약단가</th><th>전력량요금(VAT 포함)</th><th>수수료(VAT 포함)</th><th>위약금</th><th>지급액</th></tr>${genRows}
         <tr class="total"><td colspan="2">합계 (${d.gen.length}개소)</td><td class="num">${dKwh(sum(d.gen, "supply"))}</td><td></td><td class="num">${dWon(sum(d.gen, "subtotal1"))}</td><td class="num">${dWon(sum(d.gen, "subtotal2"))}</td><td class="num">${dWon(sum(d.gen, "penalty"))}</td><td class="num"><b class="minus">−${dWon(d.genTotal)}</b></td></tr></table></div>`
         : `<div class="empty">없음</div>`}
     </div>`;

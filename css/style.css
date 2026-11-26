@@ -464,6 +464,8 @@ table.perf-years td:nth-child(-n+2), table.perf-years .perf-sub{ white-space:now
 .dash-pl{ font-size:13px; margin-left:8px; }
 .dash-table td.num{ text-align:right; white-space:nowrap; }
 .dash-table tr.total td{ background:#F4F6F9; font-weight:700; }
+/* 월별 전력대금 요약 (전기사용자별·발전사업자별): 모든 칸 가운데 정렬 */
+table.grid.dash-month th, table.grid.dash-month td, table.grid.dash-month td.num{ text-align:center; vertical-align:middle; }
 @media (max-width:900px){ .dash-cal{ grid-template-columns:repeat(3, minmax(0, 1fr)); } }
 @media (max-width:600px){ .dash-cal{ grid-template-columns:repeat(2, minmax(0, 1fr)); } .dash-sum > div{ min-width:0; flex:1; } }
 .table-wrap{ overflow-x:auto; }
